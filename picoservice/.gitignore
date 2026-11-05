@@ -1,0 +1,6 @@
+.aws-sam/
+bootstrap
+*.test
+.env
+.env.*
+deploy.env

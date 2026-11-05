@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  picoservice
+
+  A single Go Lambda behind a public Function URL, routed with chi.
+
+Parameters:
+  MongoDBURI:
+    Type: String
+    NoEcho: true
+    Description: MongoDB Atlas connection string.
+  JwtSecret:
+    Type: String
+    NoEcho: true
+    MinLength: 32
+    Description: Secret used to sign email verification tokens.
+  PublicBaseURL:
+    Type: String
+    Description: Public base URL used to build verification links.
+  EmailFrom:
+    Type: String
+    Description: Sender address for verification emails.
+  SmtpAddr:
+    Type: String
+    Description: SMTP server address (host:port).
+  SmtpUsername:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Optional SMTP username.
+  SmtpPassword:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Optional SMTP password.
+
+Globals:
+  Function:
+    Timeout: 10
+    MemorySize: 128
+    Runtime: provided.al2023
+    Architectures:
+      - x86_64
+
+Resources:
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: ./
+      Handler: bootstrap
+      Environment:
+        Variables:
+          MONGODB_URI: !Ref MongoDBURI
+          MONGODB_DATABASE: picoservice
+          JWT_SECRET: !Ref JwtSecret
+          PUBLIC_BASE_URL: !Ref PublicBaseURL
+          EMAIL_FROM: !Ref EmailFrom
+          SMTP_ADDR: !Ref SmtpAddr
+          SMTP_USERNAME: !Ref SmtpUsername
+          SMTP_PASSWORD: !Ref SmtpPassword
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: BUFFERED
+        Cors:
+          AllowOrigins:
+            - "*"
+          AllowMethods:
+            - GET
+            - HEAD
+            - POST
+            - PATCH
+            - DELETE
+          AllowHeaders:
+            - content-type
+          MaxAge: 3600
+
+Outputs:
+  FunctionUrl:
+    Description: Public Lambda Function URL
+    Value: !GetAtt ApiFunctionUrl.FunctionUrl
+  ApiFunction:
+    Description: Lambda function ARN
+    Value: !GetAtt ApiFunction.Arn
+  ApiFunctionIamRole:
+    Description: Implicit IAM role ARN
+    Value: !GetAtt ApiFunctionRole.Arn
