@@ -13,13 +13,14 @@ import (
 
 func TestRequireAuth(t *testing.T) {
 	tests := []struct {
-		name       string
-		query      string
-		cookie     string
-		tokens     fakeAccessTokens
-		lookup     fakeUserLookup
-		wantStatus int
-		wantUser   string
+		name          string
+		query         string
+		cookie        string
+		authorization string
+		tokens        fakeAccessTokens
+		lookup        fakeUserLookup
+		wantStatus    int
+		wantUser      string
 	}{
 		{
 			name:       "missing identity",
@@ -37,6 +38,22 @@ func TestRequireAuth(t *testing.T) {
 			lookup:     fakeUserLookup{existing: map[string]bool{"user-1": true}},
 			wantStatus: http.StatusOK,
 			wantUser:   "user-1",
+		},
+		{
+			name:          "valid bearer",
+			authorization: "Bearer token-1",
+			tokens:        fakeAccessTokens{subject: "user-1"},
+			lookup:        fakeUserLookup{existing: map[string]bool{}},
+			wantStatus:    http.StatusOK,
+			wantUser:      "user-1",
+		},
+		{
+			name:          "invalid bearer does not fall back",
+			query:         "?userId=user-1",
+			authorization: "Bearer bad-token",
+			tokens:        fakeAccessTokens{err: errors.New("invalid token")},
+			lookup:        fakeUserLookup{existing: map[string]bool{"user-1": true}},
+			wantStatus:    http.StatusUnauthorized,
 		},
 		{
 			name:       "valid cookie",
@@ -69,6 +86,9 @@ func TestRequireAuth(t *testing.T) {
 			req := httptest.NewRequest(http.MethodGet, "/users"+tt.query, nil)
 			if tt.cookie != "" {
 				req.AddCookie(&http.Cookie{Name: middleware.AuthCookieName, Value: tt.cookie})
+			}
+			if tt.authorization != "" {
+				req.Header.Set("Authorization", tt.authorization)
 			}
 			rec := httptest.NewRecorder()
 			handler.ServeHTTP(rec, req)

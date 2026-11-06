@@ -1,3 +1,4 @@
+import { getAuthToken } from "@/lib/auth-token"
 import { API_BASE_URL } from "@/lib/env"
 
 export class ApiError extends Error {
@@ -17,8 +18,13 @@ export async function requestJSON<T>(
   const headers = new Headers(init.headers)
   headers.set("Accept", "application/json")
 
+  const token = getAuthToken()
+  if (token) {
+    headers.set("Authorization", `Bearer ${token}`)
+  }
+
   const response = await fetch(`${API_BASE_URL}${path}`, {
-    credentials: "include",
+    credentials: "omit",
     ...init,
     headers,
   })

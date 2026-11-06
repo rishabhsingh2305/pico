@@ -30,15 +30,15 @@ canonical API contract.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/auth/login` | Sign in with `{"email","password"}`; sets an HttpOnly `pico_auth` cookie and returns `{"user","expiresAt"}` |
-| `POST` | `/auth/logout` | Clear the auth cookie (`204`) |
-| `GET` | `/auth/session` | Return the current user and token expiry, or `401` |
+| `POST` | `/auth/login` | Sign in with `{"email","password"}`; returns `{"accessToken","tokenType","user","expiresAt"}` and also sets a `pico_auth` cookie fallback |
+| `POST` | `/auth/logout` | Clear the auth cookie (`204`); the client clears its stored token |
+| `GET` | `/auth/session` | Return the current user and token expiry from `Authorization: Bearer` or the cookie, or `401` |
 
 Access tokens are HS256 JWTs valid for 7 days and carry `sub`, `iss`,
 `aud=picoservice-api`, and `type=access`. Login requires a verified email:
 wrong credentials return `401 invalid email or password`, and unverified
-accounts return `403 email not verified`. Tokens are stateless; logout clears
-the cookie but does not revoke an already-issued token.
+accounts return `403 email not verified`. Tokens are stateless; logout does not
+revoke an already-issued token.
 
 ### Users
 
@@ -50,8 +50,9 @@ the cookie but does not revoke an already-issued token.
 | `PATCH` | `/users/{userID}?userId=actor` | Change `name` and/or `email`; self only. Changing the email resets verification |
 | `POST` | `/users/{userID}/password?userId=actor` | Change password with `currentPassword` and `newPassword`; self only |
 
-Protected routes use the auth cookie. Until the UI migrates, requests without a
-cookie may still use the temporary `userId` query parameter.
+Protected routes use `Authorization: Bearer` (or the `pico_auth` cookie
+fallback). Requests without either may still use the temporary `userId` query
+parameter.
 
 Passwords are bcrypt-hashed. Password hashes are never returned. There is no
 `DELETE /users` yet. User responses include `emailVerified`.
@@ -188,12 +189,13 @@ currencies would need grouping by currency.
   defaults to `PUBLIC_BASE_URL`. A `*` entry reflects any non-null origin with
   credentials enabled and is intended for development only.
 
-**Authentication uses a JWT cookie.** Protected routes read the `pico_auth`
-cookie and trust its `sub` claim after verifying the signature and expiry; no
-user lookup is performed for a valid token. Until the UI migrates, requests
-without a cookie may still use the temporary `userId` query parameter, which
-remains spoofable. Membership checks verify that the actor belongs to the org.
-`GET /users` is still a global directory for authenticated users.
+**Authentication uses a bearer JWT.** Protected routes read the
+`Authorization: Bearer` header and trust its `sub` claim after verifying the
+signature and expiry; no user lookup is performed for a valid token. The
+`pico_auth` cookie is accepted as a fallback. Requests without either may still
+use the temporary `userId` query parameter, which remains spoofable. Membership
+checks verify that the actor belongs to the org. `GET /users` is still a global
+directory for authenticated users.
 
 ## Data model and indexes
 

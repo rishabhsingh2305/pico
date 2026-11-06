@@ -4,7 +4,7 @@ const userIdParam: ApiParameter = {
   name: "userId",
   required: false,
   description:
-    "Temporary actor fallback. Protected routes use the pico_auth JWT cookie; userId is only used when no cookie is present and is not secure authentication.",
+    "Temporary actor fallback. Protected routes use Authorization: Bearer (or the pico_auth cookie fallback); userId is only used when neither is present and is not secure authentication.",
 }
 
 const orgIdParam: ApiParameter = {
@@ -149,7 +149,7 @@ export const API_SECTIONS: ApiSection[] = [
     id: "authentication",
     title: "Authentication",
     description:
-      "Login verifies credentials and sets an HttpOnly JWT cookie. Protected routes use that cookie; the userId query parameter remains a temporary fallback.",
+      "Login returns a JWT access token and also sets an HttpOnly cookie fallback. Send the token as Authorization: Bearer. The userId query parameter remains a temporary fallback.",
     endpoints: [
       {
         id: "auth-login",
@@ -157,7 +157,7 @@ export const API_SECTIONS: ApiSection[] = [
         path: "/auth/login",
         title: "Sign in",
         summary:
-          "Verifies an email and password, then sets the pico_auth cookie. The email must already be verified.",
+          "Verifies an email and password and returns an access token. The email must already be verified.",
         access: "Public",
         requestBody: `{
   "email": "ada@example.com",
@@ -166,8 +166,10 @@ export const API_SECTIONS: ApiSection[] = [
         response: {
           status: 200,
           description:
-            "Signed in. The response sets an HttpOnly, SameSite=Lax cookie valid for 7 days.",
+            "Signed in. Send accessToken as Authorization: Bearer. A pico_auth cookie is also set as a fallback.",
           body: `{
+  "accessToken": "eyJ...",
+  "tokenType": "Bearer",
   "user": ${userExample.replace(/\n/g, "\n  ")},
   "expiresAt": "2026-01-09T12:30:00Z"
 }`,
@@ -179,7 +181,7 @@ export const API_SECTIONS: ApiSection[] = [
         ],
         notes: [
           "Unknown emails run a dummy bcrypt comparison so response timing does not reveal whether an account exists.",
-          "Access tokens are stateless and cannot be revoked before they expire. Signing out clears the cookie only.",
+          "Access tokens are stateless and cannot be revoked before they expire. Signing out clears the stored token and cookie.",
         ],
       },
       {
@@ -187,7 +189,7 @@ export const API_SECTIONS: ApiSection[] = [
         method: "POST",
         path: "/auth/logout",
         title: "Sign out",
-        summary: "Clears the pico_auth cookie.",
+        summary: "Clears the pico_auth cookie fallback.",
         access: "Public",
         response: {
           status: 204,
@@ -200,17 +202,21 @@ export const API_SECTIONS: ApiSection[] = [
         path: "/auth/session",
         title: "Get the current session",
         summary:
-          "Validates the pico_auth cookie and returns the current user and token expiry.",
+          "Validates Authorization: Bearer (or the cookie fallback) and returns the current user and token expiry.",
         access: "User",
         response: {
           status: 200,
           description: "The current user.",
           body: `{
+  "accessToken": "eyJ...",
+  "tokenType": "Bearer",
   "user": ${userExample.replace(/\n/g, "\n  ")},
   "expiresAt": "2026-01-09T12:30:00Z"
 }`,
         },
-        errors: ["401 — the cookie is missing, invalid, or expired"],
+        errors: [
+          "401 — the bearer token and cookie are missing, invalid, or expired",
+        ],
       },
     ],
   },

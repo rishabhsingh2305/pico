@@ -25,11 +25,12 @@
   returns an empty `200`. `GET /ready` pings MongoDB and returns
   `200 {"status":"ok"}` or `503 {"error":"database unavailable"}`.
 - Org-scoped routes require `orgId` and a valid membership. The actor comes from
-  the `pico_auth` JWT cookie. Path-scoped org and member routes repeat `orgId`
-  in the query.
-- Protected routes authenticate with a stateless HS256 access JWT stored in an
-  HttpOnly cookie. Login requires a verified email. The `userId` query parameter
-  remains as a temporary, spoofable fallback until the UI migrates.
+  `Authorization: Bearer` (or the `pico_auth` cookie fallback). Path-scoped org
+  and member routes repeat `orgId` in the query.
+- Protected routes authenticate with a stateless HS256 access JWT. Login returns
+  the token in the response body and also sets a cookie fallback. The UI stores
+  the token in `localStorage`. Login requires a verified email. The `userId`
+  query parameter remains as a temporary, spoofable fallback.
 - Passwords are bcrypt-hashed and never returned. No user or org delete endpoints.
 - Signup creates an unverified user and emails a signed JWT verification link.
   The link opens the UI, which calls `POST /auth/verify-email`; resend is

@@ -152,9 +152,9 @@ accept `limit` and `offset` (default 20, maximum 100).
 
 | Method | Path | Success | Notes |
 | --- | --- | --- | --- |
-| POST | `/auth/login` | 200 | `{"email","password"}`; returns `{"user","expiresAt"}` and sets the `pico_auth` HttpOnly cookie |
-| POST | `/auth/logout` | 204 | Clears the auth cookie |
-| GET | `/auth/session` | 200 | Returns `{"user","expiresAt"}`; `401` when the cookie is missing or invalid |
+| POST | `/auth/login` | 200 | `{"email","password"}`; returns `{"accessToken","tokenType","user","expiresAt"}` and also sets the `pico_auth` cookie fallback |
+| POST | `/auth/logout` | 204 | Clears the auth cookie; the client clears its stored token |
+| GET | `/auth/session` | 200 | Returns `{"user","expiresAt"}` from `Authorization: Bearer` or the cookie; `401` when neither is valid |
 
 Access tokens are HS256 JWTs valid for 7 days. Claims are `sub` (user ID),
 `iss=picoservice`, `aud=picoservice-api`, `type=access`, `iat`, and `exp`.
@@ -174,9 +174,9 @@ already-issued token.
 | POST | `/users/{userID}/password?userId=actor` | 204 | Self only; `currentPassword`, `newPassword` |
 
 No user delete. Password hashes are never returned. Responses include
-`emailVerified`. Duplicate email returns `409`. Protected user routes use the
-auth cookie; the `userId` query parameter is a temporary fallback until the UI
-migrates.
+`emailVerified`. Duplicate email returns `409`. Protected user routes use
+`Authorization: Bearer` (or the cookie fallback); the `userId` query parameter
+is a temporary fallback.
 
 ### Email verification
 
@@ -200,7 +200,8 @@ verified addresses still return `202` to avoid enumeration.
 | PATCH | `/orgs/{orgID}?orgId=actor&userId=actor` | 200 | Owner only; `{"name"}` |
 
 Path-scoped org routes repeat `orgId` in the query because `RequireMember`
-reads the tenant from the query. The actor comes from the auth cookie.
+reads the tenant from the query. The actor comes from the bearer token or
+cookie fallback.
 
 No org delete.
 
@@ -283,21 +284,21 @@ Invalid ObjectIDs are treated as not found rather than as a separate error.
 
 ## Identity and tenancy
 
-Protected routes authenticate with the `pico_auth` cookie:
+Protected routes authenticate with `Authorization: Bearer <token>`, falling back
+to the `pico_auth` cookie:
 
 - `RequireAuth` validates the access JWT and stores its `sub` as the actor. A
   valid token requires no database lookup.
-- Requests without a cookie fall back to the temporary `userId` query parameter
-  and verify that the user exists. A present but invalid cookie never falls
-  back.
+- Requests without either credential fall back to the temporary `userId` query
+  parameter and verify that the user exists. A present but invalid bearer token
+  or cookie never falls back.
 - `RequireMember` reads the actor from the request context and the tenant from
   the `orgId` query parameter, then verifies the organization and membership
   before calling the controller. Missing `orgId` returns `400`; missing orgs
   return `404`; non-members return `403`.
 
-The query fallback is temporary and spoofable. It exists so the current UI keeps
-working while the client migrates to the login flow; remove it once the UI sends
-the auth cookie on every protected request.
+The query fallback is temporary and spoofable. Remove it once the UI always
+sends a token.
 
 Owner-only operations are enforced in the org and membership services by
 comparing the actor to `orgs.userId`. Creating an org inserts the org and then
@@ -417,10 +418,9 @@ a caching library that is pinned to AWS SDK v1.
 - Payload format v2, `InvokeMode: BUFFERED`.
 - Public access: `AuthType: NONE`.
 - CORS is handled by `middleware.CORS` using `CORS_ALLOWED_ORIGINS`, which
-  defaults to `PUBLIC_BASE_URL`, with credentials enabled for the auth cookie.
-  A `*` entry reflects any non-null origin with credentials and is intended for
-  development only. The Function URL has no CORS configuration; adding both
-  would duplicate `Access-Control-Allow-*` headers.
+  defaults to `PUBLIC_BASE_URL`. A `*` entry reflects any non-null origin and is
+  intended for development only. The Function URL has no CORS configuration;
+  adding both would duplicate `Access-Control-Allow-*` headers.
 - Buffered responses are limited to 6 MB.
 - Cookies are carried in the event/response `cookies` array, not the normal
   headers map.
@@ -513,15 +513,17 @@ testable.
 
 ### Stateless JWT access tokens with temporary query fallback
 
-Login issues an HS256 access JWT stored in an HttpOnly cookie. Token validation
-is local, so protected requests with a valid token do not query the user
-collection. Tokens expire after 7 days and cannot be revoked before expiry;
-logout clears the cookie only. Refresh tokens, rotation, and server-side
-revocation are intentionally deferred.
+Login issues an HS256 access JWT returned in the response body and also sets an
+HttpOnly cookie fallback. The browser client stores the token in `localStorage`
+and sends it as `Authorization: Bearer`. Token validation is local, so protected
+requests with a valid token do not query the user collection. Tokens expire
+after 7 days and cannot be revoked before expiry; logout clears the client token
+and the cookie. Refresh tokens, rotation, and server-side revocation are
+intentionally deferred.
 
 The `userId` query parameter remains as a temporary fallback for clients that
-have not migrated. It is spoofable and must be removed once the UI uses the auth
-cookie for every protected request.
+have not migrated. It is spoofable and must be removed once the UI always sends
+a token.
 
 ### Separate index command
 
@@ -589,11 +591,11 @@ document with no `type` is counted as debit through `$ifNull`.
 
 ## Known debt
 
-- **Access tokens cannot be revoked.** Logout clears the cookie, but a copied
-  token stays valid for up to 7 days, and password changes do not invalidate
-  existing tokens.
-- **Query identity fallback remains spoofable.** Requests without an auth cookie
-  may still supply `userId`. Remove the fallback once the UI migrates.
+- **Access tokens cannot be revoked.** Logout clears the client token and
+  cookie, but a copied token stays valid for up to 7 days, and password changes
+  do not invalidate existing tokens.
+- **Query identity fallback remains spoofable.** Requests without a token or
+  cookie may still supply `userId`. Remove the fallback once the UI migrates.
 - Login has no rate limiting or lockout, so online password guessing is
   unthrottled.
 - Verification links carry the JWT in the query string. Application request

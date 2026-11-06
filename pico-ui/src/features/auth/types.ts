@@ -19,6 +19,8 @@ export type User = {
 }
 
 export type SessionResponse = {
+  accessToken: string
+  tokenType: string
   user: User
   expiresAt: string
 }

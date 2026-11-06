@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest"
 
+import { setAuthToken } from "@/lib/auth-token"
 import { ApiError, requestJSON } from "@/lib/api-client"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -69,6 +70,19 @@ describe("requestJSON", () => {
     vi.stubGlobal("fetch", vi.fn().mockResolvedValue(jsonResponse(undefined)))
 
     await expect(requestJSON("/test", {})).resolves.toBeUndefined()
+  })
+
+  it("attaches a bearer token when present", async () => {
+    setAuthToken("token-1")
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await requestJSON("/test", {})
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(new Headers(init.headers).get("Authorization")).toBe(
+      "Bearer token-1"
+    )
   })
 
   it("exposes the status on ApiError", () => {

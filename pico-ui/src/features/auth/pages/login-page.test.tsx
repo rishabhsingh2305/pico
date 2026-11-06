@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { LoginPage } from "@/features/auth/pages/login-page"
+import { getAuthToken } from "@/lib/auth-token"
 import { AuthTestProvider } from "@/test/auth"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -35,6 +36,8 @@ describe("LoginPage", () => {
   it("signs in and continues to organizations", async () => {
     const fetchMock = vi.fn<typeof fetch>().mockResolvedValueOnce(
       jsonResponse({
+        accessToken: "token-1",
+        tokenType: "Bearer",
         user: {
           id: "user-1",
           name: "Ada Lovelace",
@@ -62,7 +65,8 @@ describe("LoginPage", () => {
     const [url, init] = fetchMock.mock.calls[0]
     expect(url).toBe("/api/auth/login")
     expect(init?.method).toBe("POST")
-    expect(init?.credentials).toBe("include")
+    expect(init?.credentials).toBe("omit")
+    expect(getAuthToken()).toBe("token-1")
     expect(JSON.parse(String(init?.body))).toEqual({
       email: "ada@example.com",
       password: "correct horse",

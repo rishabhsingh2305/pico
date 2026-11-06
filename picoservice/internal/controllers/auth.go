@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"time"
 
 	"picoservice/internal/entities"
@@ -51,8 +52,10 @@ func (c *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 
 	c.setAuthCookie(w, result.Token, result.ExpiresAt)
 	httpx.WriteJSON(w, r, http.StatusOK, authResponse{
-		User:      userResponseFrom(result.User),
-		ExpiresAt: result.ExpiresAt,
+		AccessToken: result.Token,
+		TokenType:   "Bearer",
+		User:        userResponseFrom(result.User),
+		ExpiresAt:   result.ExpiresAt,
 	})
 }
 
@@ -65,13 +68,13 @@ func (c *AuthController) Logout(w http.ResponseWriter, r *http.Request) {
 
 // Session handles GET and HEAD /auth/session.
 func (c *AuthController) Session(w http.ResponseWriter, r *http.Request) {
-	cookie, err := r.Cookie(middleware.AuthCookieName)
-	if err != nil || cookie.Value == "" {
+	token := accessToken(r)
+	if token == "" {
 		httpx.WriteError(w, r, http.StatusUnauthorized, "authentication required")
 		return
 	}
 
-	user, expiresAt, err := c.service.Session(r.Context(), cookie.Value)
+	user, expiresAt, err := c.service.Session(r.Context(), token)
 	if err != nil {
 		if errors.Is(err, entities.ErrInvalidToken) {
 			middleware.ClearAuthCookie(w)
@@ -81,9 +84,24 @@ func (c *AuthController) Session(w http.ResponseWriter, r *http.Request) {
 	}
 
 	httpx.WriteJSON(w, r, http.StatusOK, authResponse{
-		User:      userResponseFrom(user),
-		ExpiresAt: expiresAt,
+		AccessToken: token,
+		TokenType:   "Bearer",
+		User:        userResponseFrom(user),
+		ExpiresAt:   expiresAt,
 	})
+}
+
+func accessToken(r *http.Request) string {
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	if scheme, token, ok := strings.Cut(header, " "); ok && strings.EqualFold(scheme, "Bearer") {
+		if token = strings.TrimSpace(token); token != "" {
+			return token
+		}
+	}
+	if cookie, err := r.Cookie(middleware.AuthCookieName); err == nil {
+		return cookie.Value
+	}
+	return ""
 }
 
 func (c *AuthController) setAuthCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
@@ -125,6 +143,8 @@ type loginRequest struct {
 }
 
 type authResponse struct {
-	User      userResponse `json:"user"`
-	ExpiresAt time.Time    `json:"expiresAt"`
+	AccessToken string       `json:"accessToken"`
+	TokenType   string       `json:"tokenType"`
+	User        userResponse `json:"user"`
+	ExpiresAt   time.Time    `json:"expiresAt"`
 }

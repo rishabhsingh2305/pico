@@ -17,6 +17,7 @@ import {
 } from "@/features/auth/api"
 import { sessionFromUser, type Session } from "@/features/auth/session"
 import type { LoginInput } from "@/features/auth/types"
+import { clearAuthToken, getAuthToken, setAuthToken } from "@/lib/auth-token"
 
 type AuthStatus = "loading" | "ready"
 
@@ -38,15 +39,25 @@ type AuthProviderProps = {
 
 export function AuthProvider({ children, initialSession }: AuthProviderProps) {
   const [session, setSession] = useState<Session | null>(initialSession ?? null)
-  const [status, setStatus] = useState<AuthStatus>(
-    initialSession === undefined ? "loading" : "ready"
-  )
+  const [status, setStatus] = useState<AuthStatus>(() => {
+    if (initialSession !== undefined) {
+      return "ready"
+    }
+    return getAuthToken() ? "loading" : "ready"
+  })
 
   const refresh = useCallback(async () => {
+    if (!getAuthToken()) {
+      setSession(null)
+      setStatus("ready")
+      return
+    }
+
     try {
       const response = await fetchSession()
       setSession(sessionFromUser(response.user))
     } catch {
+      clearAuthToken()
       setSession(null)
     } finally {
       setStatus("ready")
@@ -55,6 +66,9 @@ export function AuthProvider({ children, initialSession }: AuthProviderProps) {
 
   useEffect(() => {
     if (initialSession !== undefined) {
+      return
+    }
+    if (!getAuthToken()) {
       return
     }
 
@@ -67,6 +81,7 @@ export function AuthProvider({ children, initialSession }: AuthProviderProps) {
       })
       .catch(() => {
         if (!cancelled) {
+          clearAuthToken()
           setSession(null)
         }
       })
@@ -83,15 +98,17 @@ export function AuthProvider({ children, initialSession }: AuthProviderProps) {
 
   const login = useCallback(async (input: LoginInput) => {
     const response = await loginRequest(input)
+    setAuthToken(response.accessToken)
     setSession(sessionFromUser(response.user))
     setStatus("ready")
   }, [])
 
   const logout = useCallback(async () => {
+    clearAuthToken()
     try {
       await logoutRequest()
     } catch {
-      // The cookie may already be gone; clear local state regardless.
+      // The request may fail; the local token is already cleared.
     }
     setSession(null)
   }, [])

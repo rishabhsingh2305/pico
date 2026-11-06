@@ -28,6 +28,18 @@ func RequireAuth(logger *slog.Logger, users UserLookup, tokens AccessTokens) fun
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if token := bearerToken(r); token != "" {
+				userID, err := tokens.ParseSubject(token)
+				if err != nil {
+					httpx.WriteError(w, r, http.StatusUnauthorized, "authentication required")
+					return
+				}
+
+				ctx := WithContext(r.Context(), Identity{UserID: userID})
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+
 			if cookie, err := r.Cookie(AuthCookieName); err == nil && cookie.Value != "" {
 				userID, err := tokens.ParseSubject(cookie.Value)
 				if err != nil {
@@ -68,6 +80,15 @@ func RequireAuth(logger *slog.Logger, users UserLookup, tokens AccessTokens) fun
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+func bearerToken(r *http.Request) string {
+	header := strings.TrimSpace(r.Header.Get("Authorization"))
+	scheme, token, ok := strings.Cut(header, " ")
+	if !ok || !strings.EqualFold(scheme, "Bearer") {
+		return ""
+	}
+	return strings.TrimSpace(token)
 }
 
 // ClearAuthCookie expires the auth cookie.

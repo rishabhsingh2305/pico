@@ -21,9 +21,9 @@ browser
 
 The backend sends a verification email as part of `POST /users`. The email link
 opens the UI at `/verify-email#token=...`; the UI reads the fragment and calls
-the API. After verification the user signs in at `/login`, which sets an
-HttpOnly JWT cookie. `AuthProvider` restores the session from `/auth/session` on
-load.
+the API. After verification the user signs in at `/login`, which returns an
+access token. `AuthProvider` stores it in `localStorage` and restores the
+session from `/auth/session` on load.
 
 ## Structure
 
@@ -141,15 +141,16 @@ The form is disabled while the request is in flight. The success state offers a
 1. `LoginPage` renders the email and password form.
 2. `validateLogin` checks the email shape and required password.
 3. `AuthProvider.login` posts `{email,password}` to `/auth/login`.
-4. The backend sets an HttpOnly `pico_auth` JWT cookie; the UI stores the
-   returned user in memory and navigates to `/orgs`.
+4. The backend returns an access token; the UI stores it in `localStorage`,
+   keeps the user in memory, and navigates to `/orgs`.
 5. `401` maps to "Email or password is incorrect." and `403` maps to "Verify your
    email before signing in."
-6. On reload, `AuthProvider` calls `GET /auth/session` to restore the user. A
-   `401` clears the session and protected routes redirect to `/login`.
+6. On reload, `AuthProvider` reads the stored token and calls
+   `GET /auth/session` to restore the user. A `401` clears the token and
+   protected routes redirect to `/login`.
 
-Tokens are never read by JavaScript or stored in `localStorage`. Signing out
-calls `/auth/logout` and clears the cookie.
+`requestJSON` sends the token as `Authorization: Bearer`. Signing out clears the
+stored token and calls `/auth/logout`.
 
 ## Email verification flow
 
@@ -183,7 +184,7 @@ session.
 - The workspace sidebar shows the signed-in email and offers sign out.
 
 The legacy `userId` query parameter is still sent while the backend supports the
-temporary fallback; the auth cookie is the authoritative identity.
+temporary fallback; the bearer token is the authoritative identity.
 
 ## Workspace shell
 
@@ -368,19 +369,20 @@ Request:
 }
 ```
 
-Success: `200` with `{"user":{...},"expiresAt":"..."}` and an HttpOnly
-`pico_auth` JWT cookie. Invalid credentials return `401`; unverified accounts
-return `403`. Login never returns the token in the response body.
+Success: `200` with
+`{"accessToken":"...","tokenType":"Bearer","user":{...},"expiresAt":"..."}`.
+Invalid credentials return `401`; unverified accounts return `403`.
 
 ### `POST /auth/logout`
 
-Success: `204`. Clears the auth cookie. Tokens are stateless, so an already
-issued token remains valid until it expires.
+Success: `204`. Clears the cookie fallback; the UI also clears the stored token.
+Tokens are stateless, so an already issued token remains valid until it expires.
 
 ### `GET /auth/session`
 
-Success: `200` with `{"user":{...},"expiresAt":"..."}`. Missing, invalid, or
-expired cookies return `401`.
+Success: `200` with `{"user":{...},"expiresAt":"..."}` when
+`Authorization: Bearer` or the cookie is valid. Missing, invalid, or expired
+credentials return `401`.
 
 ### `POST /users`
 
@@ -583,11 +585,8 @@ Organization errors:
 | `VITE_API_BASE_URL`     | build time | API origin, default `http://localhost:8080` |
 | `VITE_API_PROXY_TARGET` | dev server | Optional proxy target; unused by default    |
 
-- The browser calls the API directly. The Go API allows `PUBLIC_BASE_URL`
-  through `middleware.CORS` with credentials, so the HttpOnly `pico_auth` cookie
-  is sent.
-- Production should use `SameSite=None; Secure` for a cross-site cookie. Local
-  development uses `SameSite=Lax` because localhost ports are same-site.
+- The browser calls the API directly and sends `Authorization: Bearer`. The Go
+  API allows `PUBLIC_BASE_URL` through `middleware.CORS`.
 - `VITE_*` values are public and are embedded in the bundle.
 - Copy `.env.example` to `.env.local` for local overrides. `.env` files are
   ignored; `.env.example` is committed.
@@ -661,14 +660,14 @@ screens need shared caching.
 disable `react-hooks/set-state-in-effect`. Application code keeps the strict
 rule.
 
-### HttpOnly JWT cookie session
+### Bearer token in localStorage
 
-Login posts credentials to `/auth/login`, which sets an HttpOnly `pico_auth`
-JWT cookie. The browser sends it automatically because the UI and API allow each
-other through CORS with credentials. `AuthProvider` keeps the user in memory and
-restores it with `GET /auth/session`; no token is readable by JavaScript or
-stored in `localStorage`. Tokens are stateless, so sign-out clears the cookie
-without server-side revocation.
+Login posts credentials to `/auth/login`, which returns a stateless JWT.
+`AuthProvider` stores it in `localStorage` and `requestJSON` sends it as
+`Authorization: Bearer`. The backend also sets an HttpOnly cookie fallback, but
+the UI does not rely on it. This survives refresh and works across origins
+without third-party cookie restrictions. The tradeoff is that XSS can read the
+token; tokens cannot be revoked before they expire.
 
 ### Project-owned currency
 
@@ -763,8 +762,9 @@ it and refreshes the current page and totals.
 ## Known debt
 
 - Access tokens are stateless and cannot be revoked before they expire; signing
-  out clears the cookie only.
-- The legacy `userId` query parameter is still sent alongside the auth cookie
+  out clears the stored token only. The token is in `localStorage`, so XSS can
+  read it.
+- The legacy `userId` query parameter is still sent alongside the bearer token
   until the backend removes the temporary fallback.
 - No resend UI; an expired link has no recovery path in the UI yet.
 - No organization settings or membership screens.

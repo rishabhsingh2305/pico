@@ -38,10 +38,10 @@
   backend endpoint. Content lives in typed data under `src/features/api-docs`.
 - Organization settings, memberships, project rename/delete, and expense edit are
   not implemented yet.
-- Login posts to `/auth/login`; the backend sets an HttpOnly `pico_auth` JWT
-  cookie. `AuthProvider` restores the session from `/auth/session` on load and
-  exposes login, logout, and the current user. Never store tokens in
-  `localStorage`.
+- Login posts to `/auth/login`; the backend returns an access token.
+  `AuthProvider` stores it in `localStorage`, sends it as
+  `Authorization: Bearer`, restores the session from `/auth/session` on load,
+  and exposes login, logout, and the current user.
 
 ## Read first
 
@@ -120,8 +120,8 @@ Boundaries:
   difference explicit in the UI and docs.
 - **State:** local React state first. Do not add a global store or data-fetching
   library until there is a repeated need. The authenticated session lives in
-  `AuthProvider` and is restored from `/auth/session`; never store passwords or
-  access tokens in `localStorage`.
+  `AuthProvider`, restores from `/auth/session`, and stores the access token in
+  `localStorage`. Never store passwords there.
 - **Forms:** controlled fields with a small pure validation function. Mirror
   backend constraints (name 120 bytes, email 254 bytes, password 8–72 bytes).
   Projects own a currency; expense amounts are positive decimal values converted

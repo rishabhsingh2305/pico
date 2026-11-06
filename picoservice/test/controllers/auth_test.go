@@ -45,11 +45,19 @@ func TestAuthLogin(t *testing.T) {
 	}
 
 	var body struct {
-		User      map[string]any `json:"user"`
-		ExpiresAt time.Time      `json:"expiresAt"`
+		AccessToken string         `json:"accessToken"`
+		TokenType   string         `json:"tokenType"`
+		User        map[string]any `json:"user"`
+		ExpiresAt   time.Time      `json:"expiresAt"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := body.AccessToken, "token-1"; got != want {
+		t.Fatalf("expected access token %q, got %q", want, got)
+	}
+	if got, want := body.TokenType, "Bearer"; got != want {
+		t.Fatalf("expected token type %q, got %q", want, got)
 	}
 	if got, want := body.User["id"], "user-1"; got != want {
 		t.Fatalf("expected user %q, got %v", want, got)
@@ -143,6 +151,27 @@ func TestAuthSession(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
 	req.AddCookie(&http.Cookie{Name: middleware.AuthCookieName, Value: "token-1"})
+
+	controllers.NewAuthController(testLogger(), service, false).Session(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestAuthSessionBearer(t *testing.T) {
+	service := &fakes.AuthService{
+		SessionFunc: func(_ context.Context, token string) (entities.User, time.Time, error) {
+			if token != "token-1" {
+				t.Fatalf("expected token-1, got %q", token)
+			}
+			return entities.User{ID: "user-1", Email: "ada@example.com", EmailVerified: true}, time.Now().UTC().Add(time.Hour), nil
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+	req.Header.Set("Authorization", "Bearer token-1")
 
 	controllers.NewAuthController(testLogger(), service, false).Session(rec, req)
 
