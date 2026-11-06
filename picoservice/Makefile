@@ -46,6 +46,7 @@ invoke:
 	test -n "$$EMAIL_FROM" || (echo "EMAIL_FROM is required"; exit 1); \
 	test -n "$$SMTP_ADDR" || (echo "SMTP_ADDR is required"; exit 1); \
 	params="MongoDBURI=$$MONGODB_URI JwtSecret=$$JWT_SECRET PublicBaseURL=$$PUBLIC_BASE_URL EmailFrom=$$EMAIL_FROM SmtpAddr=$$SMTP_ADDR"; \
+	if [ -n "$$CORS_ALLOWED_ORIGINS" ]; then params="$$params CorsAllowedOrigins=$$CORS_ALLOWED_ORIGINS"; fi; \
 	if [ -n "$$SMTP_USERNAME" ]; then params="$$params SmtpUsername=$$SMTP_USERNAME SmtpPassword=$$SMTP_PASSWORD"; fi; \
 	sam local invoke ApiFunction -e events/function-url.json --parameter-overrides "$$params"
 
@@ -56,6 +57,7 @@ deploy:
 	@test -n "$$EMAIL_FROM" || (echo "EMAIL_FROM is required"; exit 1)
 	@test -n "$$SMTP_ADDR" || (echo "SMTP_ADDR is required"; exit 1)
 	@params="MongoDBURI=$$MONGODB_URI JwtSecret=$$JWT_SECRET PublicBaseURL=$$PUBLIC_BASE_URL EmailFrom=$$EMAIL_FROM SmtpAddr=$$SMTP_ADDR"; \
+	if [ -n "$$CORS_ALLOWED_ORIGINS" ]; then params="$$params CorsAllowedOrigins=$$CORS_ALLOWED_ORIGINS"; fi; \
 	if [ -n "$$SMTP_USERNAME" ]; then params="$$params SmtpUsername=$$SMTP_USERNAME SmtpPassword=$$SMTP_PASSWORD"; fi; \
 	sam deploy --parameter-overrides "$$params"
 

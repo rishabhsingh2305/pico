@@ -26,6 +26,20 @@ canonical API contract.
 | GET    | `/ready` | `{"status":"ok"}` (`200`) or `{"error":"database unavailable"}` (`503`) |
 | HEAD   | `/ready` | empty body (`200` or `503`)                                           |
 
+### Authentication
+
+| Method | Path | Description |
+| --- | --- | --- |
+| `POST` | `/auth/login` | Sign in with `{"email","password"}`; sets an HttpOnly `pico_auth` cookie and returns `{"user","expiresAt"}` |
+| `POST` | `/auth/logout` | Clear the auth cookie (`204`) |
+| `GET` | `/auth/session` | Return the current user and token expiry, or `401` |
+
+Access tokens are HS256 JWTs valid for 7 days and carry `sub`, `iss`,
+`aud=picoservice-api`, and `type=access`. Login requires a verified email:
+wrong credentials return `401 invalid email or password`, and unverified
+accounts return `403 email not verified`. Tokens are stateless; logout clears
+the cookie but does not revoke an already-issued token.
+
 ### Users
 
 | Method | Path | Description |
@@ -35,6 +49,9 @@ canonical API contract.
 | `GET` | `/users/{userID}?userId=actor` | Get a user |
 | `PATCH` | `/users/{userID}?userId=actor` | Change `name` and/or `email`; self only. Changing the email resets verification |
 | `POST` | `/users/{userID}/password?userId=actor` | Change password with `currentPassword` and `newPassword`; self only |
+
+Protected routes use the auth cookie. Until the UI migrates, requests without a
+cookie may still use the temporary `userId` query parameter.
 
 Passwords are bcrypt-hashed. Password hashes are never returned. There is no
 `DELETE /users` yet. User responses include `emailVerified`.
@@ -167,14 +184,16 @@ currencies would need grouping by currency.
   `Allow` header.
 - `HEAD` responses carry headers and no body.
 - The Lambda request ID is returned as `X-Request-Id`.
-- CORS is configured on the Function URL for `GET`, `HEAD`, `POST`, `PATCH`,
-  and `DELETE`.
+- CORS is handled by `middleware.CORS` using `CORS_ALLOWED_ORIGINS`, which
+  defaults to `PUBLIC_BASE_URL`. A `*` entry reflects any non-null origin with
+  credentials enabled and is intended for development only.
 
-**Authentication is not implemented.** `orgId` and `userId` are query
-parameters, so any caller can claim any identity. Membership checks verify that
-the claimed user belongs to the claimed org, but they do not authenticate the
-caller. `GET /users` is also a global directory. Do not expose this service
-publicly until a real authentication layer exists.
+**Authentication uses a JWT cookie.** Protected routes read the `pico_auth`
+cookie and trust its `sub` claim after verifying the signature and expiry; no
+user lookup is performed for a valid token. Until the UI migrates, requests
+without a cookie may still use the temporary `userId` query parameter, which
+remains spoofable. Membership checks verify that the actor belongs to the org.
+`GET /users` is still a global directory for authenticated users.
 
 ## Data model and indexes
 
@@ -414,15 +433,17 @@ make deploy
 
 `make deploy` does not load `.env`. It requires `MONGODB_URI`, `JWT_SECRET`,
 `PUBLIC_BASE_URL`, `EMAIL_FROM`, and `SMTP_ADDR`. `SMTP_USERNAME` and
-`SMTP_PASSWORD` are optional but must be set together. `MongoDBURI`,
-`JwtSecret`, `SmtpUsername`, and `SmtpPassword` are `NoEcho` parameters, so
-CloudFormation masks them in stack descriptions. To deploy without the Makefile:
+`SMTP_PASSWORD` are optional but must be set together. `CORS_ALLOWED_ORIGINS`
+is optional and defaults to `PUBLIC_BASE_URL`. `MongoDBURI`, `JwtSecret`,
+`SmtpUsername`, and `SmtpPassword` are `NoEcho` parameters, so CloudFormation
+masks them in stack descriptions. To deploy without the Makefile:
 
 ```bash
 sam deploy --parameter-overrides \
   MongoDBURI='mongodb+srv://...' \
   JwtSecret='...' \
   PublicBaseURL='https://example.com' \
+  CorsAllowedOrigins='https://example.com' \
   EmailFrom='noreply@example.com' \
   SmtpAddr='smtp.example.com:587' \
   SmtpUsername='...' \
@@ -430,8 +451,8 @@ sam deploy --parameter-overrides \
 ```
 
 `PUBLIC_BASE_URL` must be the public UI origin, for example
-`https://app.example.com`. The API uses it only to build verification links;
-it is not the Function URL.
+`https://app.example.com`. The API uses it to build verification links and as
+the default CORS origin; it is not the Function URL.
 
 ### One-command deploy
 
@@ -458,7 +479,7 @@ Application settings stay in `.env` (template: `sample.env`):
 ```bash
 chmod 600 .env
 # MONGODB_URI, MONGODB_DATABASE, JWT_SECRET, PUBLIC_BASE_URL,
-# EMAIL_FROM, SMTP_ADDR, optional SMTP_USERNAME/SMTP_PASSWORD
+# CORS_ALLOWED_ORIGINS, EMAIL_FROM, SMTP_ADDR, optional SMTP_USERNAME/SMTP_PASSWORD
 ```
 
 Then deploy:
@@ -523,8 +544,9 @@ curl -i "$(make url)ready"
 | --- | --- | --- |
 | `MONGODB_URI` | yes | MongoDB Atlas connection string |
 | `MONGODB_DATABASE` | yes | Database name, `picoservice` in `template.yaml` |
-| `JWT_SECRET` | yes | Signs email verification tokens; at least 32 bytes |
-| `PUBLIC_BASE_URL` | yes | Frontend origin used in verification links |
+| `JWT_SECRET` | yes | Signs email verification and access tokens; at least 32 bytes |
+| `PUBLIC_BASE_URL` | yes | Frontend origin used in verification links and as the default CORS origin |
+| `CORS_ALLOWED_ORIGINS` | no | Comma-separated allowed browser origins; defaults to `PUBLIC_BASE_URL`; `*` allows all |
 | `EMAIL_FROM` | yes | Sender address for verification email |
 | `SMTP_ADDR` | yes | SMTP server address, `host:port` |
 | `SMTP_USERNAME` | no | SMTP username; set with `SMTP_PASSWORD` |
@@ -545,8 +567,9 @@ bucket (created automatically on first deploy), and optional `STACK_NAME`
 environment values only; local `make` targets read `.env`; see `sample.env`.
 
 - The Function URL is public (`AuthType: NONE`).
-- CORS allows all origins and the `GET`, `HEAD`, `POST`, `PATCH`, and `DELETE`
-  methods. Tighten the allowed origins before production use.
+- CORS is handled by the application middleware and uses
+  `CORS_ALLOWED_ORIGINS`, defaulting to `PUBLIC_BASE_URL`, with credentials
+  enabled. `*` allows any non-null origin and is development-only.
 - Invocation mode is `BUFFERED`.
 - Lambda runs the `provided.al2023` runtime on `x86_64` with a 10 second
   timeout.

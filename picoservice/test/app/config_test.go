@@ -1,6 +1,7 @@
 package apptest
 
 import (
+	"slices"
 	"strings"
 	"testing"
 
@@ -11,15 +12,53 @@ func TestConfigFromEnv(t *testing.T) {
 	validSecret := strings.Repeat("s", 32)
 
 	tests := []struct {
-		name     string
-		secret   string
-		baseURL  string
-		from     string
-		smtpAddr string
-		username string
-		password string
-		wantErr  bool
+		name        string
+		secret      string
+		baseURL     string
+		corsOrigins string
+		from        string
+		smtpAddr    string
+		username    string
+		password    string
+		wantOrigins []string
+		wantErr     bool
 	}{
+		{
+			name:        "valid with cors origins",
+			secret:      validSecret,
+			baseURL:     "https://api.example.com",
+			corsOrigins: "http://localhost:5173, https://app.example.com/",
+			from:        "noreply@example.com",
+			smtpAddr:    "smtp.example.com:587",
+			wantOrigins: []string{"http://localhost:5173", "https://app.example.com"},
+		},
+		{
+			name:        "cors allow all",
+			secret:      validSecret,
+			baseURL:     "https://api.example.com",
+			corsOrigins: "*",
+			from:        "noreply@example.com",
+			smtpAddr:    "smtp.example.com:587",
+			wantOrigins: []string{"*"},
+		},
+		{
+			name:        "invalid cors origin",
+			secret:      validSecret,
+			baseURL:     "https://api.example.com",
+			corsOrigins: "not-a-url",
+			from:        "noreply@example.com",
+			smtpAddr:    "smtp.example.com:587",
+			wantErr:     true,
+		},
+		{
+			name:        "cors origin with path",
+			secret:      validSecret,
+			baseURL:     "https://api.example.com",
+			corsOrigins: "https://app.example.com/app",
+			from:        "noreply@example.com",
+			smtpAddr:    "smtp.example.com:587",
+			wantErr:     true,
+		},
 		{
 			name:     "valid without auth",
 			secret:   validSecret,
@@ -105,6 +144,7 @@ func TestConfigFromEnv(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("JWT_SECRET", tt.secret)
 			t.Setenv("PUBLIC_BASE_URL", tt.baseURL)
+			t.Setenv("CORS_ALLOWED_ORIGINS", tt.corsOrigins)
 			t.Setenv("EMAIL_FROM", tt.from)
 			t.Setenv("SMTP_ADDR", tt.smtpAddr)
 			t.Setenv("SMTP_USERNAME", tt.username)
@@ -123,6 +163,17 @@ func TestConfigFromEnv(t *testing.T) {
 			if got, want := cfg.PublicBaseURL, strings.TrimRight(tt.baseURL, "/"); got != want {
 				t.Fatalf("expected base URL %q, got %q", want, got)
 			}
+			if !slices.Equal(cfg.CORSAllowedOrigins, tt.wantOrigins) {
+				t.Fatalf("expected CORS origins %v, got %v", tt.wantOrigins, cfg.CORSAllowedOrigins)
+			}
 		})
+	}
+}
+
+func TestAllowedOriginsFallback(t *testing.T) {
+	cfg := app.Config{PublicBaseURL: "http://localhost:5173"}
+
+	if got, want := cfg.AllowedOrigins(), []string{"http://localhost:5173"}; !slices.Equal(got, want) {
+		t.Fatalf("expected %v, got %v", want, got)
 	}
 }

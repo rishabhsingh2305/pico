@@ -18,7 +18,7 @@ import {
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
 import { Spinner } from "@/components/ui/spinner"
-import { isUserNotFoundError } from "@/features/auth/session"
+import { isSessionInvalidError } from "@/features/auth/session"
 import { createOrg } from "@/features/orgs/api"
 import { orgErrorMessage } from "@/features/orgs/error-message"
 import type { Org } from "@/features/orgs/types"
@@ -78,7 +78,7 @@ export function CreateOrgForm({
       setIsSubmitting(false)
       onCreated(org)
     } catch (error) {
-      if (isUserNotFoundError(error)) {
+      if (isSessionInvalidError(error)) {
         onSessionInvalid()
         return
       }

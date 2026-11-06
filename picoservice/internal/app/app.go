@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"strings"
 
 	"picoservice/internal/dao/mongodb"
 	"picoservice/internal/email"
@@ -48,19 +49,27 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 	}
 	verification := services.NewEmailVerificationService(userStore, tokens, mailer, cfg.PublicBaseURL)
 
-	userService := services.NewUserService(userStore, services.NewBcryptHasher(), verification)
+	hasher := services.NewBcryptHasher()
+	userService := services.NewUserService(userStore, hasher, verification)
+	authService, err := services.NewAuthService(userStore, hasher, cfg.JWTSecret)
+	if err != nil {
+		return nil, fmt.Errorf("app: create auth service: %w", err)
+	}
 	orgService := services.NewOrgService(orgStore, membershipStore)
 	membershipService := services.NewMembershipService(membershipStore, orgStore, userStore)
 	projectService := services.NewProjectService(projectStore)
 	expenseService := services.NewExpenseService(expenseStore, projectStore)
 
 	return routes.New(routes.Deps{
-		Logger:      logger,
-		Pinger:      db,
-		Users:       userService,
-		Orgs:        orgService,
-		Memberships: membershipService,
-		Projects:    projectService,
-		Expenses:    expenseService,
+		Logger:         logger,
+		Pinger:         db,
+		Users:          userService,
+		Auth:           authService,
+		Orgs:           orgService,
+		Memberships:    membershipService,
+		Projects:       projectService,
+		Expenses:       expenseService,
+		SecureCookies:  strings.HasPrefix(cfg.PublicBaseURL, "https://"),
+		AllowedOrigins: cfg.AllowedOrigins(),
 	})
 }

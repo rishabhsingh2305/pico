@@ -137,7 +137,8 @@ app grows.
 
 - Register routes only in `src/app/router.tsx`.
 - Keep `BrowserRouter` in `main.tsx`; tests use `MemoryRouter`.
-- Redirects are explicit routes, currently `/` and `*` to `/signup`.
+- Redirects are explicit routes, currently `/` to `/orgs` or `/login` and `*`
+  through `/`. Protected routes render inside `RequireSession`.
 - When adding a page, add a route test and update `docs/architecture.md`.
 - Static hosting must rewrite unknown paths to `index.html`.
 
@@ -148,9 +149,9 @@ app grows.
 - Keep `.env.example` in sync. Never commit `.env`, `.env.local`, tokens, or
   passwords.
 - Treat all client validation as UX only; the backend is authoritative.
-- The temporary `pico.session` user ID and email may be stored in
-  `localStorage`. Never store passwords or access tokens there unless a
-  documented authentication design requires it.
+- The authenticated session lives in `AuthProvider` and is restored from
+  `/auth/session`. The backend sets an HttpOnly `pico_auth` cookie; never read,
+  store, or log tokens in JavaScript, and never put them in `localStorage`.
 
 ## Testing
 

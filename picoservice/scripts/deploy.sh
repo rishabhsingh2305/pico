@@ -217,6 +217,10 @@ if [[ -n "${SMTP_USERNAME:-}" ]]; then
   deploy_args+=("SmtpUsername=$SMTP_USERNAME" "SmtpPassword=$SMTP_PASSWORD")
 fi
 
+if [[ -n "${CORS_ALLOWED_ORIGINS:-}" ]]; then
+  deploy_args+=("CorsAllowedOrigins=$CORS_ALLOWED_ORIGINS")
+fi
+
 if ((ASSUME_YES)); then
   deploy_args+=(--no-confirm-changeset)
 fi

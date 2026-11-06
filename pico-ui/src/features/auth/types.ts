@@ -4,6 +4,11 @@ export type SignUpInput = {
   password: string
 }
 
+export type LoginInput = {
+  email: string
+  password: string
+}
+
 export type User = {
   id: string
   name: string
@@ -11,6 +16,11 @@ export type User = {
   emailVerified: boolean
   createdAt: string
   updatedAt: string
+}
+
+export type SessionResponse = {
+  user: User
+  expiresAt: string
 }
 
 export type VerificationResponse = {

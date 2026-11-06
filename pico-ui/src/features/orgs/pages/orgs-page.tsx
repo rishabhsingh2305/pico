@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react"
-import { Navigate, useNavigate } from "react-router"
+import { useCallback, useEffect, useState } from "react"
+import { useNavigate } from "react-router"
 import { Building2Icon, CircleAlertIcon, TagsIcon } from "lucide-react"
 
 import { AppShell } from "@/components/app-shell"
@@ -9,12 +9,8 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  clearSession,
-  getSession,
-  isUserNotFoundError,
-  type TemporarySession,
-} from "@/features/auth/session"
+import { useAuth, useSession } from "@/features/auth/auth-provider"
+import { isSessionInvalidError, type Session } from "@/features/auth/session"
 import { CreateOrgForm } from "@/features/orgs/components/create-org-form"
 import { OrgCard } from "@/features/orgs/components/org-card"
 import { OrgFilterForm } from "@/features/orgs/components/org-filter-form"
@@ -26,22 +22,25 @@ import { usePageTitle } from "@/hooks/use-page-title"
 type LoadStatus = "loading" | "ready" | "error"
 
 export function OrgsPage() {
-  const session = getSession()
-  if (!session) {
-    return <Navigate to="/signup" replace />
-  }
+  const session = useSession()
   return <OrgsView session={session} />
 }
 
-function OrgsView({ session }: { session: TemporarySession }) {
+function OrgsView({ session }: { session: Session }) {
   usePageTitle("Organizations · Pico")
   const navigate = useNavigate()
+  const { logout } = useAuth()
 
   const [orgs, setOrgs] = useState<Org[]>([])
   const [tags, setTags] = useState<string[]>([])
   const [status, setStatus] = useState<LoadStatus>("loading")
   const [loadError, setLoadError] = useState("")
   const [attempt, setAttempt] = useState(0)
+
+  const handleSessionInvalid = useCallback(() => {
+    void logout()
+    navigate("/login", { replace: true })
+  }, [logout, navigate])
 
   useEffect(() => {
     let cancelled = false
@@ -57,9 +56,8 @@ function OrgsView({ session }: { session: TemporarySession }) {
         if (cancelled) {
           return
         }
-        if (isUserNotFoundError(error)) {
-          clearSession()
-          navigate("/signup", { replace: true })
+        if (isSessionInvalidError(error)) {
+          handleSessionInvalid()
           return
         }
         setLoadError(orgErrorMessage(error))
@@ -69,17 +67,12 @@ function OrgsView({ session }: { session: TemporarySession }) {
     return () => {
       cancelled = true
     }
-  }, [session.userId, tags, attempt, navigate])
+  }, [session.userId, tags, attempt, navigate, handleSessionInvalid])
 
   function retry() {
     setStatus("loading")
     setLoadError("")
     setAttempt((current) => current + 1)
-  }
-
-  function handleSessionInvalid() {
-    clearSession()
-    navigate("/signup", { replace: true })
   }
 
   function handleCreated(org: Org) {

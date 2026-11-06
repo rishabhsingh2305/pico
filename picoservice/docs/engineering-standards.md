@@ -127,12 +127,12 @@ them when the service grows.
 
 ## Identity, tenancy, and passwords
 
-- `userId` and `orgId` are query-parameter identity until authentication is
-  implemented. Never describe this as secure authentication.
+- Protected routes authenticate with the `pico_auth` JWT cookie. The temporary
+  `userId` query fallback is not secure; never describe it as authentication.
 - Email verification proves ownership of an email address only. Verification
   JWTs must never be accepted as access tokens or used to authorize requests.
 - Every org-scoped route must use `middleware.RequireMember`. User-scoped routes
-  that need an actor must use `middleware.RequireUser`.
+  that need an actor must use `middleware.RequireAuth`.
 - The route tree, not individual controllers, decides which middleware wraps a
   route.
 - Membership enforcement is not authorization by itself. Owner-only rules belong

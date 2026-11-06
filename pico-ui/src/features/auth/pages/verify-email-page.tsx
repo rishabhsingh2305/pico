@@ -7,7 +7,6 @@ import { CardContent } from "@/components/ui/card"
 import { Spinner } from "@/components/ui/spinner"
 import { AuthShell } from "@/features/auth/components/auth-shell"
 import { verifyEmail } from "@/features/auth/api"
-import { storeSession } from "@/features/auth/session"
 import { usePageTitle } from "@/hooks/use-page-title"
 import { ApiError } from "@/lib/api-client"
 
@@ -21,7 +20,7 @@ const statusCopy: Record<
   success: {
     title: "Email verified",
     description:
-      "Your email address is confirmed. Continue to create or open an organization.",
+      "Your email address is confirmed. Sign in to create or open an organization.",
   },
   invalid: {
     title: "Invalid verification link",
@@ -59,9 +58,8 @@ export function VerifyEmailPage() {
     let cancelled = false
 
     verifyEmail(token)
-      .then((result) => {
+      .then(() => {
         if (!cancelled) {
-          storeSession({ userId: result.userId, email: result.email })
           setStatus("success")
         }
       })
@@ -124,9 +122,9 @@ export function VerifyEmailPage() {
             <Button
               type="button"
               className="w-full"
-              onClick={() => navigate("/orgs")}
+              onClick={() => navigate("/login")}
             >
-              Continue to organizations
+              Continue to sign in
             </Button>
           ) : null}
 

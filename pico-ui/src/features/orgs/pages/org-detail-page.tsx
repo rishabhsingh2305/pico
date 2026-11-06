@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react"
-import { Link, Navigate, useNavigate, useParams } from "react-router"
+import { Link, useNavigate, useParams } from "react-router"
 import {
   ArrowLeftIcon,
   CircleAlertIcon,
@@ -24,12 +24,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  clearSession,
-  getSession,
-  isUserNotFoundError,
-  type TemporarySession,
-} from "@/features/auth/session"
+import { useAuth, useSession } from "@/features/auth/auth-provider"
+import { isSessionInvalidError, type Session } from "@/features/auth/session"
 import { getOrg } from "@/features/orgs/api"
 import { orgErrorMessage } from "@/features/orgs/error-message"
 import type { Org } from "@/features/orgs/types"
@@ -44,16 +40,14 @@ import { ApiError } from "@/lib/api-client"
 type LoadStatus = "loading" | "ready" | "error"
 
 export function OrgDetailPage() {
-  const session = getSession()
-  if (!session) {
-    return <Navigate to="/signup" replace />
-  }
+  const session = useSession()
   return <OrgDetailView session={session} />
 }
 
-function OrgDetailView({ session }: { session: TemporarySession }) {
+function OrgDetailView({ session }: { session: Session }) {
   const { orgId = "" } = useParams<{ orgId: string }>()
   const navigate = useNavigate()
+  const { logout } = useAuth()
   const projectDialogTriggerId = useId()
 
   const [org, setOrg] = useState<Org | null>(null)
@@ -71,9 +65,9 @@ function OrgDetailView({ session }: { session: TemporarySession }) {
   usePageTitle(org ? `${org.name} · Pico` : "Organization · Pico")
 
   const sessionInvalid = useCallback(() => {
-    clearSession()
-    navigate("/signup", { replace: true })
-  }, [navigate])
+    void logout()
+    navigate("/login", { replace: true })
+  }, [logout, navigate])
 
   useEffect(() => {
     let cancelled = false
@@ -89,7 +83,7 @@ function OrgDetailView({ session }: { session: TemporarySession }) {
         if (cancelled) {
           return
         }
-        if (isUserNotFoundError(loadError)) {
+        if (isSessionInvalidError(loadError)) {
           sessionInvalid()
           return
         }
@@ -117,7 +111,7 @@ function OrgDetailView({ session }: { session: TemporarySession }) {
         if (cancelled) {
           return
         }
-        if (isUserNotFoundError(loadError)) {
+        if (isSessionInvalidError(loadError)) {
           sessionInvalid()
           return
         }

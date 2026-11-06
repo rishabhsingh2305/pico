@@ -1,15 +1,17 @@
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { getSession, storeSession } from "@/features/auth/session"
+import type { Session } from "@/features/auth/session"
+import { RequireSession } from "@/features/auth/auth-provider"
 import type { Expense } from "@/features/expenses/types"
 import type { Org } from "@/features/orgs/types"
 import { ProjectDetailPage } from "@/features/orgs/pages/project-detail-page"
 import type { Project } from "@/features/projects/types"
+import { AuthTestProvider } from "@/test/auth"
 
-const session = {
+const session: Session = {
   userId: "user-1",
   email: "ada@example.com",
 }
@@ -164,38 +166,40 @@ function expenseListURLs(fetchMock: ReturnType<typeof stubApi>): URL[] {
     .map(([url]) => new URL(String(url), "http://localhost"))
 }
 
-function renderProjectDetail() {
+function renderProjectDetail(initialSession: Session | null = session) {
   return render(
-    <MemoryRouter initialEntries={["/orgs/org-1/projects/project-1"]}>
-      <Routes>
-        <Route
-          path="/orgs/:orgId/projects/:projectId"
-          element={<ProjectDetailPage />}
-        />
-        <Route path="/orgs/:orgId" element={<div>Projects destination</div>} />
-        <Route path="/signup" element={<div>Signup destination</div>} />
-      </Routes>
-    </MemoryRouter>
+    <AuthTestProvider session={initialSession}>
+      <MemoryRouter initialEntries={["/orgs/org-1/projects/project-1"]}>
+        <Routes>
+          <Route element={<RequireSession />}>
+            <Route
+              path="/orgs/:orgId/projects/:projectId"
+              element={<ProjectDetailPage />}
+            />
+          </Route>
+          <Route
+            path="/orgs/:orgId"
+            element={<div>Projects destination</div>}
+          />
+          <Route path="/login" element={<div>Login destination</div>} />
+        </Routes>
+      </MemoryRouter>
+    </AuthTestProvider>
   )
 }
-
-beforeEach(() => {
-  localStorage.clear()
-})
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe("ProjectDetailPage", () => {
-  it("redirects to signup without a session", () => {
-    renderProjectDetail()
+  it("redirects to login without a session", () => {
+    renderProjectDetail(null)
 
-    expect(screen.getByText("Signup destination")).toBeInTheDocument()
+    expect(screen.getByText("Login destination")).toBeInTheDocument()
   })
 
   it("loads the project, expenses, and filtered total", async () => {
-    storeSession(session)
     const fetchMock = stubApi({ expenses: [lunch] })
 
     renderProjectDetail()
@@ -223,7 +227,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("shows debit and credit badges with signed amounts and a net total", async () => {
-    storeSession(session)
     stubApi({
       expenses: [
         lunch,
@@ -263,7 +266,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("keeps the large net styling when the total is negative", async () => {
-    storeSession(session)
     stubApi({ expenses: [lunch] })
 
     renderProjectDetail()
@@ -275,7 +277,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("shows the empty state and zero total when the project has no expenses", async () => {
-    storeSession(session)
     stubApi({ expenses: [] })
 
     renderProjectDetail()
@@ -288,7 +289,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("shows the create expense form only in a modal", async () => {
-    storeSession(session)
     stubApi({ expenses: [] })
     const userEventInstance = userEvent.setup()
 
@@ -319,7 +319,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("turns filter tags into removable badges", async () => {
-    storeSession(session)
     stubApi({ expenses: [lunch] })
     const userEventInstance = userEvent.setup()
 
@@ -342,7 +341,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("creates an expense and reloads the current page total", async () => {
-    storeSession(session)
     const fetchMock = stubApi({ expenses: [] })
     const userEventInstance = userEvent.setup()
 
@@ -389,7 +387,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("creates a credit and shows money in", async () => {
-    storeSession(session)
     const fetchMock = stubApi({ expenses: [] })
     const userEventInstance = userEvent.setup()
 
@@ -439,7 +436,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("deletes an expense after confirmation and refreshes the total", async () => {
-    storeSession(session)
     const fetchMock = stubApi({ expenses: [lunch] })
     const userEventInstance = userEvent.setup()
 
@@ -466,7 +462,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("paginates without changing the filtered total", async () => {
-    storeSession(session)
     const expenses = Array.from({ length: 21 }, (_, index) =>
       makeExpense({
         id: `expense-${index + 1}`,
@@ -498,7 +493,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("applies tags and dates and resets pagination to the first page", async () => {
-    storeSession(session)
     const today = new Date()
     const daysAgo = (days: number) =>
       new Date(
@@ -554,7 +548,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("clears filters and shows all expenses again", async () => {
-    storeSession(session)
     const fetchMock = stubApi({ expenses: [lunch] })
     const userEventInstance = userEvent.setup()
 
@@ -583,7 +576,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("normalizes a custom range selected end-first", async () => {
-    storeSession(session)
     const fetchMock = stubApi({ expenses: [lunch] })
     const userEventInstance = userEvent.setup()
 
@@ -630,7 +622,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("shows a retry action when expenses fail to load", async () => {
-    storeSession(session)
     stubApi({
       listExpensesResponse: jsonResponse({ error: "list failed" }, 500),
     })
@@ -646,7 +637,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("shows project-not-found with a back action", async () => {
-    storeSession(session)
     stubApi({
       projectResponse: jsonResponse({ error: "project not found" }, 404),
     })
@@ -660,7 +650,6 @@ describe("ProjectDetailPage", () => {
   })
 
   it("clears a stale user session", async () => {
-    storeSession(session)
     stubApi({
       orgResponse: jsonResponse({ error: "user not found" }, 404),
     })
@@ -668,8 +657,7 @@ describe("ProjectDetailPage", () => {
     renderProjectDetail()
 
     await waitFor(() => {
-      expect(screen.getByText("Signup destination")).toBeInTheDocument()
+      expect(screen.getByText("Login destination")).toBeInTheDocument()
     })
-    expect(getSession()).toBeNull()
   })
 })

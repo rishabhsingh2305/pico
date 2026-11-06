@@ -18,6 +18,7 @@ export async function requestJSON<T>(
   headers.set("Accept", "application/json")
 
   const response = await fetch(`${API_BASE_URL}${path}`, {
+    credentials: "include",
     ...init,
     headers,
   })

@@ -1,4 +1,4 @@
-import type { SignUpInput } from "@/features/auth/types"
+import type { LoginInput, SignUpInput } from "@/features/auth/types"
 import { byteLength } from "@/lib/text"
 
 const NAME_MAX_BYTES = 120
@@ -10,6 +10,26 @@ const emailPattern = /^[^\s@]+@[^\s@]+$/
 
 export type SignUpField = keyof SignUpInput
 export type SignUpErrors = Partial<Record<SignUpField, string>>
+
+export type LoginField = keyof LoginInput
+export type LoginErrors = Partial<Record<LoginField, string>>
+
+export function validateLogin(input: LoginInput): LoginErrors {
+  const errors: LoginErrors = {}
+
+  const email = input.email.trim()
+  if (email === "") {
+    errors.email = "Enter your email address."
+  } else if (!emailPattern.test(email)) {
+    errors.email = "Enter a valid email address."
+  }
+
+  if (input.password === "") {
+    errors.password = "Enter your password."
+  }
+
+  return errors
+}
 
 export function validateSignUp(input: SignUpInput): SignUpErrors {
   const errors: SignUpErrors = {}

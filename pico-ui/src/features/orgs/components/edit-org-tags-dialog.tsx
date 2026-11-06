@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
-import { isUserNotFoundError } from "@/features/auth/session"
+import { isSessionInvalidError } from "@/features/auth/session"
 import { updateOrgTags } from "@/features/orgs/api"
 import { orgErrorMessage } from "@/features/orgs/error-message"
 import type { Org } from "@/features/orgs/types"
@@ -76,7 +76,7 @@ export function EditOrgTagsDialog({
       setOpen(false)
       onUpdated()
     } catch (error) {
-      if (isUserNotFoundError(error)) {
+      if (isSessionInvalidError(error)) {
         onSessionInvalid()
         return
       }

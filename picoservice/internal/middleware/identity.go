@@ -54,72 +54,30 @@ func FromContext(ctx context.Context) (Identity, bool) {
 	return id, ok
 }
 
-// RequireUser requires a valid userId query parameter, verifies that the user
-// exists, and stores the identity in the request context. This is request
-// context, not authentication; callers can still supply any user ID until a
-// real authentication layer exists.
-func RequireUser(logger *slog.Logger, users UserLookup) func(http.Handler) http.Handler {
+// RequireMember requires an authenticated identity and an orgId query
+// parameter, verifies that the organization exists, and verifies that the
+// identity is a member of the organization. The identity is stored in the
+// request context by RequireAuth.
+func RequireMember(logger *slog.Logger, orgs OrgLookup, memberships MembershipLookup) func(http.Handler) http.Handler {
 	if logger == nil {
 		logger = slog.Default()
 	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			userID, ok := queryID(w, r, UserIDParam)
-			if !ok {
+			id, ok := FromContext(r.Context())
+			if !ok || id.UserID == "" {
+				httpx.WriteError(w, r, http.StatusUnauthorized, "authentication required")
 				return
 			}
 
-			lookupCtx, cancel := context.WithTimeout(r.Context(), lookupTimeout)
-			defer cancel()
-
-			exists, err := users.Exists(lookupCtx, userID)
-			if err != nil {
-				writeLookupError(logger, w, r, "user lookup failed", err)
-				return
-			}
-			if !exists {
-				httpx.WriteError(w, r, http.StatusNotFound, "user not found")
-				return
-			}
-
-			ctx := WithContext(r.Context(), Identity{UserID: userID})
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-}
-
-// RequireMember requires orgId and userId query parameters, verifies that the
-// user and organization exist, and verifies that the user is a member of the
-// organization. The identity is stored in the request context.
-func RequireMember(logger *slog.Logger, users UserLookup, orgs OrgLookup, memberships MembershipLookup) func(http.Handler) http.Handler {
-	if logger == nil {
-		logger = slog.Default()
-	}
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			orgID, ok := queryID(w, r, OrgIDParam)
 			if !ok {
 				return
 			}
-			userID, ok := queryID(w, r, UserIDParam)
-			if !ok {
-				return
-			}
 
 			lookupCtx, cancel := context.WithTimeout(r.Context(), lookupTimeout)
 			defer cancel()
-
-			userExists, err := users.Exists(lookupCtx, userID)
-			if err != nil {
-				writeLookupError(logger, w, r, "user lookup failed", err)
-				return
-			}
-			if !userExists {
-				httpx.WriteError(w, r, http.StatusNotFound, "user not found")
-				return
-			}
 
 			orgExists, err := orgs.Exists(lookupCtx, orgID)
 			if err != nil {
@@ -131,7 +89,7 @@ func RequireMember(logger *slog.Logger, users UserLookup, orgs OrgLookup, member
 				return
 			}
 
-			member, err := memberships.Exists(lookupCtx, orgID, userID)
+			member, err := memberships.Exists(lookupCtx, orgID, id.UserID)
 			if err != nil {
 				writeLookupError(logger, w, r, "membership lookup failed", err)
 				return
@@ -141,7 +99,7 @@ func RequireMember(logger *slog.Logger, users UserLookup, orgs OrgLookup, member
 				return
 			}
 
-			ctx := WithContext(r.Context(), Identity{OrgID: orgID, UserID: userID})
+			ctx := WithContext(r.Context(), Identity{OrgID: orgID, UserID: id.UserID})
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

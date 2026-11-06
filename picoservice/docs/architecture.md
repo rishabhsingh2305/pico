@@ -40,7 +40,7 @@ client
 | `internal/validation` | Shared validation error, name checks, pagination | stdlib |
 | `internal/httpx` | JSON response helpers, request-ID context, error envelope | stdlib |
 | `internal/lambdahttp` | Function URL event ↔ `net/http`; cookies, base64 bodies, response conversion | `events`, `net/http`, `internal/httpx` |
-| `internal/middleware` | Request ID propagation, structured request logging, panic recovery, query identity and membership checks | stdlib, chi middleware, `internal/httpx` |
+| `internal/middleware` | CORS, request ID propagation, structured request logging, panic recovery, query identity and membership checks | stdlib, chi middleware, `internal/httpx` |
 | `test/*` | External tests mirroring the `internal` packages | `internal/*`, stdlib, `httptest`; MongoDB driver for integration fixtures |
 
 Tests live under `test/` and use only exported APIs. Integration tests are gated
@@ -148,6 +148,21 @@ accept `limit` and `offset` (default 20, maximum 100).
 | GET | `/ready` | 503 | `{"error":"database unavailable"}` |
 | HEAD | `/ready` | 200/503 | empty |
 
+### Authentication
+
+| Method | Path | Success | Notes |
+| --- | --- | --- | --- |
+| POST | `/auth/login` | 200 | `{"email","password"}`; returns `{"user","expiresAt"}` and sets the `pico_auth` HttpOnly cookie |
+| POST | `/auth/logout` | 204 | Clears the auth cookie |
+| GET | `/auth/session` | 200 | Returns `{"user","expiresAt"}`; `401` when the cookie is missing or invalid |
+
+Access tokens are HS256 JWTs valid for 7 days. Claims are `sub` (user ID),
+`iss=picoservice`, `aud=picoservice-api`, `type=access`, `iat`, and `exp`.
+Login requires a verified email. Wrong credentials return `401 invalid email or
+password`; unverified accounts return `403 email not verified`. Tokens are
+stateless: a valid token requires no user lookup, and logout does not revoke an
+already-issued token.
+
 ### Users
 
 | Method | Path | Success | Notes |
@@ -159,7 +174,9 @@ accept `limit` and `offset` (default 20, maximum 100).
 | POST | `/users/{userID}/password?userId=actor` | 204 | Self only; `currentPassword`, `newPassword` |
 
 No user delete. Password hashes are never returned. Responses include
-`emailVerified`. Duplicate email returns `409`.
+`emailVerified`. Duplicate email returns `409`. Protected user routes use the
+auth cookie; the `userId` query parameter is a temporary fallback until the UI
+migrates.
 
 ### Email verification
 
@@ -182,8 +199,8 @@ verified addresses still return `202` to avoid enumeration.
 | GET | `/orgs/{orgID}?orgId=actor&userId=actor` | 200 | Member only |
 | PATCH | `/orgs/{orgID}?orgId=actor&userId=actor` | 200 | Owner only; `{"name"}` |
 
-Path-scoped org routes repeat `orgId` in the query because `RequireMember` reads
-identity from query parameters.
+Path-scoped org routes repeat `orgId` in the query because `RequireMember`
+reads the tenant from the query. The actor comes from the auth cookie.
 
 No org delete.
 
@@ -253,8 +270,9 @@ independent of pagination:
 
 | Status | Meaning |
 | --- | --- |
-| 400 | Validation error, malformed JSON, missing identity query parameter, invalid verification token |
-| 403 | Actor is not a member, or a non-owner attempted an owner-only action |
+| 400 | Validation error, malformed JSON, missing `orgId` query parameter, invalid verification token |
+| 401 | Missing, invalid, or expired auth token; invalid login credentials |
+| 403 | Email not verified, actor is not a member, or a non-owner attempted an owner-only action |
 | 404 | Resource missing or malformed ObjectID |
 | 405 | Method not allowed; includes `Allow` |
 | 409 | Duplicate email/membership, owner removal, or conflict |
@@ -265,22 +283,21 @@ Invalid ObjectIDs are treated as not found rather than as a separate error.
 
 ## Identity and tenancy
 
-The current identity model uses query parameters:
+Protected routes authenticate with the `pico_auth` cookie:
 
-- `userId` identifies the actor for user and org endpoints.
-- `orgId` and `userId` identify the tenant and actor for projects, expenses,
-  and org-member endpoints. Path-scoped org routes repeat `orgId` in the query
-  because `RequireMember` reads identity from query parameters.
+- `RequireAuth` validates the access JWT and stores its `sub` as the actor. A
+  valid token requires no database lookup.
+- Requests without a cookie fall back to the temporary `userId` query parameter
+  and verify that the user exists. A present but invalid cookie never falls
+  back.
+- `RequireMember` reads the actor from the request context and the tenant from
+  the `orgId` query parameter, then verifies the organization and membership
+  before calling the controller. Missing `orgId` returns `400`; missing orgs
+  return `404`; non-members return `403`.
 
-`internal/middleware.RequireUser` verifies that the user exists.
-`internal/middleware.RequireMember` verifies the user, the organization, and the
-membership before calling the controller. Missing query parameters return `400`;
-missing users/orgs return `404`; non-members return `403`.
-
-**This is not authentication.** Any caller can supply another user's ID. The
-membership checks enforce tenant consistency but not caller identity. A real
-authentication layer (sessions or signed tokens) is required before exposing the
-service to untrusted clients.
+The query fallback is temporary and spoofable. It exists so the current UI keeps
+working while the client migrates to the login flow; remove it once the UI sends
+the auth cookie on every protected request.
 
 Owner-only operations are enforced in the org and membership services by
 comparing the actor to `orgs.userId`. Creating an org inserts the org and then
@@ -316,8 +333,11 @@ best-effort cleanup.
   or returned.
 - `POST /users` hashes the password. `POST /users/{id}/password` verifies the
   current password before storing a new hash.
-- Login, sessions, and access tokens are intentionally not implemented yet.
-  Verification JWTs only prove email ownership and cannot authorize API calls.
+- Login verifies the bcrypt hash and issues a stateless access token. Unknown
+  emails run a dummy bcrypt comparison so timing does not reveal whether an
+  account exists.
+- Email verification JWTs prove email ownership only and use a different
+  audience from access tokens, so they cannot authorize API calls.
 
 ## MongoDB
 
@@ -325,8 +345,9 @@ best-effort cleanup.
   at startup; this is a deployment error, not an Atlas outage.
 - `JWT_SECRET`, `PUBLIC_BASE_URL`, `EMAIL_FROM`, and `SMTP_ADDR` are also
   required at startup. `PUBLIC_BASE_URL` is the UI origin used in verification
-  links. `SMTP_USERNAME` and `SMTP_PASSWORD` are optional and must be set
-  together.
+  links and as the default CORS origin. `CORS_ALLOWED_ORIGINS` is optional and
+  overrides that origin list. `SMTP_USERNAME` and `SMTP_PASSWORD` are optional
+  and must be set together.
 - The client is created once during process startup and reused. It is never
   created per request. `mongo.Connect` does not validate reachability, so
   startup does not depend on Atlas being available. An SRV connection string
@@ -395,9 +416,11 @@ a caching library that is pinned to AWS SDK v1.
 
 - Payload format v2, `InvokeMode: BUFFERED`.
 - Public access: `AuthType: NONE`.
-- CORS is configured on the Function URL for `GET`, `HEAD`, `POST`, `PATCH`,
-  and `DELETE`. Do not add application CORS middleware; duplicate
-  `Access-Control-Allow-*` headers can break browsers.
+- CORS is handled by `middleware.CORS` using `CORS_ALLOWED_ORIGINS`, which
+  defaults to `PUBLIC_BASE_URL`, with credentials enabled for the auth cookie.
+  A `*` entry reflects any non-null origin with credentials and is intended for
+  development only. The Function URL has no CORS configuration; adding both
+  would duplicate `Access-Control-Allow-*` headers.
 - Buffered responses are limited to 6 MB.
 - Cookies are carried in the event/response `cookies` array, not the normal
   headers map.
@@ -421,8 +444,8 @@ a caching library that is pinned to AWS SDK v1.
   mode `600`, template `sample.deploy.env`). `make deploy` remains the
   explicit-env fallback and does not load env files.
 - Environment: `MONGODB_URI` (parameter), `MONGODB_DATABASE`, `JWT_SECRET`,
-  `PUBLIC_BASE_URL`, `EMAIL_FROM`, `SMTP_ADDR`, and optional `SMTP_USERNAME` /
-  `SMTP_PASSWORD`
+  `PUBLIC_BASE_URL`, optional `CORS_ALLOWED_ORIGINS`, `EMAIL_FROM`, `SMTP_ADDR`,
+  and optional `SMTP_USERNAME` / `SMTP_PASSWORD`
 - Local development: `cmd/server` on `PORT` (default `8080`). `make run`,
   `make indexes`, `make test-integration`, and `make invoke` load `.env`;
   `sample.env` is the committed template.
@@ -488,13 +511,17 @@ define small service interfaces. `internal/app` wires the concrete
 implementations. This keeps HTTP, MongoDB, and business rules independently
 testable.
 
-### Query-parameter identity before authentication
+### Stateless JWT access tokens with temporary query fallback
 
-Authentication, login, sessions, and tokens are deferred. Passwords are hashed
-and password changes are supported, but the API currently trusts `userId` and
-`orgId` query parameters. Membership enforcement prevents accidental
-cross-tenant access by an honestly supplied identity; it does not prevent
-spoofing.
+Login issues an HS256 access JWT stored in an HttpOnly cookie. Token validation
+is local, so protected requests with a valid token do not query the user
+collection. Tokens expire after 7 days and cannot be revoked before expiry;
+logout clears the cookie only. Refresh tokens, rotation, and server-side
+revocation are intentionally deferred.
+
+The `userId` query parameter remains as a temporary fallback for clients that
+have not migrated. It is spoofable and must be removed once the UI uses the auth
+cookie for every protected request.
 
 ### Separate index command
 
@@ -562,11 +589,13 @@ document with no `type` is counted as debit through `$ifNull`.
 
 ## Known debt
 
-- **No authentication.** Query identity is spoofable. Do not expose the
-  Function URL to untrusted clients.
-- Email verification does not authorize requests. Login, sessions, and access
-  tokens are still missing, so `emailVerified` is informational until a real
-  authentication layer checks it.
+- **Access tokens cannot be revoked.** Logout clears the cookie, but a copied
+  token stays valid for up to 7 days, and password changes do not invalidate
+  existing tokens.
+- **Query identity fallback remains spoofable.** Requests without an auth cookie
+  may still supply `userId`. Remove the fallback once the UI migrates.
+- Login has no rate limiting or lockout, so online password guessing is
+  unthrottled.
 - Verification links carry the JWT in the query string. Application request
   logs omit query strings, but upstream access logs may retain them.
 - Resend is throttled per user, but signup and resend have no global rate
@@ -609,7 +638,7 @@ document with no `type` is counted as debit through `$ifNull`.
   subrouter in `internal/routes` (`routes_users.go`, `routes_auth.go`,
   `routes_orgs.go`, and so on). `routes/router.go` mounts each subrouter under
   its prefix. Wrap org-scoped routes with `middleware.RequireMember` and
-  user-scoped routes with `middleware.RequireUser`.
+  user-scoped routes with `middleware.RequireAuth`.
 - **Business logic:** add a service in `internal/services` and keep controllers
   thin. Controllers call services; services do not know about HTTP.
 - **Persistence or AWS calls:** define the contract in `internal/dao` and

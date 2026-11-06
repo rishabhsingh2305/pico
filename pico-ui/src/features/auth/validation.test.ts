@@ -1,7 +1,33 @@
 import { describe, expect, it } from "vitest"
 
 import { byteLength } from "@/lib/text"
-import { validateSignUp } from "@/features/auth/validation"
+import { validateLogin, validateSignUp } from "@/features/auth/validation"
+
+describe("validateLogin", () => {
+  it("accepts valid input", () => {
+    expect(
+      validateLogin({ email: "ada@example.com", password: "correct horse" })
+    ).toEqual({})
+  })
+
+  it("requires an email", () => {
+    expect(
+      validateLogin({ email: "", password: "correct horse" })
+    ).toMatchObject({ email: "Enter your email address." })
+  })
+
+  it("rejects malformed email addresses", () => {
+    expect(
+      validateLogin({ email: "not-an-email", password: "correct horse" })
+    ).toMatchObject({ email: "Enter a valid email address." })
+  })
+
+  it("requires a password", () => {
+    expect(
+      validateLogin({ email: "ada@example.com", password: "" })
+    ).toMatchObject({ password: "Enter your password." })
+  })
+})
 
 describe("validateSignUp", () => {
   const validInput = {

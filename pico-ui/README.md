@@ -3,7 +3,7 @@
 The browser client for picoservice. Built with React 19, TypeScript, Vite,
 Tailwind CSS 4, shadcn/ui, and React Router.
 
-Current scope: signup, email verification, an organization dashboard,
+Current scope: signup, login, email verification, an organization dashboard,
 organization list/create, project list/create, and project expenses.
 Organizations carry tags and can be filtered by any matching tag. Each
 organization’s project list links to its dashboard, which summarizes that
@@ -32,9 +32,9 @@ corepack pnpm install
 cp .env.example .env.local
 ```
 
-The default `.env.example` points the UI at `/api`, which the Vite dev server
-proxies to `http://localhost:8080`. This avoids local CORS because the Go
-development server does not add CORS middleware.
+The default `.env.example` points the UI directly at the Go API at
+`http://localhost:8080`. The API allows `http://localhost:5173` through CORS and
+accepts credentials, so the auth cookie works without a proxy.
 
 ## Commands
 
@@ -67,11 +67,13 @@ Start the UI in another terminal:
 corepack pnpm dev
 ```
 
-Open `http://localhost:5173`. Signup posts to `POST /users` through the proxy.
-The backend sends a verification email. Clicking the link opens
-`/verify-email#token=...` in the UI, which calls the verification API and stores
-the temporary user identity. Continue to `/orgs` to create and list
-organizations. Organizations accept tags at creation, show them on their cards,
+Open `http://localhost:5173`. Signup posts directly to `POST /users`. The
+backend sends a verification email. Clicking the link opens
+`/verify-email#token=...` in the UI, which calls the verification API. After
+verification, sign in at `/login`; the backend sets an HttpOnly `pico_auth` JWT
+cookie and the UI restores the session from `/auth/session` on reload. Then
+continue to `/orgs` to create and list organizations. Organizations accept tags
+at creation, show them on their cards,
 and can be filtered with a tag toolbar; owners can edit tags from the card. Open
 an organization to see and create projects; projects have editable tags and can
 be filtered server-side by any matching tag. The organization’s project list
@@ -89,24 +91,22 @@ includes searchable endpoint cards, request/response examples, and copy buttons.
 
 ## Configuration
 
-| Variable                | Scope      | Description                                   |
-| ----------------------- | ---------- | --------------------------------------------- |
-| `VITE_API_BASE_URL`     | build time | API prefix, default `/api`                    |
-| `VITE_API_PROXY_TARGET` | dev server | Proxy target, default `http://localhost:8080` |
+| Variable                | Scope      | Description                                 |
+| ----------------------- | ---------- | ------------------------------------------- |
+| `VITE_API_BASE_URL`     | build time | API origin, default `http://localhost:8080` |
+| `VITE_API_PROXY_TARGET` | dev server | Optional proxy target; unused by default    |
 
 `VITE_*` values are public and embedded in the browser bundle. Never put
-secrets in this project. For a production build, set `VITE_API_BASE_URL` to the
-deployed Function URL:
-
-```bash
-VITE_API_BASE_URL='https://your-function-url/' corepack pnpm build
-```
+secrets in this project. The browser calls the API directly. The API allows the
+UI origin through CORS with credentials, so the HttpOnly `pico_auth` cookie is
+sent. In production, use `SameSite=None; Secure` for a cross-site cookie.
 
 ## Routes
 
 | Path                               | Screen                     |
 | ---------------------------------- | -------------------------- |
 | `/signup`                          | Signup page                |
+| `/login`                           | Sign-in page               |
 | `/verify-email`                    | Email verification         |
 | `/api-docs`                        | Public API documentation   |
 | `/orgs`                            | Organization list + create |
@@ -161,13 +161,17 @@ VITE_API_BASE_URL='https://your-function-url/' corepack pnpm build
   credit. Filters use a compact toolbar, and tag entry creates removable badges
   on comma or Enter. Applying filters resets to the first page; creating or
   deleting reloads the current page and totals.
-- `src/features/auth/error-message.ts` maps signup `400`, `409`, `502`, network,
-  and unknown failures to safe messages.
+- `src/features/auth/error-message.ts` maps signup and login errors to safe
+  messages.
 - Success responses switch to the check-your-email state.
 - The verification page reads `token` from the URL fragment and posts it to the
-  API. It stores the returned `userId` and `email` as a temporary session.
-- `/orgs` requires that session and sends `userId` as a query parameter.
-- The org workspace sends `orgId` and `userId` for projects and expenses.
+  API, then sends the user to `/login`.
+- `/login` posts credentials to `/auth/login`; the backend sets the HttpOnly
+  `pico_auth` cookie. `AuthProvider` restores the session from `/auth/session`
+  and exposes login, logout, and the current user.
+- Protected routes render inside `RequireSession`; the workspace sends `orgId`
+  and the legacy `userId` query parameter while the backend migrates fully to
+  cookie authentication.
 - Expense amounts are entered in major units and converted to minor units using
   the currency exponent.
 
@@ -193,7 +197,8 @@ touch the network.
 
 ## Known limitations
 
-- No login or real session. The stored user ID is temporary and spoofable.
+- Access tokens are stateless and cannot be revoked before they expire; signing
+  out clears the cookie only.
 - No resend UI yet.
 - No organization settings or membership screens.
 - No standalone project management screens; project creation opens in a dialog

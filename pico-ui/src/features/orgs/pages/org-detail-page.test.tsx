@@ -1,14 +1,16 @@
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { getSession, storeSession } from "@/features/auth/session"
+import type { Session } from "@/features/auth/session"
+import { RequireSession } from "@/features/auth/auth-provider"
 import { OrgDetailPage } from "@/features/orgs/pages/org-detail-page"
 import type { Org } from "@/features/orgs/types"
 import type { Project } from "@/features/projects/types"
+import { AuthTestProvider } from "@/test/auth"
 
-const session = {
+const session: Session = {
   userId: "user-1",
   email: "ada@example.com",
 }
@@ -132,35 +134,34 @@ function projectListURLs(fetchMock: ReturnType<typeof stubApi>): URL[] {
     .map(([url]) => new URL(String(url), "http://localhost"))
 }
 
-function renderOrgDetail() {
+function renderOrgDetail(initialSession: Session | null = session) {
   return render(
-    <MemoryRouter initialEntries={["/orgs/org-1"]}>
-      <Routes>
-        <Route path="/orgs/:orgId" element={<OrgDetailPage />} />
-        <Route path="/orgs" element={<div>Organizations destination</div>} />
-        <Route path="/signup" element={<div>Signup destination</div>} />
-      </Routes>
-    </MemoryRouter>
+    <AuthTestProvider session={initialSession}>
+      <MemoryRouter initialEntries={["/orgs/org-1"]}>
+        <Routes>
+          <Route element={<RequireSession />}>
+            <Route path="/orgs/:orgId" element={<OrgDetailPage />} />
+          </Route>
+          <Route path="/orgs" element={<div>Organizations destination</div>} />
+          <Route path="/login" element={<div>Login destination</div>} />
+        </Routes>
+      </MemoryRouter>
+    </AuthTestProvider>
   )
 }
-
-beforeEach(() => {
-  localStorage.clear()
-})
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe("OrgDetailPage", () => {
-  it("redirects to signup without a session", () => {
-    renderOrgDetail()
+  it("redirects to login without a session", () => {
+    renderOrgDetail(null)
 
-    expect(screen.getByText("Signup destination")).toBeInTheDocument()
+    expect(screen.getByText("Login destination")).toBeInTheDocument()
   })
 
   it("loads the organization, projects, and project tags", async () => {
-    storeSession(session)
     const fetchMock = stubApi({ projects: [general] })
 
     renderOrgDetail()
@@ -187,7 +188,6 @@ describe("OrgDetailPage", () => {
   })
 
   it("opens project creation in a modal when none exist", async () => {
-    storeSession(session)
     stubApi({ projects: [] })
     const userEventInstance = userEvent.setup()
 
@@ -208,7 +208,6 @@ describe("OrgDetailPage", () => {
   })
 
   it("closes project creation without submitting on cancel", async () => {
-    storeSession(session)
     const fetchMock = stubApi({ projects: [] })
     const userEventInstance = userEvent.setup()
 
@@ -232,7 +231,6 @@ describe("OrgDetailPage", () => {
   })
 
   it("creates a project with tags and adds it to the list", async () => {
-    storeSession(session)
     const fetchMock = stubApi({ projects: [] })
     const userEventInstance = userEvent.setup()
 
@@ -274,7 +272,6 @@ describe("OrgDetailPage", () => {
   })
 
   it("filters projects server-side with any-match tags", async () => {
-    storeSession(session)
     const fetchMock = stubApi({
       projects: [general, foodProject, mixedProject],
     })
@@ -317,7 +314,6 @@ describe("OrgDetailPage", () => {
   })
 
   it("toggles a project tag from the card into the filter", async () => {
-    storeSession(session)
     const fetchMock = stubApi({
       projects: [general, foodProject],
     })
@@ -355,7 +351,6 @@ describe("OrgDetailPage", () => {
   })
 
   it("shows a filtered empty state and clears the filter", async () => {
-    storeSession(session)
     stubApi({ projects: [general] })
     const userEventInstance = userEvent.setup()
 
@@ -382,7 +377,6 @@ describe("OrgDetailPage", () => {
   })
 
   it("edits project tags and refreshes the list", async () => {
-    storeSession(session)
     const fetchMock = stubApi({ projects: [general] })
     const userEventInstance = userEvent.setup()
 
@@ -421,7 +415,6 @@ describe("OrgDetailPage", () => {
   })
 
   it("shows a project list error with a retry action", async () => {
-    storeSession(session)
     stubApi({
       projectsResponse: jsonResponse({ error: "list failed" }, 500),
     })
@@ -437,7 +430,6 @@ describe("OrgDetailPage", () => {
   })
 
   it("shows organization-not-found with a back action", async () => {
-    storeSession(session)
     stubApi({
       orgResponse: jsonResponse({ error: "org not found" }, 404),
     })
@@ -453,14 +445,12 @@ describe("OrgDetailPage", () => {
   })
 
   it("clears a stale user session", async () => {
-    storeSession(session)
     stubApi({
       orgResponse: jsonResponse({ error: "user not found" }, 404),
     })
 
     renderOrgDetail()
 
-    expect(await screen.findByText("Signup destination")).toBeInTheDocument()
-    expect(getSession()).toBeNull()
+    expect(await screen.findByText("Login destination")).toBeInTheDocument()
   })
 })

@@ -10,7 +10,7 @@
 - pnpm 12 via Corepack. Do not use npm or yarn.
 - Vitest 5 and React Testing Library for UI tests.
 - The backend is the Go service in `../picoservice`.
-- Current scope is signup, email verification, an organization dashboard,
+- Current scope is signup, login, email verification, an organization dashboard,
   organization list/create, project list/create, and project debits and credits.
   An organization shows project names, currencies, and tags; opening a project
   shows that project's debits and credits. Projects are created in a dialog from
@@ -36,10 +36,12 @@
   tag toggles it in the compact filter toolbar.
 - `/api-docs` is a public, searchable, in-app API reference covering every
   backend endpoint. Content lives in typed data under `src/features/api-docs`.
-- Login, organization settings, memberships, project rename/delete, and expense
-  edit are not implemented yet.
-- After verification, the UI stores the returned user ID and email in
-  `localStorage` as a temporary session. This is not authentication.
+- Organization settings, memberships, project rename/delete, and expense edit are
+  not implemented yet.
+- Login posts to `/auth/login`; the backend sets an HttpOnly `pico_auth` JWT
+  cookie. `AuthProvider` restores the session from `/auth/session` on load and
+  exposes login, logout, and the current user. Never store tokens in
+  `localStorage`.
 
 ## Read first
 
@@ -76,7 +78,7 @@ src/
 │   └── theme-provider.tsx    # Existing theme provider
 ├── features/
 │   ├── api-docs/           # Public searchable API reference
-│   ├── auth/               # Signup, verification, temporary session
+│   ├── auth/               # Signup, login, verification, session
 │   ├── dashboard/          # Workspace totals, project flow, recent activity
 │   ├── design-system/      # Public palette/type/pattern style tile
 │   ├── expenses/           # Expenses, debit/credit, filters, totals, money
@@ -117,9 +119,9 @@ Boundaries:
   any-match semantics; expense tags require all tags to match. Keep this
   difference explicit in the UI and docs.
 - **State:** local React state first. Do not add a global store or data-fetching
-  library until there is a repeated need. The temporary `pico.session` user ID
-  and email may be stored in `localStorage`; never store passwords or access
-  tokens there.
+  library until there is a repeated need. The authenticated session lives in
+  `AuthProvider` and is restored from `/auth/session`; never store passwords or
+  access tokens in `localStorage`.
 - **Forms:** controlled fields with a small pure validation function. Mirror
   backend constraints (name 120 bytes, email 254 bytes, password 8–72 bytes).
   Projects own a currency; expense amounts are positive decimal values converted
@@ -138,7 +140,8 @@ Boundaries:
   `text-label` instead of one-off display sizes. Credit is `chart-2`, debit is
   `primary`. Keep `/design` in sync when tokens change.
 - **Routing:** register routes in `src/app/router.tsx`. `/` redirects to
-  `/orgs` when a temporary session exists, otherwise `/signup`.
+  `/orgs` when authenticated, otherwise `/login`. Protected routes render inside
+  `RequireSession`.
 - **Environment:** only `VITE_*` variables belong in the browser bundle. They are
   public. Never put secrets in the UI. Keep `.env.example` current.
 - **Tests:** every behavior change needs a test. Mock `fetch`; never call a real

@@ -1,6 +1,6 @@
 import { useState, type ComponentType, type ReactNode } from "react"
-import { Link, useLocation } from "react-router"
-import { BookOpenIcon, Building2Icon, MenuIcon } from "lucide-react"
+import { Link, useLocation, useNavigate } from "react-router"
+import { BookOpenIcon, Building2Icon, LogOutIcon, MenuIcon } from "lucide-react"
 
 import { Brand } from "@/components/brand"
 import { Button } from "@/components/ui/button"
@@ -13,11 +13,12 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "@/components/ui/sheet"
-import type { TemporarySession } from "@/features/auth/session"
+import { useAuth } from "@/features/auth/auth-provider"
+import type { Session } from "@/features/auth/session"
 import { cn } from "cn"
 
 type AppShellProps = {
-  session: TemporarySession
+  session: Session
   children: ReactNode
 }
 
@@ -116,7 +117,7 @@ export function AppShell({ session, children }: AppShellProps) {
                   Workspace
                 </SheetTitle>
                 <SheetDescription className="text-sidebar-foreground/60">
-                  Navigate Pico and review your temporary session.
+                  Navigate Pico and manage your session.
                 </SheetDescription>
               </SheetHeader>
               <nav
@@ -213,7 +214,7 @@ function NavigationLink({
   )
 }
 
-function SidebarSession({ session }: { session: TemporarySession }) {
+function SidebarSession({ session }: { session: Session }) {
   return (
     <div className="border-t border-sidebar-border p-3">
       <SessionSummary session={session} />
@@ -221,23 +222,35 @@ function SidebarSession({ session }: { session: TemporarySession }) {
   )
 }
 
-function SessionSummary({ session }: { session: TemporarySession }) {
+function SessionSummary({ session }: { session: Session }) {
+  const { logout } = useAuth()
+  const navigate = useNavigate()
   const initial = session.email.trim().charAt(0).toUpperCase() || "P"
+
+  function handleLogout() {
+    void logout().then(() => navigate("/login", { replace: true }))
+  }
 
   return (
     <div className="flex items-center gap-2.5 rounded-md border border-sidebar-border bg-sidebar-accent/60 p-2.5">
       <div className="flex size-8 shrink-0 items-center justify-center rounded-full bg-sidebar-primary text-xs font-semibold text-sidebar-primary-foreground">
         {initial}
       </div>
-      <div className="min-w-0">
+      <div className="min-w-0 flex-1">
         <p className="truncate text-xs font-medium">{session.email}</p>
-        <p
-          className="truncate text-[10px] tracking-wide text-sidebar-foreground/50 uppercase"
-          title="Temporary identity. This is not authentication."
-        >
-          Temporary session · {session.userId.slice(0, 8)}…
+        <p className="truncate text-[10px] tracking-wide text-sidebar-foreground/50 uppercase">
+          Signed in
         </p>
       </div>
+      <button
+        type="button"
+        onClick={handleLogout}
+        aria-label="Sign out"
+        title="Sign out"
+        className="flex size-7 shrink-0 items-center justify-center rounded-md text-sidebar-foreground/60 transition-colors hover:bg-sidebar-accent hover:text-sidebar-foreground focus-visible:ring-3 focus-visible:ring-sidebar-ring/50 focus-visible:outline-none"
+      >
+        <LogOutIcon className="size-4" aria-hidden="true" />
+      </button>
     </div>
   )
 }

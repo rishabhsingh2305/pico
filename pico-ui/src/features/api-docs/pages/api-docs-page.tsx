@@ -18,12 +18,13 @@ import { ApiEndpointCard } from "@/features/api-docs/components/api-endpoint-car
 import { CodeBlock } from "@/features/api-docs/components/code-block"
 import { CopyButton } from "@/features/api-docs/components/copy-button"
 import type { ApiEndpoint, ApiSection } from "@/features/api-docs/types"
-import { getSession } from "@/features/auth/session"
+import { useAuth } from "@/features/auth/auth-provider"
 import { usePageTitle } from "@/hooks/use-page-title"
 import { API_BASE_URL } from "@/lib/env"
 
 export function ApiDocsPage() {
-  const session = getSession()
+  const { session, status } = useAuth()
+  const authenticated = status === "ready" && Boolean(session)
   const [query, setQuery] = useState("")
   usePageTitle("API docs · Pico")
 
@@ -56,10 +57,10 @@ export function ApiDocsPage() {
               API reference
             </Badge>
             <Link
-              to={session ? "/orgs" : "/signup"}
+              to={authenticated ? "/orgs" : "/login"}
               className={buttonVariants({ variant: "outline", size: "sm" })}
             >
-              {session ? "Back to app" : "Create an account"}
+              {authenticated ? "Back to app" : "Sign in"}
             </Link>
           </div>
         </div>

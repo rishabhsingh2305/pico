@@ -4,6 +4,7 @@ package fakes
 import (
 	"context"
 	"log/slog"
+	"time"
 
 	"picoservice/internal/controllers"
 	"picoservice/internal/entities"
@@ -14,6 +15,7 @@ import (
 // Services groups fake service implementations for router tests.
 type Services struct {
 	Users       *UserService
+	Auth        *AuthService
 	Orgs        *OrgService
 	Memberships *MembershipService
 	Projects    *ProjectService
@@ -25,6 +27,7 @@ type Services struct {
 func NewServices() Services {
 	return Services{
 		Users:       &UserService{},
+		Auth:        &AuthService{},
 		Orgs:        &OrgService{},
 		Memberships: &MembershipService{},
 		Projects:    &ProjectService{},
@@ -35,13 +38,16 @@ func NewServices() Services {
 // Deps returns router dependencies backed by the fake services.
 func (s Services) Deps(logger *slog.Logger, pinger controllers.Pinger) routes.Deps {
 	return routes.Deps{
-		Logger:      logger,
-		Pinger:      pinger,
-		Users:       s.Users,
-		Orgs:        s.Orgs,
-		Memberships: s.Memberships,
-		Projects:    s.Projects,
-		Expenses:    s.Expenses,
+		Logger:         logger,
+		Pinger:         pinger,
+		Users:          s.Users,
+		Auth:           s.Auth,
+		Orgs:           s.Orgs,
+		Memberships:    s.Memberships,
+		Projects:       s.Projects,
+		Expenses:       s.Expenses,
+		SecureCookies:  false,
+		AllowedOrigins: []string{"http://localhost:5173"},
 	}
 }
 
@@ -115,6 +121,38 @@ func (s *UserService) Exists(ctx context.Context, id string) (bool, error) {
 		return s.Existing[id], nil
 	}
 	return true, nil
+}
+
+// AuthService is a configurable fake authentication service.
+type AuthService struct {
+	LoginFunc        func(context.Context, string, string) (services.LoginResult, error)
+	SessionFunc      func(context.Context, string) (entities.User, time.Time, error)
+	ParseSubjectFunc func(string) (string, error)
+}
+
+func (s *AuthService) Login(ctx context.Context, email, password string) (services.LoginResult, error) {
+	if s.LoginFunc != nil {
+		return s.LoginFunc(ctx, email, password)
+	}
+	return services.LoginResult{
+		User:      entities.User{ID: "user-1", Email: email, EmailVerified: true},
+		Token:     "token-1",
+		ExpiresAt: time.Now().UTC().Add(time.Hour),
+	}, nil
+}
+
+func (s *AuthService) Session(ctx context.Context, token string) (entities.User, time.Time, error) {
+	if s.SessionFunc != nil {
+		return s.SessionFunc(ctx, token)
+	}
+	return entities.User{ID: "user-1", EmailVerified: true}, time.Now().UTC().Add(time.Hour), nil
+}
+
+func (s *AuthService) ParseSubject(token string) (string, error) {
+	if s.ParseSubjectFunc != nil {
+		return s.ParseSubjectFunc(token)
+	}
+	return "", entities.ErrInvalidToken
 }
 
 // OrgService is a configurable fake organization service.

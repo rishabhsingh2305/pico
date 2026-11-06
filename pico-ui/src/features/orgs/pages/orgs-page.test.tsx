@@ -1,13 +1,15 @@
 import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { getSession, storeSession } from "@/features/auth/session"
+import type { Session } from "@/features/auth/session"
+import { RequireSession } from "@/features/auth/auth-provider"
 import { OrgsPage } from "@/features/orgs/pages/orgs-page"
 import type { Org } from "@/features/orgs/types"
+import { AuthTestProvider } from "@/test/auth"
 
-const session = {
+const session: Session = {
   userId: "user-1",
   email: "ada@example.com",
 }
@@ -38,34 +40,33 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as Response
 }
 
-function renderOrgsPage() {
+function renderOrgsPage(initialSession: Session | null = session) {
   return render(
-    <MemoryRouter initialEntries={["/orgs"]}>
-      <Routes>
-        <Route path="/orgs" element={<OrgsPage />} />
-        <Route path="/signup" element={<div>Signup destination</div>} />
-      </Routes>
-    </MemoryRouter>
+    <AuthTestProvider session={initialSession}>
+      <MemoryRouter initialEntries={["/orgs"]}>
+        <Routes>
+          <Route element={<RequireSession />}>
+            <Route path="/orgs" element={<OrgsPage />} />
+          </Route>
+          <Route path="/login" element={<div>Login destination</div>} />
+        </Routes>
+      </MemoryRouter>
+    </AuthTestProvider>
   )
 }
-
-beforeEach(() => {
-  localStorage.clear()
-})
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe("OrgsPage", () => {
-  it("redirects to signup without a session", () => {
-    renderOrgsPage()
+  it("redirects to login without a session", () => {
+    renderOrgsPage(null)
 
-    expect(screen.getByText("Signup destination")).toBeInTheDocument()
+    expect(screen.getByText("Login destination")).toBeInTheDocument()
   })
 
   it("loads and renders organizations", async () => {
-    storeSession(session)
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>().mockResolvedValueOnce(
@@ -99,7 +100,6 @@ describe("OrgsPage", () => {
   })
 
   it("shows an empty state", async () => {
-    storeSession(session)
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse({ items: [] }))
@@ -111,7 +111,6 @@ describe("OrgsPage", () => {
   })
 
   it("creates an organization with tags and prepends it", async () => {
-    storeSession(session)
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ items: [] }))
@@ -147,7 +146,6 @@ describe("OrgsPage", () => {
   })
 
   it("filters organizations by tag", async () => {
-    storeSession(session)
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input), "http://localhost")
       const method = init?.method ?? "GET"
@@ -185,7 +183,6 @@ describe("OrgsPage", () => {
   })
 
   it("shows a filtered empty state", async () => {
-    storeSession(session)
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>(async (input, init) => {
@@ -219,7 +216,6 @@ describe("OrgsPage", () => {
   })
 
   it("edits organization tags from the card", async () => {
-    storeSession(session)
     const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
       const url = new URL(String(input), "http://localhost")
       const method = init?.method ?? "GET"
@@ -261,7 +257,6 @@ describe("OrgsPage", () => {
   })
 
   it("validates the organization name before submitting", async () => {
-    storeSession(session)
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockResolvedValueOnce(jsonResponse({ items: [] }))
@@ -280,7 +275,6 @@ describe("OrgsPage", () => {
   })
 
   it("shows create errors", async () => {
-    storeSession(session)
     vi.stubGlobal(
       "fetch",
       vi
@@ -305,8 +299,7 @@ describe("OrgsPage", () => {
     ).toBeInTheDocument()
   })
 
-  it("clears a stale session and redirects to signup", async () => {
-    storeSession(session)
+  it("clears a stale session and redirects to login", async () => {
     vi.stubGlobal(
       "fetch",
       vi
@@ -316,12 +309,10 @@ describe("OrgsPage", () => {
 
     renderOrgsPage()
 
-    expect(await screen.findByText("Signup destination")).toBeInTheDocument()
-    expect(getSession()).toBeNull()
+    expect(await screen.findByText("Login destination")).toBeInTheDocument()
   })
 
   it("shows a list error and retries", async () => {
-    storeSession(session)
     vi.stubGlobal(
       "fetch",
       vi

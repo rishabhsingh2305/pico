@@ -17,7 +17,7 @@ import { Input } from "@/components/ui/input"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Spinner } from "@/components/ui/spinner"
 import { Textarea } from "@/components/ui/textarea"
-import { isUserNotFoundError } from "@/features/auth/session"
+import { isSessionInvalidError } from "@/features/auth/session"
 import { TagInput } from "@/components/tag-input"
 import { createExpense } from "@/features/expenses/api"
 import { expenseErrorMessage } from "@/features/expenses/error-message"
@@ -113,7 +113,7 @@ export function CreateExpenseForm({
       setIsSubmitting(false)
       onCreated(expense)
     } catch (error) {
-      if (isUserNotFoundError(error)) {
+      if (isSessionInvalidError(error)) {
         onSessionInvalid()
         return
       }

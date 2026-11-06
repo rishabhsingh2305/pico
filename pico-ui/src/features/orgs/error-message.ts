@@ -10,7 +10,7 @@ export function orgErrorMessage(error: unknown): string {
       case 403:
         return "You do not have permission to do that."
       case 404:
-        return "Your temporary session is no longer valid. Sign up again."
+        return "Your session is no longer valid. Sign in again."
       default:
         return GENERIC_ERROR
     }

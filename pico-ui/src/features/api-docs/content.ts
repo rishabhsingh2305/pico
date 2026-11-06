@@ -2,9 +2,9 @@ import type { ApiParameter, ApiSection } from "@/features/api-docs/types"
 
 const userIdParam: ApiParameter = {
   name: "userId",
-  required: true,
+  required: false,
   description:
-    "Temporary actor identity. The backend trusts this value; it is not authentication.",
+    "Temporary actor fallback. Protected routes use the pico_auth JWT cookie; userId is only used when no cookie is present and is not secure authentication.",
 }
 
 const orgIdParam: ApiParameter = {
@@ -142,6 +142,75 @@ export const API_SECTIONS: ApiSection[] = [
           description: "Empty body.",
         },
         errors: ["503 — database unavailable"],
+      },
+    ],
+  },
+  {
+    id: "authentication",
+    title: "Authentication",
+    description:
+      "Login verifies credentials and sets an HttpOnly JWT cookie. Protected routes use that cookie; the userId query parameter remains a temporary fallback.",
+    endpoints: [
+      {
+        id: "auth-login",
+        method: "POST",
+        path: "/auth/login",
+        title: "Sign in",
+        summary:
+          "Verifies an email and password, then sets the pico_auth cookie. The email must already be verified.",
+        access: "Public",
+        requestBody: `{
+  "email": "ada@example.com",
+  "password": "correct horse battery staple"
+}`,
+        response: {
+          status: 200,
+          description:
+            "Signed in. The response sets an HttpOnly, SameSite=Lax cookie valid for 7 days.",
+          body: `{
+  "user": ${userExample.replace(/\n/g, "\n  ")},
+  "expiresAt": "2026-01-09T12:30:00Z"
+}`,
+        },
+        errors: [
+          "400 — validation error or malformed JSON",
+          "401 — invalid email or password",
+          "403 — the email address is not verified",
+        ],
+        notes: [
+          "Unknown emails run a dummy bcrypt comparison so response timing does not reveal whether an account exists.",
+          "Access tokens are stateless and cannot be revoked before they expire. Signing out clears the cookie only.",
+        ],
+      },
+      {
+        id: "auth-logout",
+        method: "POST",
+        path: "/auth/logout",
+        title: "Sign out",
+        summary: "Clears the pico_auth cookie.",
+        access: "Public",
+        response: {
+          status: 204,
+          description: "Signed out. No response body.",
+        },
+      },
+      {
+        id: "auth-session",
+        method: "GET",
+        path: "/auth/session",
+        title: "Get the current session",
+        summary:
+          "Validates the pico_auth cookie and returns the current user and token expiry.",
+        access: "User",
+        response: {
+          status: 200,
+          description: "The current user.",
+          body: `{
+  "user": ${userExample.replace(/\n/g, "\n  ")},
+  "expiresAt": "2026-01-09T12:30:00Z"
+}`,
+        },
+        errors: ["401 — the cookie is missing, invalid, or expired"],
       },
     ],
   },
@@ -876,7 +945,7 @@ export const COMMON_ERRORS = [
   {
     status: "404",
     description:
-      "Resource missing or malformed ObjectID. Some routes also use 404 for a missing user in the temporary identity model.",
+      "Resource missing or malformed ObjectID. Protected routes also return 404 for a missing user on the temporary userId fallback.",
   },
   {
     status: "405",

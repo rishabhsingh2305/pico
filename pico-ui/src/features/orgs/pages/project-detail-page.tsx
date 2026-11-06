@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useId, useState } from "react"
-import { Navigate, useNavigate, useParams } from "react-router"
+import { useNavigate, useParams } from "react-router"
 import { ArrowLeftIcon, CircleAlertIcon, PlusIcon } from "lucide-react"
 
 import { AppShell } from "@/components/app-shell"
@@ -16,12 +16,8 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  clearSession,
-  getSession,
-  isUserNotFoundError,
-  type TemporarySession,
-} from "@/features/auth/session"
+import { useAuth, useSession } from "@/features/auth/auth-provider"
+import { isSessionInvalidError, type Session } from "@/features/auth/session"
 import { CreateExpenseForm } from "@/features/expenses/components/create-expense-form"
 import { ExpenseFilterForm } from "@/features/expenses/components/expense-filter-form"
 import { ExpenseList } from "@/features/expenses/components/expense-list"
@@ -51,19 +47,17 @@ const EMPTY_PAGE: ExpensePage = {
 }
 
 export function ProjectDetailPage() {
-  const session = getSession()
-  if (!session) {
-    return <Navigate to="/signup" replace />
-  }
+  const session = useSession()
   return <ProjectDetailView session={session} />
 }
 
-function ProjectDetailView({ session }: { session: TemporarySession }) {
+function ProjectDetailView({ session }: { session: Session }) {
   const { orgId = "", projectId = "" } = useParams<{
     orgId: string
     projectId: string
   }>()
   const navigate = useNavigate()
+  const { logout } = useAuth()
   const expenseDialogTriggerId = useId()
 
   const [org, setOrg] = useState<Org | null>(null)
@@ -85,9 +79,9 @@ function ProjectDetailView({ session }: { session: TemporarySession }) {
   usePageTitle(project ? `${project.name} · Pico` : "Project · Pico")
 
   const sessionInvalid = useCallback(() => {
-    clearSession()
-    navigate("/signup", { replace: true })
-  }, [navigate])
+    void logout()
+    navigate("/login", { replace: true })
+  }, [logout, navigate])
 
   useEffect(() => {
     let cancelled = false
@@ -107,7 +101,7 @@ function ProjectDetailView({ session }: { session: TemporarySession }) {
         if (cancelled) {
           return
         }
-        if (isUserNotFoundError(loadError)) {
+        if (isSessionInvalidError(loadError)) {
           sessionInvalid()
           return
         }
@@ -144,7 +138,7 @@ function ProjectDetailView({ session }: { session: TemporarySession }) {
         if (cancelled) {
           return
         }
-        if (isUserNotFoundError(loadError)) {
+        if (isSessionInvalidError(loadError)) {
           sessionInvalid()
           return
         }
@@ -223,7 +217,7 @@ function ProjectDetailView({ session }: { session: TemporarySession }) {
         setRefreshKey((current) => current + 1)
       }
     } catch (deleteFailure) {
-      if (isUserNotFoundError(deleteFailure)) {
+      if (isSessionInvalidError(deleteFailure)) {
         sessionInvalid()
         return
       }

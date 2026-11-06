@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type ReactNode } from "react"
-import { Navigate, Link, useNavigate, useParams } from "react-router"
+import { Link, useNavigate, useParams } from "react-router"
 import { ArrowLeftIcon, CircleAlertIcon } from "lucide-react"
 
 import { AppShell } from "@/components/app-shell"
@@ -7,12 +7,8 @@ import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button, buttonVariants } from "@/components/ui/button"
 import { Spinner } from "@/components/ui/spinner"
-import {
-  clearSession,
-  getSession,
-  isUserNotFoundError,
-  type TemporarySession,
-} from "@/features/auth/session"
+import { useAuth, useSession } from "@/features/auth/auth-provider"
+import { isSessionInvalidError, type Session } from "@/features/auth/session"
 import { DashboardSummary } from "@/features/dashboard/components/dashboard-summary"
 import { ProjectFlow } from "@/features/dashboard/components/project-flow"
 import { RecentActivity } from "@/features/dashboard/components/recent-activity"
@@ -40,16 +36,14 @@ type DashboardData = {
 }
 
 export function OrgDashboardPage() {
-  const session = getSession()
-  if (!session) {
-    return <Navigate to="/signup" replace />
-  }
+  const session = useSession()
   return <OrgDashboardView session={session} />
 }
 
-function OrgDashboardView({ session }: { session: TemporarySession }) {
+function OrgDashboardView({ session }: { session: Session }) {
   const { orgId = "" } = useParams<{ orgId: string }>()
   const navigate = useNavigate()
+  const { logout } = useAuth()
 
   const [org, setOrg] = useState<Org | null>(null)
   const [data, setData] = useState<DashboardData | null>(null)
@@ -61,9 +55,9 @@ function OrgDashboardView({ session }: { session: TemporarySession }) {
   usePageTitle(org ? `${org.name} dashboard · Pico` : "Dashboard · Pico")
 
   const sessionInvalid = useCallback(() => {
-    clearSession()
-    navigate("/signup", { replace: true })
-  }, [navigate])
+    void logout()
+    navigate("/login", { replace: true })
+  }, [logout, navigate])
 
   useEffect(() => {
     let cancelled = false
@@ -105,7 +99,7 @@ function OrgDashboardView({ session }: { session: TemporarySession }) {
         if (cancelled) {
           return
         }
-        if (isUserNotFoundError(loadError)) {
+        if (isSessionInvalidError(loadError)) {
           sessionInvalid()
           return
         }

@@ -3,7 +3,13 @@ import { MemoryRouter } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AppRouter } from "@/app/router"
-import { storeSession } from "@/features/auth/session"
+import type { Session } from "@/features/auth/session"
+import { AuthTestProvider } from "@/test/auth"
+
+const session: Session = {
+  userId: "user-1",
+  email: "ada@example.com",
+}
 
 function jsonResponse(body: unknown, status = 200): Response {
   return {
@@ -13,35 +19,36 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as Response
 }
 
+function renderRouter(path: string, initialSession: Session | null = null) {
+  return render(
+    <AuthTestProvider session={initialSession}>
+      <MemoryRouter initialEntries={[path]}>
+        <AppRouter />
+      </MemoryRouter>
+    </AuthTestProvider>
+  )
+}
+
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe("AppRouter", () => {
-  it("redirects the root path to signup", async () => {
-    render(
-      <MemoryRouter initialEntries={["/"]}>
-        <AppRouter />
-      </MemoryRouter>
-    )
+  it("redirects the root path to login without a session", async () => {
+    renderRouter("/")
 
     expect(
-      await screen.findByRole("heading", { name: "Create your account" })
+      await screen.findByRole("heading", { name: "Sign in" })
     ).toBeInTheDocument()
   })
 
   it("redirects the root path to organizations with a session", async () => {
-    storeSession({ userId: "user-1", email: "ada@example.com" })
     vi.stubGlobal(
       "fetch",
       vi.fn<typeof fetch>().mockResolvedValueOnce(jsonResponse({ items: [] }))
     )
 
-    render(
-      <MemoryRouter initialEntries={["/"]}>
-        <AppRouter />
-      </MemoryRouter>
-    )
+    renderRouter("/", session)
 
     expect(
       await screen.findByRole("heading", { name: "Organizations" })
@@ -50,7 +57,6 @@ describe("AppRouter", () => {
   })
 
   it("renders the organization dashboard route", async () => {
-    storeSession({ userId: "user-1", email: "ada@example.com" })
     const org = {
       id: "org-1",
       name: "Acme",
@@ -83,11 +89,7 @@ describe("AppRouter", () => {
       })
     )
 
-    render(
-      <MemoryRouter initialEntries={["/orgs/org-1/dashboard"]}>
-        <AppRouter />
-      </MemoryRouter>
-    )
+    renderRouter("/orgs/org-1/dashboard", session)
 
     expect(
       await screen.findByRole("heading", { name: "Dashboard" })
@@ -96,26 +98,16 @@ describe("AppRouter", () => {
   })
 
   it("renders the public API docs route", async () => {
-    render(
-      <MemoryRouter initialEntries={["/api-docs"]}>
-        <AppRouter />
-      </MemoryRouter>
-    )
+    renderRouter("/api-docs")
 
     expect(
       await screen.findByRole("heading", { name: "Pico API" })
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole("link", { name: "Create an account" })
-    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Sign in" })).toBeInTheDocument()
   })
 
   it("renders the public design system route", async () => {
-    render(
-      <MemoryRouter initialEntries={["/design"]}>
-        <AppRouter />
-      </MemoryRouter>
-    )
+    renderRouter("/design")
 
     expect(
       await screen.findByRole("heading", { name: "Design system" })
@@ -124,11 +116,7 @@ describe("AppRouter", () => {
   })
 
   it("renders the signup route", async () => {
-    render(
-      <MemoryRouter initialEntries={["/signup"]}>
-        <AppRouter />
-      </MemoryRouter>
-    )
+    renderRouter("/signup")
 
     expect(
       await screen.findByRole("heading", { name: "Create your account" })
@@ -136,11 +124,7 @@ describe("AppRouter", () => {
   })
 
   it("renders the verification route", async () => {
-    render(
-      <MemoryRouter initialEntries={["/verify-email"]}>
-        <AppRouter />
-      </MemoryRouter>
-    )
+    renderRouter("/verify-email")
 
     expect(
       await screen.findByRole("heading", {
@@ -150,7 +134,6 @@ describe("AppRouter", () => {
   })
 
   it("renders the organization detail route", async () => {
-    storeSession({ userId: "user-1", email: "ada@example.com" })
     const org = {
       id: "org-1",
       name: "Acme",
@@ -177,11 +160,7 @@ describe("AppRouter", () => {
       })
     )
 
-    render(
-      <MemoryRouter initialEntries={["/orgs/org-1"]}>
-        <AppRouter />
-      </MemoryRouter>
-    )
+    renderRouter("/orgs/org-1", session)
 
     expect(
       await screen.findByRole("heading", { name: "Acme" })
@@ -190,7 +169,6 @@ describe("AppRouter", () => {
   })
 
   it("renders the project detail route", async () => {
-    storeSession({ userId: "user-1", email: "ada@example.com" })
     const org = {
       id: "org-1",
       name: "Acme",
@@ -227,11 +205,7 @@ describe("AppRouter", () => {
       })
     )
 
-    render(
-      <MemoryRouter initialEntries={["/orgs/org-1/projects/project-1"]}>
-        <AppRouter />
-      </MemoryRouter>
-    )
+    renderRouter("/orgs/org-1/projects/project-1", session)
 
     expect(
       await screen.findByRole("heading", { name: "General" })
@@ -239,15 +213,11 @@ describe("AppRouter", () => {
     expect(await screen.findByText("No expenses yet")).toBeInTheDocument()
   })
 
-  it("redirects unknown paths to signup", async () => {
-    render(
-      <MemoryRouter initialEntries={["/missing"]}>
-        <AppRouter />
-      </MemoryRouter>
-    )
+  it("redirects unknown paths to login", async () => {
+    renderRouter("/missing")
 
     expect(
-      await screen.findByRole("heading", { name: "Create your account" })
+      await screen.findByRole("heading", { name: "Sign in" })
     ).toBeInTheDocument()
   })
 })

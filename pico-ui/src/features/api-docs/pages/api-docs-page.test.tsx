@@ -4,12 +4,15 @@ import { MemoryRouter } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { ApiDocsPage } from "@/features/api-docs/pages/api-docs-page"
+import { AuthTestProvider } from "@/test/auth"
 
 function renderDocs() {
   return render(
-    <MemoryRouter initialEntries={["/api-docs"]}>
-      <ApiDocsPage />
-    </MemoryRouter>
+    <AuthTestProvider session={null}>
+      <MemoryRouter initialEntries={["/api-docs"]}>
+        <ApiDocsPage />
+      </MemoryRouter>
+    </AuthTestProvider>
   )
 }
 
@@ -27,12 +30,14 @@ describe("ApiDocsPage", () => {
     expect(
       screen.getByRole("heading", { name: "Pico API" })
     ).toBeInTheDocument()
-    expect(
-      screen.getByRole("link", { name: "Create an account" })
-    ).toHaveAttribute("href", "/signup")
+    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute(
+      "href",
+      "/login"
+    )
 
     for (const section of [
       "Health",
+      "Authentication",
       "Users",
       "Email verification",
       "Organizations",

@@ -18,7 +18,7 @@ describe("orgErrorMessage", () => {
 
   it("maps stale sessions", () => {
     expect(orgErrorMessage(new ApiError(404, "user not found"))).toBe(
-      "Your temporary session is no longer valid. Sign up again."
+      "Your session is no longer valid. Sign in again."
     )
   })
 

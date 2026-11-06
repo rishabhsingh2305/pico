@@ -1,4 +1,5 @@
 import { useState } from "react"
+import { Link } from "react-router"
 
 import { CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { AuthShell } from "@/features/auth/components/auth-shell"
@@ -12,7 +13,23 @@ export function SignUpPage() {
   usePageTitle("Create your account · Pico")
 
   return (
-    <AuthShell footer={<p>Check your inbox to verify your email.</p>}>
+    <AuthShell
+      footer={
+        createdUser ? (
+          <p>Check your inbox to verify your email.</p>
+        ) : (
+          <p>
+            Already have an account?{" "}
+            <Link
+              to="/login"
+              className="font-medium text-foreground underline-offset-4 hover:underline"
+            >
+              Sign in
+            </Link>
+          </p>
+        )
+      }
+    >
       {createdUser ? (
         <CardContent>
           <SignUpSuccess

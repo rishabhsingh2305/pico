@@ -3,25 +3,27 @@
 ## Overview
 
 pico-ui is the browser client for the picoservice Go API. It is a React single
-page application built with Vite. The current features are account signup, email
-verification, an organization dashboard, organizations, projects, and project
-debits and credits.
+page application built with Vite. The current features are account signup,
+login, email verification, an organization dashboard, organizations, projects,
+and project debits and credits.
 
 ```text
 browser
-  -> React signup / verification / dashboard / organization / project / expense pages
-  -> requestJSON (fetch)
-  -> /api in development (Vite proxy) or VITE_API_BASE_URL in production
+  -> React signup / login / verification / dashboard / organization / project / expense pages
+  -> requestJSON (fetch, credentials: include)
+  -> VITE_API_BASE_URL (default http://localhost:8080) or the production API origin
   -> picoservice Lambda Function URL
-  -> POST /users, POST /auth/verify-email, GET/POST /orgs,
-     GET/POST /projects, GET/POST/DELETE /expenses
+  -> POST /users, POST /auth/login, POST /auth/logout, GET /auth/session,
+     POST /auth/verify-email, GET/POST /orgs, GET/POST /projects,
+     GET/POST/DELETE /expenses
   -> JSON response
 ```
 
 The backend sends a verification email as part of `POST /users`. The email link
 opens the UI at `/verify-email#token=...`; the UI reads the fragment and calls
-the API. Verification returns the user identity, which is stored temporarily for
-organization requests.
+the API. After verification the user signs in at `/login`, which sets an
+HttpOnly JWT cookie. `AuthProvider` restores the session from `/auth/session` on
+load.
 
 ## Structure
 
@@ -45,16 +47,19 @@ src/
 │   │   └── pages/
 │   │       └── api-docs-page.tsx
 │   ├── auth/
-│   │   ├── api.ts                   # Signup and verification requests
-│   │   ├── error-message.ts         # Safe signup error mapping
-│   │   ├── session.ts               # Temporary localStorage identity
-│   │   ├── types.ts                 # SignUpInput, User, VerificationResponse
-│   │   ├── validation.ts            # Pure signup validation
+│   │   ├── api.ts                   # Signup, login, logout, session, verification
+│   │   ├── auth-provider.tsx        # Session context and protected-route guard
+│   │   ├── error-message.ts         # Safe signup and login error mapping
+│   │   ├── session.ts               # Session shape and invalid-session detection
+│   │   ├── types.ts                 # SignUpInput, LoginInput, User, SessionResponse
+│   │   ├── validation.ts            # Pure signup and login validation
 │   │   ├── components/
 │   │   │   ├── auth-shell.tsx
+│   │   │   ├── login-form.tsx
 │   │   │   ├── sign-up-form.tsx
 │   │   │   └── sign-up-success.tsx
 │   │   └── pages/
+│   │       ├── login-page.tsx
 │   │       ├── sign-up-page.tsx
 │   │       └── verify-email-page.tsx
 │   ├── dashboard/
@@ -120,7 +125,7 @@ src/
 
 ## Signup flow
 
-1. Without a session, `/` and unknown paths redirect to `/signup`.
+1. Unauthenticated users land on `/login`; `/signup` is linked from there.
 2. `SignUpPage` renders the form.
 3. `validateSignUp` checks required fields, email shape, and byte limits.
 4. `signUp` posts `{name,email,password}` to `/users`.
@@ -131,46 +136,63 @@ src/
 The form is disabled while the request is in flight. The success state offers a
 "Use a different email" action that returns to an empty form.
 
+## Login flow
+
+1. `LoginPage` renders the email and password form.
+2. `validateLogin` checks the email shape and required password.
+3. `AuthProvider.login` posts `{email,password}` to `/auth/login`.
+4. The backend sets an HttpOnly `pico_auth` JWT cookie; the UI stores the
+   returned user in memory and navigates to `/orgs`.
+5. `401` maps to "Email or password is incorrect." and `403` maps to "Verify your
+   email before signing in."
+6. On reload, `AuthProvider` calls `GET /auth/session` to restore the user. A
+   `401` clears the session and protected routes redirect to `/login`.
+
+Tokens are never read by JavaScript or stored in `localStorage`. Signing out
+calls `/auth/logout` and clears the cookie.
+
 ## Email verification flow
 
 1. The backend sends a link to `{PUBLIC_BASE_URL}/verify-email#token=...`.
 2. The UI reads `token` from the URL fragment.
 3. `VerifyEmailPage` calls `POST /auth/verify-email` with `{"token":"..."}`.
-4. On success, the response includes `status`, `userId`, and `email`.
-5. The UI stores `{userId,email}` under `pico.session` in `localStorage`.
-6. The page shows loading, verified, expired/invalid, missing-token, or network
+4. On success, the page shows a "Continue to sign in" action.
+5. The page shows loading, verified, expired/invalid, missing-token, or network
    states.
-7. Network failures offer a retry action; the backend verification is
+6. Network failures offer a retry action; the backend verification is
    idempotent.
 
 The fragment is not sent to the static host or its access logs. The token is
-sent to the API only in the POST body.
+sent to the API only in the POST body. Verification does not create a session;
+the user signs in afterwards.
 
-## Temporary session and organizations
+## Authenticated workspace
 
-`pico.session` is a temporary identity handoff, not authentication. The backend
-still trusts query-parameter `userId`.
+Protected routes render inside `RequireSession`, which shows a loading state
+while `/auth/session` resolves and redirects to `/login` when there is no
+session.
 
-- `/` redirects to `/orgs` when a session exists, otherwise `/signup`.
-- `/orgs` redirects to `/signup` without a session.
-- `GET /orgs?userId=...&tags=...&limit=100` loads the organization list.
-- `POST /orgs?userId=...` creates an organization and its owner membership.
-- `PATCH /orgs/{orgID}?orgId=...&userId=...` updates the owner's organization
-  name or tags.
-- A `404` from either org request means the stored user is stale; the UI clears
-  the session and redirects to signup.
+- `/` redirects to `/orgs` when authenticated, otherwise `/login`.
+- `GET /orgs?tags=...&limit=100` loads the organization list.
+- `POST /orgs` creates an organization and its owner membership.
+- `PATCH /orgs/{orgID}?orgId=...` updates the owner's organization name or tags.
+- A `401` or a stale `404 user not found` clears the session and redirects to
+  `/login`.
 - New organizations are prepended when no tag filter is active; otherwise the
   filtered list reloads.
-- The workspace sidebar shows the temporary email and a shortened user ID.
+- The workspace sidebar shows the signed-in email and offers sign out.
+
+The legacy `userId` query parameter is still sent while the backend supports the
+temporary fallback; the auth cookie is the authoritative identity.
 
 ## Workspace shell
 
 Signed-in screens share `AppShell`: a persistent sidebar from the `lg` breakpoint,
 a compact mobile top bar with a sheet navigator, active navigation state, and a
-footer that labels the temporary session. `PageHeader` provides the shared
-eyebrow, title, description, and action layout. Auth screens use `AuthShell`
-with a split brand panel, while `/api-docs` keeps its public header so it works
-without a temporary session.
+footer that shows the signed-in user with a sign-out action. `PageHeader`
+provides the shared eyebrow, title, description, and action layout. Auth screens
+use `AuthShell` with a split brand panel, while `/api-docs` keeps its public
+header so it works without a session.
 
 ## Organization dashboard
 
@@ -312,12 +334,12 @@ separate type, and net totals subtract debits from credits.
 
 ## API documentation page
 
-`/api-docs` is public and does not require a temporary session. The page is a
+`/api-docs` is public and does not require a session. The page is a
 curated guide rather than generated Swagger output.
 
 - Content lives in typed data in `src/features/api-docs/content.ts`.
-- Sections cover health, users, email verification, organizations, memberships,
-  projects, expenses, and common error behavior.
+- Sections cover health, authentication, users, email verification,
+  organizations, memberships, projects, expenses, and common error behavior.
 - Each endpoint shows its method, path, access level, parameters, request/response
   examples, errors, and important notes.
 - Search filters endpoints by method, path, title, section, parameters, errors,
@@ -326,7 +348,7 @@ curated guide rather than generated Swagger output.
   examples.
 - The layout uses a sticky desktop sidebar and a collapsible mobile section
   navigator.
-- The page links back to `/orgs` with a session, otherwise `/signup`.
+- The page links back to `/orgs` when authenticated, otherwise `/login`.
 - The app header and auth shell link to the guide.
 
 The backend README and architecture document remain the canonical API contract.
@@ -334,6 +356,31 @@ When an endpoint, request shape, response shape, or rule changes, update
 `src/features/api-docs/content.ts` in the same change.
 
 ## API contract
+
+### `POST /auth/login`
+
+Request:
+
+```json
+{
+  "email": "ada@example.com",
+  "password": "correct horse"
+}
+```
+
+Success: `200` with `{"user":{...},"expiresAt":"..."}` and an HttpOnly
+`pico_auth` JWT cookie. Invalid credentials return `401`; unverified accounts
+return `403`. Login never returns the token in the response body.
+
+### `POST /auth/logout`
+
+Success: `204`. Clears the auth cookie. Tokens are stateless, so an already
+issued token remains valid until it expires.
+
+### `GET /auth/session`
+
+Success: `200` with `{"user":{...},"expiresAt":"..."}`. Missing, invalid, or
+expired cookies return `401`.
 
 ### `POST /users`
 
@@ -525,20 +572,23 @@ Organization errors:
 
 - `400` — server validation message
 - `403` — permission message
-- `404` — stale temporary session; clear it and redirect to signup
+- `401` — expired or invalid session; clear it and redirect to login
+- `404` — stale `userId` fallback; clear the session and redirect to login
 - network or other failures — retry or generic message
 
 ## Configuration
 
-| Variable                | Scope      | Purpose                                       |
-| ----------------------- | ---------- | --------------------------------------------- |
-| `VITE_API_BASE_URL`     | build time | API prefix, default `/api`                    |
-| `VITE_API_PROXY_TARGET` | dev server | Proxy target, default `http://localhost:8080` |
+| Variable                | Scope      | Purpose                                     |
+| ----------------------- | ---------- | ------------------------------------------- |
+| `VITE_API_BASE_URL`     | build time | API origin, default `http://localhost:8080` |
+| `VITE_API_PROXY_TARGET` | dev server | Optional proxy target; unused by default    |
 
-- Development uses the Vite proxy at `/api`. This avoids local CORS because the
-  Go local server does not add CORS middleware.
-- Production builds must set `VITE_API_BASE_URL` to the deployed Function URL.
-  `VITE_*` values are public and are embedded in the bundle.
+- The browser calls the API directly. The Go API allows `PUBLIC_BASE_URL`
+  through `middleware.CORS` with credentials, so the HttpOnly `pico_auth` cookie
+  is sent.
+- Production should use `SameSite=None; Secure` for a cross-site cookie. Local
+  development uses `SameSite=Lax` because localhost ports are same-site.
+- `VITE_*` values are public and are embedded in the bundle.
 - Copy `.env.example` to `.env.local` for local overrides. `.env` files are
   ignored; `.env.example` is committed.
 
@@ -547,15 +597,18 @@ Organization errors:
 `src/app/router.tsx` is the single route table:
 
 - `/signup` — signup page
-- `/verify-email` — reads the fragment token, verifies, and stores the session
+- `/login` — sign-in page
+- `/verify-email` — reads the fragment token and verifies it
 - `/api-docs` — public, searchable API reference
 - `/design` — public design-system style tile
 - `/orgs` — organization list and creation
 - `/orgs/:orgId` — project list for an organization
 - `/orgs/:orgId/dashboard` — organization dashboard
 - `/orgs/:orgId/projects/:projectId` — project expenses
-- `/` — redirects to `/orgs` or `/signup` based on the temporary session
+- `/` — redirects to `/orgs` when authenticated, otherwise `/login`
 - `*` — redirects through `/`
+
+Protected routes render inside `RequireSession`.
 
 `BrowserRouter` lives in `main.tsx` so tests can use `MemoryRouter`. A static
 host must serve `index.html` for unknown paths.
@@ -587,8 +640,8 @@ palette, type scale, and core patterns.
 
 ### React Router now
 
-A router is included because signup and verification are separate screens and
-login is the next obvious page. Route registration stays in one file.
+A router is included because signup, login, and verification are separate
+screens. Route registration stays in one file.
 
 ### Plain React state instead of a form library
 
@@ -608,12 +661,14 @@ screens need shared caching.
 disable `react-hooks/set-state-in-effect`. Application code keeps the strict
 rule.
 
-### Temporary localStorage session
+### HttpOnly JWT cookie session
 
-Email verification returns the user ID and email. The UI stores them under
-`pico.session` so organization requests can include `userId`. This avoids an
-extra identity screen until login exists. The identity is spoofable and is
-explicitly labeled as temporary in the UI.
+Login posts credentials to `/auth/login`, which sets an HttpOnly `pico_auth`
+JWT cookie. The browser sends it automatically because the UI and API allow each
+other through CORS with credentials. `AuthProvider` keeps the user in memory and
+restores it with `GET /auth/session`; no token is readable by JavaScript or
+stored in `localStorage`. Tokens are stateless, so sign-out clears the cookie
+without server-side revocation.
 
 ### Project-owned currency
 
@@ -707,8 +762,10 @@ it and refreshes the current page and totals.
 
 ## Known debt
 
-- No login, access token, or real session. The stored user ID is spoofable.
-- No session recovery when `localStorage` is cleared; the user must verify again.
+- Access tokens are stateless and cannot be revoked before they expire; signing
+  out clears the cookie only.
+- The legacy `userId` query parameter is still sent alongside the auth cookie
+  until the backend removes the temporary fallback.
 - No resend UI; an expired link has no recovery path in the UI yet.
 - No organization settings or membership screens.
 - The editorial visual system currently covers the shell, page headers, org

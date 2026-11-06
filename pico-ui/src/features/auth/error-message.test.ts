@@ -1,7 +1,30 @@
 import { describe, expect, it } from "vitest"
 
 import { ApiError } from "@/lib/api-client"
-import { signUpErrorMessage } from "@/features/auth/error-message"
+import {
+  loginErrorMessage,
+  signUpErrorMessage,
+} from "@/features/auth/error-message"
+
+describe("loginErrorMessage", () => {
+  it("maps invalid credentials", () => {
+    expect(
+      loginErrorMessage(new ApiError(401, "invalid email or password"))
+    ).toBe("Email or password is incorrect.")
+  })
+
+  it("maps unverified emails", () => {
+    expect(loginErrorMessage(new ApiError(403, "email not verified"))).toBe(
+      "Verify your email before signing in."
+    )
+  })
+
+  it("maps network failures", () => {
+    expect(loginErrorMessage(new TypeError("Failed to fetch"))).toBe(
+      "Could not reach the server. Check your connection and try again."
+    )
+  })
+})
 
 describe("signUpErrorMessage", () => {
   it("shows server validation messages", () => {

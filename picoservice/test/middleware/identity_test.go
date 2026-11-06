@@ -11,18 +11,19 @@ import (
 	"picoservice/internal/middleware"
 )
 
-func TestRequireUser(t *testing.T) {
+func TestRequireAuth(t *testing.T) {
 	tests := []struct {
 		name       string
 		query      string
+		cookie     string
+		tokens     fakeAccessTokens
 		lookup     fakeUserLookup
 		wantStatus int
 		wantUser   string
 	}{
 		{
-			name:       "missing user",
-			query:      "",
-			wantStatus: http.StatusBadRequest,
+			name:       "missing identity",
+			wantStatus: http.StatusUnauthorized,
 		},
 		{
 			name:       "unknown user",
@@ -37,20 +38,40 @@ func TestRequireUser(t *testing.T) {
 			wantStatus: http.StatusOK,
 			wantUser:   "user-1",
 		},
+		{
+			name:       "valid cookie",
+			cookie:     "token-1",
+			tokens:     fakeAccessTokens{subject: "user-1"},
+			lookup:     fakeUserLookup{existing: map[string]bool{}},
+			wantStatus: http.StatusOK,
+			wantUser:   "user-1",
+		},
+		{
+			name:       "invalid cookie does not fall back",
+			query:      "?userId=user-1",
+			cookie:     "bad-token",
+			tokens:     fakeAccessTokens{err: errors.New("invalid token")},
+			lookup:     fakeUserLookup{existing: map[string]bool{"user-1": true}},
+			wantStatus: http.StatusUnauthorized,
+		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
 			var got middleware.Identity
-			handler := middleware.RequireUser(testLogger(), tt.lookup)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler := middleware.RequireAuth(testLogger(), tt.lookup, tt.tokens)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				called = true
 				got, _ = middleware.FromContext(r.Context())
 				w.WriteHeader(http.StatusOK)
 			}))
 
+			req := httptest.NewRequest(http.MethodGet, "/users"+tt.query, nil)
+			if tt.cookie != "" {
+				req.AddCookie(&http.Cookie{Name: middleware.AuthCookieName, Value: tt.cookie})
+			}
 			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/users"+tt.query, nil))
+			handler.ServeHTTP(rec, req)
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("expected status %d, got %d", tt.wantStatus, rec.Code)
@@ -74,48 +95,41 @@ func TestRequireUser(t *testing.T) {
 func TestRequireMember(t *testing.T) {
 	tests := []struct {
 		name       string
+		identity   bool
 		query      string
-		users      fakeUserLookup
 		orgs       fakeOrgLookup
 		members    fakeMembershipLookup
 		wantStatus int
 		wantID     middleware.Identity
 	}{
 		{
+			name:       "missing identity",
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
 			name:       "missing org",
-			query:      "?userId=user-1",
+			identity:   true,
 			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "missing user",
-			query:      "?orgId=org-1",
-			wantStatus: http.StatusBadRequest,
-		},
-		{
-			name:       "unknown user",
-			query:      "?orgId=org-1&userId=user-1",
-			users:      fakeUserLookup{existing: map[string]bool{}},
-			wantStatus: http.StatusNotFound,
 		},
 		{
 			name:       "unknown org",
-			query:      "?orgId=org-1&userId=user-1",
-			users:      fakeUserLookup{existing: map[string]bool{"user-1": true}},
+			identity:   true,
+			query:      "?orgId=org-1",
 			orgs:       fakeOrgLookup{existing: map[string]bool{}},
 			wantStatus: http.StatusNotFound,
 		},
 		{
 			name:       "non-member",
-			query:      "?orgId=org-1&userId=user-1",
-			users:      fakeUserLookup{existing: map[string]bool{"user-1": true}},
+			identity:   true,
+			query:      "?orgId=org-1",
 			orgs:       fakeOrgLookup{existing: map[string]bool{"org-1": true}},
 			members:    fakeMembershipLookup{existing: map[string]bool{}},
 			wantStatus: http.StatusForbidden,
 		},
 		{
 			name:       "member",
-			query:      "?orgId=org-1&userId=user-1",
-			users:      fakeUserLookup{existing: map[string]bool{"user-1": true}},
+			identity:   true,
+			query:      "?orgId=org-1",
 			orgs:       fakeOrgLookup{existing: map[string]bool{"org-1": true}},
 			members:    fakeMembershipLookup{existing: map[string]bool{"org-1/user-1": true}},
 			wantStatus: http.StatusOK,
@@ -127,14 +141,18 @@ func TestRequireMember(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
 			var got middleware.Identity
-			handler := middleware.RequireMember(testLogger(), tt.users, tt.orgs, tt.members)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler := middleware.RequireMember(testLogger(), tt.orgs, tt.members)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				called = true
 				got, _ = middleware.FromContext(r.Context())
 				w.WriteHeader(http.StatusOK)
 			}))
 
+			req := httptest.NewRequest(http.MethodGet, "/projects"+tt.query, nil)
+			if tt.identity {
+				req = req.WithContext(middleware.WithContext(req.Context(), middleware.Identity{UserID: "user-1"}))
+			}
 			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/projects"+tt.query, nil))
+			handler.ServeHTTP(rec, req)
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("expected status %d, got %d", tt.wantStatus, rec.Code)
@@ -156,7 +174,7 @@ func TestRequireMember(t *testing.T) {
 }
 
 func TestLookupErrorIsGeneric(t *testing.T) {
-	handler := middleware.RequireUser(testLogger(), fakeUserLookup{err: errors.New("database down")})(
+	handler := middleware.RequireAuth(testLogger(), fakeUserLookup{err: errors.New("database down")}, fakeAccessTokens{})(
 		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
 			t.Fatal("next handler should not be called")
 		}),
@@ -175,6 +193,18 @@ func TestLookupErrorIsGeneric(t *testing.T) {
 	if got, want := body["error"], "internal server error"; got != want {
 		t.Fatalf("expected error %q, got %q", want, got)
 	}
+}
+
+type fakeAccessTokens struct {
+	subject string
+	err     error
+}
+
+func (t fakeAccessTokens) ParseSubject(string) (string, error) {
+	if t.err != nil {
+		return "", t.err
+	}
+	return t.subject, nil
 }
 
 type fakeUserLookup struct {

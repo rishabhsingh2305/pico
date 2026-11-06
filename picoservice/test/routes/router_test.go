@@ -16,6 +16,7 @@ import (
 
 	"picoservice/internal/entities"
 	"picoservice/internal/httpx"
+	"picoservice/internal/middleware"
 	"picoservice/internal/routes"
 	"picoservice/internal/services"
 	"picoservice/test/fakes"
@@ -264,6 +265,9 @@ func TestAllowHeadersForParameterizedRoutes(t *testing.T) {
 		wantAllow string
 	}{
 		{name: "users collection", method: http.MethodPut, path: "/users", wantAllow: "GET, HEAD, POST"},
+		{name: "login", method: http.MethodGet, path: "/auth/login", wantAllow: "POST"},
+		{name: "logout", method: http.MethodGet, path: "/auth/logout", wantAllow: "POST"},
+		{name: "session", method: http.MethodPost, path: "/auth/session", wantAllow: "GET, HEAD"},
 		{name: "verify email", method: http.MethodGet, path: "/auth/verify-email", wantAllow: "POST"},
 		{name: "resend verification", method: http.MethodGet, path: "/auth/verify-email/resend", wantAllow: "POST"},
 		{name: "user item", method: http.MethodPost, path: "/users/user-1", wantAllow: "GET, HEAD, PATCH"},
@@ -315,7 +319,47 @@ func TestVerificationRoutes(t *testing.T) {
 	}
 }
 
-func TestRequireUserOnRoutes(t *testing.T) {
+func TestAuthRoutes(t *testing.T) {
+	r := newTestRouter(t)
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/auth/login", strings.NewReader(`{"email":"ada@example.com","password":"correct horse"}`))
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	if !strings.Contains(rec.Header().Get("Set-Cookie"), middleware.AuthCookieName) {
+		t.Fatalf("expected auth cookie, got %q", rec.Header().Get("Set-Cookie"))
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("expected status %d, got %d", http.StatusUnauthorized, rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodGet, "/auth/session", nil)
+	req.AddCookie(&http.Cookie{Name: middleware.AuthCookieName, Value: "token-1"})
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+
+	rec = httptest.NewRecorder()
+	req = httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	r.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("expected status %d, got %d", http.StatusNoContent, rec.Code)
+	}
+}
+
+func TestRequireAuthOnRoutes(t *testing.T) {
 	fakeServices := fakes.NewServices()
 	fakeServices.Users.Existing = map[string]bool{"user-1": true}
 	r := newRouter(t, fakeServices, stubPinger{})
@@ -325,7 +369,7 @@ func TestRequireUserOnRoutes(t *testing.T) {
 		path       string
 		wantStatus int
 	}{
-		{name: "missing", path: "/users", wantStatus: http.StatusBadRequest},
+		{name: "missing", path: "/users", wantStatus: http.StatusUnauthorized},
 		{name: "unknown", path: "/users?userId=missing", wantStatus: http.StatusNotFound},
 		{name: "known", path: "/users?userId=user-1", wantStatus: http.StatusOK},
 	}
@@ -353,7 +397,7 @@ func TestRequireMemberOnProjects(t *testing.T) {
 	}{
 		{
 			name:       "missing identity",
-			wantStatus: http.StatusBadRequest,
+			wantStatus: http.StatusUnauthorized,
 		},
 		{
 			name:       "unknown user",

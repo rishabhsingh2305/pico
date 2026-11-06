@@ -3,7 +3,6 @@ import userEvent from "@testing-library/user-event"
 import { MemoryRouter } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { getSession } from "@/features/auth/session"
 import { VerifyEmailPage } from "@/features/auth/pages/verify-email-page"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -43,12 +42,8 @@ describe("VerifyEmailPage", () => {
       await screen.findByRole("heading", { name: "Email verified" })
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Continue to organizations" })
+      screen.getByRole("button", { name: "Continue to sign in" })
     ).toBeInTheDocument()
-    expect(getSession()).toEqual({
-      userId: "user-1",
-      email: "ada@example.com",
-    })
 
     expect(fetchMock).toHaveBeenCalledTimes(1)
     const [url, init] = fetchMock.mock.calls[0]

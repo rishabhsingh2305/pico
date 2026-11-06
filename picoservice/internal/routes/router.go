@@ -5,6 +5,7 @@ package routes
 import (
 	"errors"
 	"log/slog"
+	"net/http"
 
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
@@ -17,6 +18,12 @@ import (
 type UserService interface {
 	controllers.UserService
 	middleware.UserLookup
+}
+
+// AuthService is the authentication behavior required by the router.
+type AuthService interface {
+	controllers.AuthService
+	middleware.AccessTokens
 }
 
 // OrgService is the organization behavior required by the router.
@@ -43,13 +50,16 @@ type ExpenseService interface {
 
 // Deps contains the dependencies required to build the application router.
 type Deps struct {
-	Logger      *slog.Logger
-	Pinger      controllers.Pinger
-	Users       UserService
-	Orgs        OrgService
-	Memberships MembershipService
-	Projects    ProjectService
-	Expenses    ExpenseService
+	Logger         *slog.Logger
+	Pinger         controllers.Pinger
+	Users          UserService
+	Auth           AuthService
+	Orgs           OrgService
+	Memberships    MembershipService
+	Projects       ProjectService
+	Expenses       ExpenseService
+	SecureCookies  bool
+	AllowedOrigins []string
 }
 
 // New builds the application router.
@@ -64,24 +74,28 @@ func New(deps Deps) (*chi.Mux, error) {
 	}
 
 	userController := controllers.NewUserController(logger, deps.Users)
+	authController := controllers.NewAuthController(logger, deps.Auth, deps.SecureCookies)
 	orgController := controllers.NewOrgController(logger, deps.Orgs)
 	membershipController := controllers.NewMembershipController(logger, deps.Memberships)
 	projectController := controllers.NewProjectController(logger, deps.Projects)
 	expenseController := controllers.NewExpenseController(logger, deps.Expenses)
 
-	requireUser := middleware.RequireUser(logger, deps.Users)
-	requireMember := middleware.RequireMember(logger, deps.Users, deps.Orgs, deps.Memberships)
+	requireAuth := middleware.RequireAuth(logger, deps.Users, deps.Auth)
+	requireMember := func(next http.Handler) http.Handler {
+		return requireAuth(middleware.RequireMember(logger, deps.Orgs, deps.Memberships)(next))
+	}
 
 	r := chi.NewRouter()
+	r.Use(middleware.CORS(deps.AllowedOrigins))
 	r.Use(chimiddleware.RequestID)
 	r.Use(middleware.RequestIDHeader)
 	r.Use(middleware.RequestLogger(logger))
 	r.Use(middleware.Recoverer(logger))
 
 	healthRoutes(r, logger, deps.Pinger)
-	r.Mount("/auth", authRoutes(userController))
-	r.Mount("/users", userRoutes(userController, requireUser))
-	r.Mount("/orgs", orgRoutes(orgController, membershipController, requireUser, requireMember))
+	r.Mount("/auth", authRoutes(userController, authController))
+	r.Mount("/users", userRoutes(userController, requireAuth))
+	r.Mount("/orgs", orgRoutes(orgController, membershipController, requireAuth, requireMember))
 	r.Mount("/projects", projectRoutes(projectController, requireMember))
 	r.Mount("/expenses", expenseRoutes(expenseController, requireMember))
 
@@ -102,6 +116,10 @@ func (d Deps) validate() error {
 		return errors.New("routes: pinger is required")
 	case d.Users == nil:
 		return errors.New("routes: user service is required")
+	case d.Auth == nil:
+		return errors.New("routes: auth service is required")
+	case d.AllowedOrigins == nil || len(d.AllowedOrigins) == 0:
+		return errors.New("routes: allowed origins are required")
 	case d.Orgs == nil:
 		return errors.New("routes: org service is required")
 	case d.Memberships == nil:

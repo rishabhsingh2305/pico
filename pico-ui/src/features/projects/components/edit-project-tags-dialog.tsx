@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Field, FieldError, FieldLabel } from "@/components/ui/field"
 import { Spinner } from "@/components/ui/spinner"
-import { isUserNotFoundError } from "@/features/auth/session"
+import { isSessionInvalidError } from "@/features/auth/session"
 import { updateProjectTags } from "@/features/projects/api"
 import { projectErrorMessage } from "@/features/projects/error-message"
 import type { Project } from "@/features/projects/types"
@@ -78,7 +78,7 @@ export function EditProjectTagsDialog({
       setOpen(false)
       onUpdated()
     } catch (error) {
-      if (isUserNotFoundError(error)) {
+      if (isSessionInvalidError(error)) {
         onSessionInvalid()
         return
       }

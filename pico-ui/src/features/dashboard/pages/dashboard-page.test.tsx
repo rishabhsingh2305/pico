@@ -1,16 +1,18 @@
 import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { MemoryRouter, Route, Routes } from "react-router"
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import { getSession, storeSession } from "@/features/auth/session"
+import type { Session } from "@/features/auth/session"
+import { RequireSession } from "@/features/auth/auth-provider"
 import { OrgDashboardPage } from "@/features/dashboard/pages/dashboard-page"
 import { formatMoney } from "@/features/expenses/money"
 import type { Expense } from "@/features/expenses/types"
 import type { Org } from "@/features/orgs/types"
 import type { Project } from "@/features/projects/types"
+import { AuthTestProvider } from "@/test/auth"
 
-const session = {
+const session: Session = {
   userId: "user-1",
   email: "ada@example.com",
 }
@@ -158,34 +160,36 @@ function expectedSummary(
   )}. Debit ${formatMoney(totals.totalDebit, currency)}.`
 }
 
-function renderDashboard() {
+function renderDashboard(initialSession: Session | null = session) {
   return render(
-    <MemoryRouter initialEntries={["/orgs/org-1/dashboard"]}>
-      <Routes>
-        <Route path="/orgs/:orgId/dashboard" element={<OrgDashboardPage />} />
-        <Route path="/signup" element={<div>Signup destination</div>} />
-      </Routes>
-    </MemoryRouter>
+    <AuthTestProvider session={initialSession}>
+      <MemoryRouter initialEntries={["/orgs/org-1/dashboard"]}>
+        <Routes>
+          <Route element={<RequireSession />}>
+            <Route
+              path="/orgs/:orgId/dashboard"
+              element={<OrgDashboardPage />}
+            />
+          </Route>
+          <Route path="/login" element={<div>Login destination</div>} />
+        </Routes>
+      </MemoryRouter>
+    </AuthTestProvider>
   )
 }
-
-beforeEach(() => {
-  localStorage.clear()
-})
 
 afterEach(() => {
   vi.unstubAllGlobals()
 })
 
 describe("OrgDashboardPage", () => {
-  it("redirects to signup without a session", () => {
-    renderDashboard()
+  it("redirects to login without a session", () => {
+    renderDashboard(null)
 
-    expect(screen.getByText("Signup destination")).toBeInTheDocument()
+    expect(screen.getByText("Login destination")).toBeInTheDocument()
   })
 
   it("loads totals, project flow, and recent activity", async () => {
-    storeSession(session)
     const fetchMock = stubApi({
       projects: [general],
       totals: { [general.id]: usdTotals },
@@ -237,7 +241,6 @@ describe("OrgDashboardPage", () => {
   })
 
   it("groups mixed currencies and switches the active currency", async () => {
-    storeSession(session)
     stubApi({
       projects: [general, berlin],
       totals: {
@@ -270,7 +273,6 @@ describe("OrgDashboardPage", () => {
   })
 
   it("keeps the large net styling when the total is negative", async () => {
-    storeSession(session)
     stubApi({
       projects: [general],
       totals: {
@@ -306,7 +308,6 @@ describe("OrgDashboardPage", () => {
   })
 
   it("shows an empty project state", async () => {
-    storeSession(session)
     stubApi({ projects: [] })
 
     renderDashboard()
@@ -318,7 +319,6 @@ describe("OrgDashboardPage", () => {
   })
 
   it("shows an organization-not-found state", async () => {
-    storeSession(session)
     stubApi({
       orgResponse: jsonResponse({ error: "org not found" }, 404),
     })
@@ -331,7 +331,6 @@ describe("OrgDashboardPage", () => {
   })
 
   it("shows a load error and retries", async () => {
-    storeSession(session)
     const fetchMock = vi
       .fn<typeof fetch>()
       .mockRejectedValueOnce(new TypeError("Failed to fetch"))
@@ -353,15 +352,13 @@ describe("OrgDashboardPage", () => {
     expect(await screen.findByText("Nothing to summarize")).toBeInTheDocument()
   })
 
-  it("clears a stale session and redirects to signup", async () => {
-    storeSession(session)
+  it("clears a stale session and redirects to login", async () => {
     stubApi({
       orgResponse: jsonResponse({ error: "user not found" }, 404),
     })
 
     renderDashboard()
 
-    expect(await screen.findByText("Signup destination")).toBeInTheDocument()
-    expect(getSession()).toBeNull()
+    expect(await screen.findByText("Login destination")).toBeInTheDocument()
   })
 })
