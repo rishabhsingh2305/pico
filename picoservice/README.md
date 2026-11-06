@@ -302,19 +302,36 @@ Copy the sample configuration, fill in your Atlas and SMTP values, create the
 indexes, then run the same router in a plain HTTP server:
 
 ```bash
-cp sample.env .env   # first time only
-# Edit .env: MONGODB_URI, JWT_SECRET, SMTP settings, and so on.
+cp sample.env .env   # default, or use dev.env / prod.env
+# Edit the file: MONGODB_URI, JWT_SECRET, SMTP settings, and so on.
 
 make indexes
 make run
 ```
 
+For environment-specific application files:
+
+```bash
+cp sample.env dev.env
+cp sample.env prod.env
+chmod 600 dev.env prod.env
+
+make indexes APP_ENV=dev
+make run APP_ENV=dev
+make ship APP_ENV=prod
+```
+
+`APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects
+`prod.env` and `prod.deploy.env`. With `APP_ENV` unset, `.env` and `deploy.env`
+are used. The same selector works for `run`, `indexes`, `test-integration`,
+`invoke`, `ship`, and `url`.
+
 Generate a local JWT secret with `openssl rand -hex 32`.
 
-`make run`, `make indexes`, `make test-integration`, and `make invoke` load
-`.env` automatically. `make deploy` intentionally does not; pass deployment
-values explicitly. Exported environment variables still work for commands that
-do not load `.env`.
+`make run`, `make indexes`, `make test-integration`, and `make invoke` load the
+selected application env file automatically. `make deploy` intentionally does
+not; pass deployment values explicitly. Exported environment variables still
+work for commands that do not load an env file.
 
 Use any SMTP server for development. For example, Mailpit listens on
 `localhost:1025` and shows delivered mail at `http://localhost:8025`. With
@@ -493,7 +510,7 @@ make ship
 Or run `./scripts/deploy.sh` directly. The script:
 
 - requires both env files to exist with mode `600`
-- loads `.env` for application settings and `deploy.env` for AWS settings
+- loads the selected application env file and deploy env file
 - checks the required values
 - verifies AWS credentials with `aws sts get-caller-identity`
 - uses a dedicated `S3_BUCKET` when configured, creating it if missing unless
@@ -515,15 +532,19 @@ make ship ARGS='--watch'
 make ship ARGS='--no-create-bucket'
 ```
 
-To keep deployment application values separate from local development, point
-`APP_ENV_FILE` at a gitignored file:
+To keep deployment application values separate from local development, use
+`APP_ENV`:
 
 ```bash
-APP_ENV_FILE=.env.production make ship
+make ship APP_ENV=prod
 ```
 
-`deploy.env` is ignored and contains AWS deployment settings only. Application
-secrets stay in the app env file and are never committed.
+That loads `prod.env` for application values and `prod.deploy.env` for AWS
+settings. `APP_ENV_FILE` and `DEPLOY_ENV_FILE` still work as explicit
+overrides.
+
+Real `*.env` files are ignored and contain secrets. Application secrets stay in
+the app env file and are never committed.
 
 The one-command script already runs the index and health checks. For the manual
 `make deploy` path, run the index command and retrieve the Function URL:
@@ -557,16 +578,19 @@ curl -i "$(make url)ready"
 | `MONGODB_TEST_DATABASE` | no | Integration test database, default `picoservice_test` |
 | `PORT` | no | Local server port, default `8080` |
 
-AWS deployment settings live in `deploy.env` (template: `sample.deploy.env`):
-`AWS_PROFILE` or raw `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`,
-`AWS_REGION`, optional `AWS_DEFAULT_REGION` (the script derives it from
-`AWS_REGION` when omitted), optional `S3_BUCKET` for a dedicated SAM artifact
-bucket (created automatically on first deploy), and optional `STACK_NAME`
-(default `picoservice`). Application settings never go in `deploy.env`.
+AWS deployment settings live in `deploy.env` or `$(APP_ENV).deploy.env`
+(templates: `sample.deploy.env`, `sample.dev.deploy.env`,
+`sample.prod.deploy.env`): `AWS_PROFILE` or raw
+`AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY`, `AWS_REGION`, optional
+`AWS_DEFAULT_REGION` (the script derives it from `AWS_REGION` when omitted),
+optional `S3_BUCKET` for a dedicated SAM artifact bucket (created automatically
+on first deploy), and optional `STACK_NAME` (default `picoservice`). Application
+settings never go in a deploy env file.
 
-`make ship` loads `.env` for application values (override with
-`APP_ENV_FILE`) and `deploy.env` for AWS settings. `make deploy` reads explicit
-environment values only; local `make` targets read `.env`; see `sample.env`.
+`make ship` loads the selected application env file (`APP_ENV=prod` uses
+`prod.env`) and the selected deploy env file (`prod.deploy.env`). `make deploy`
+reads explicit environment values only; local `make` targets use `.env` by
+default. See `sample.env`.
 
 - The Function URL is public (`AuthType: NONE`).
 - CORS is handled by the application middleware and uses

@@ -41,9 +41,11 @@
   `SMTP_USERNAME` and `SMTP_PASSWORD` are optional and set together.
 - Build with SAM (`template.yaml`); run locally with `make run`.
 - `MONGODB_URI` and `MONGODB_DATABASE` are required.
-- Local settings live in `.env` (ignored); `sample.env` is committed. Make targets
-  for `run`, `indexes`, `test-integration`, and `invoke` load `.env`; `deploy`
-  stays explicit.
+- Local settings live in `.env` (ignored); `sample.env` is committed.
+  `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects
+  `prod.env` and `prod.deploy.env`; no `APP_ENV` uses `.env` and `deploy.env`.
+  Make targets for `run`, `indexes`, `test-integration`, and `invoke` load the
+  selected app env; `deploy` stays explicit.
 - Unique indexes are created with `make indexes`, not during Lambda startup.
 
 ## Read first
@@ -55,15 +57,15 @@
 
 | Command | Purpose |
 | --- | --- |
-| `make run` | Run the local HTTP server on `:8080` (loads `.env`) |
+| `make run` | Run the local HTTP server on `:8080` (loads the selected app env) |
 | `make test` | Run Go tests only (integration tests skip) |
-| `make test-integration` | Run MongoDB integration tests (loads `.env`; requires `MONGODB_TEST_URI`) |
+| `make test-integration` | Run MongoDB integration tests (loads the selected app env; requires `MONGODB_TEST_URI`) |
 | `make check` | Check formatting, run `go vet`, and run tests |
-| `make indexes` | Create MongoDB indexes (loads `.env`; requires `MONGODB_URI` and `MONGODB_DATABASE`) |
+| `make indexes` | Create MongoDB indexes (loads the selected app env; requires `MONGODB_URI` and `MONGODB_DATABASE`) |
 | `make build` | Run `sam build` |
-| `make invoke` | Invoke the Lambda locally with `events/function-url.json` (Docker and `.env` required) |
-| `make deploy` | Deploy the SAM stack (explicit env; does not load `.env`) |
-| `make ship` | Deploy through `scripts/deploy.sh` using `deploy.env` |
+| `make invoke` | Invoke the Lambda locally with `events/function-url.json` (Docker and the selected app env required) |
+| `make deploy` | Deploy the SAM stack (explicit env; does not load an app env file) |
+| `make ship` | Deploy through `scripts/deploy.sh` using the selected app and deploy env files |
 | `make url` | Print the deployed Function URL |
 | `sam validate --lint` | Validate template changes |
 
@@ -82,7 +84,7 @@
   CORS; duplicate `Access-Control-*` headers break browsers.
 - **Architecture:** do not add API Gateway, replace chi, add an ODM/generic repository, or add a Lambda proxy/framework library without explicit approval.
 - **State:** no global mutable state, no `init()`, no hidden I/O. Wire dependencies in `internal/app`; create one MongoDB client per process and never per request.
-- **Configuration:** application values belong in `.env` (ignored), with `sample.env` as the committed template. `make run`, `indexes`, `test-integration`, and `invoke` load `.env`; `make deploy` must not. AWS deployment settings belong in `deploy.env` (ignored), with `sample.deploy.env` committed; `make ship`/`scripts/deploy.sh` load `.env` for application values and `deploy.env` for AWS settings. Do not put application secrets in `deploy.env`.
+- **Configuration:** application values belong in `.env` or `$(APP_ENV).env` (ignored), with `sample.env` as the committed template. `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects `prod.env` and `prod.deploy.env`; unset uses `.env` and `deploy.env`. `make run`, `indexes`, `test-integration`, and `invoke` load the selected app env; `make deploy` must not. AWS deployment settings belong in `deploy.env` or `$(APP_ENV).deploy.env` (ignored), with `sample.deploy.env` and per-environment samples committed; `make ship`/`scripts/deploy.sh` load the selected files. Do not put application secrets in a deploy env file.
 - **Database:** every call takes a `context.Context` with a timeout; log driver errors with `request_id` and never return them to clients. DAO contracts live in `internal/dao`; implementations live in `internal/dao/mongodb`. Add indexes in `internal/dao/mongodb/indexes.go`.
 - **Errors:** wrap with `%w`, log once at the boundary, never silently ignore. No `log.Fatal`/`os.Exit` outside `main`.
 - **Logging:** use `log/slog`; never log secrets, tokens, connection strings, passwords, or full request bodies.

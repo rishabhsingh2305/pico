@@ -439,23 +439,27 @@ a caching library that is pinned to AWS SDK v1.
 - Build method: SAM `go1.x` (runs `go build` at the repository root)
 - Deployment: `sam deploy` using `samconfig.toml` (stack `picoservice`).
   `scripts/deploy.sh` / `make ship` wraps `sam build`, `sam deploy`, index
-  creation, and health checks. It loads application values from `.env`
-  (override with `APP_ENV_FILE`) and AWS settings from `deploy.env` (ignored,
-  mode `600`, template `sample.deploy.env`). `make deploy` remains the
+  creation, and health checks. It loads the selected application env file
+  (`APP_ENV=prod` uses `prod.env`, unset uses `.env`) and the selected deploy
+  env file (`prod.deploy.env` or `deploy.env`; ignored, mode `600`, templates
+  `sample.prod.deploy.env` / `sample.deploy.env`). `make deploy` remains the
   explicit-env fallback and does not load env files.
 - Environment: `MONGODB_URI` (parameter), `MONGODB_DATABASE`, `JWT_SECRET`,
   `PUBLIC_BASE_URL`, optional `CORS_ALLOWED_ORIGINS`, `EMAIL_FROM`, `SMTP_ADDR`,
   and optional `SMTP_USERNAME` / `SMTP_PASSWORD`
 - Local development: `cmd/server` on `PORT` (default `8080`). `make run`,
-  `make indexes`, `make test-integration`, and `make invoke` load `.env`;
-  `sample.env` is the committed template.
-- Index creation: `make indexes` (loads `.env`) or the deploy script after it
-  loads the application env file; requires `MONGODB_URI` and
+  `make indexes`, `make test-integration`, and `make invoke` load the selected
+  application env file (`APP_ENV=dev` uses `dev.env`); `sample.env` is the
+  committed template.
+- Index creation: `make indexes` (loads the selected app env) or the deploy
+  script after it loads the application env file; requires `MONGODB_URI` and
   `MONGODB_DATABASE`
-- Local Lambda invocation: `make invoke` (loads `.env`; requires Docker)
-- Deployment convenience: `deploy.env` contains only AWS/deployment settings;
-  application secrets stay in `.env` or `APP_ENV_FILE`. The script refuses
-  world-readable files and validates required values before deploying.
+- Local Lambda invocation: `make invoke` (loads the selected app env; requires
+  Docker)
+- Deployment convenience: `deploy.env` or `$(APP_ENV).deploy.env` contains only
+  AWS/deployment settings; application secrets stay in the selected app env
+  file. The script refuses world-readable files and validates required values
+  before deploying.
 
 ## Decisions
 
@@ -539,15 +543,18 @@ deployment. The Lambda Parameters and Secrets Extension is preferred over an
 in-process SDK cache when that changes.
 
 Local development uses `.env` (ignored by git) with `sample.env` as the
-committed template. The Makefile sources `.env` for local commands; the Go
-binaries still read only environment variables. `make deploy` never loads
-`.env`, so local values cannot be deployed accidentally.
+committed template. `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`;
+`APP_ENV=prod` selects `prod.env` and `prod.deploy.env`; unset uses `.env` and
+`deploy.env`. The Makefile sources the selected app env for local commands; the
+Go binaries still read only environment variables. `make deploy` never loads an
+env file, so local values cannot be deployed accidentally.
 
-Deployment convenience uses two files. Application values stay in `.env`
-(ignored), with `sample.env` committed. AWS deployment settings stay in
-`deploy.env` (ignored, mode `600`), with `sample.deploy.env` committed.
+Deployment convenience uses two files. Application values stay in the selected
+app env file (ignored), with `sample.env` committed. AWS deployment settings
+stay in `deploy.env` or `$(APP_ENV).deploy.env` (ignored, mode `600`), with
+`sample.deploy.env` and per-environment samples committed.
 `make ship`/`scripts/deploy.sh` is the only target that loads both; application
-secrets are never placed in `deploy.env`. The recommended form uses
+secrets are never placed in a deploy env file. The recommended form uses
 `AWS_PROFILE`, keeping actual AWS credentials in `~/.aws`.
 
 ### Stateless JWT email verification

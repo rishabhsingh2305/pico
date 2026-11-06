@@ -6,7 +6,11 @@ cd "$SCRIPT_DIR/.."
 
 AWS_ENV_FILE="${DEPLOY_ENV_FILE:-deploy.env}"
 APP_ENV_FILE="${APP_ENV_FILE:-.env}"
-SAMPLE_FILE="sample.deploy.env"
+if [[ -n "${APP_ENV:-}" ]]; then
+  SAMPLE_FILE="sample.${APP_ENV}.deploy.env"
+else
+  SAMPLE_FILE="sample.deploy.env"
+fi
 ASSUME_YES=0
 SKIP_INDEXES=0
 WATCH=0
