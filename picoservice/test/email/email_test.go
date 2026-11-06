@@ -90,17 +90,26 @@ func TestBuildVerificationMessage(t *testing.T) {
 	checks := []string{
 		"From: Pico <noreply@example.com>",
 		"To: ada@example.com",
-		"Subject: Verify your email",
+		"Subject: Verify your email - Pico",
 		"Content-Type: multipart/alternative",
+		"Confirm your email address for Pico.",
 		"Hi <Ada>,",
 		"https://example.com/auth/verify-email?token=abc&next=1",
 		"&lt;Ada&gt;",
 		"https://example.com/auth/verify-email?token=abc&amp;next=1",
+		"Verify email",
+		"background-color:#f4f1ea",
+		"background-color:#fbf8f1",
+		"background-color:#c63c1e",
+		"Pico &middot; Shared expense tracking for small teams",
 		"expires in 24 hours",
 	}
 	for _, check := range checks {
 		if !strings.Contains(message, check) {
 			t.Fatalf("expected message to contain %q, got:\n%s", check, message)
 		}
+	}
+	if strings.Contains(message, "%!") {
+		t.Fatalf("expected formatted message without errors, got:\n%s", message)
 	}
 }
