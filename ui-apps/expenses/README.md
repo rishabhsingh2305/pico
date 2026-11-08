@@ -1,21 +1,47 @@
-# React + TypeScript + Vite + shadcn/ui
+# Expenses
 
-This is a template for a new Vite project with React, TypeScript, and shadcn/ui.
+React + TypeScript + Vite UI for expense management. Authentication is provided
+by the separate `picoservice` API.
 
-## Adding components
-
-To add components to your app, run the following command:
+## Development
 
 ```bash
-npx shadcn@latest add button
+cp .env.example .env
+pnpm install
+pnpm dev
 ```
 
-This will place the ui components in the `src/components` directory.
+The dev server proxies `/api` to `http://localhost:8080` (`picoservice`). Change
+the target with `VITE_API_PROXY_TARGET`.
 
-## Using components
+## Authentication
 
-To use the components in your app, import them as follows:
+- Signup posts to `/users` and triggers a 6-digit verification email.
+- The code is verified with `/auth/verify-email/otp`.
+- Login posts to `/auth/login`; the JWT is stored in `localStorage` and sent as
+  `Authorization: Bearer`.
+- The session is restored from `/auth/session` on page load.
+- After login the app silently finds the internal org tagged `expenses`, or
+  creates it on first use. The org is never shown in the UI; only `orgId` is
+  passed to project and expense API calls.
 
-```tsx
-import { Button } from "@/components/ui/button"
-```
+## Categories
+
+- The main page lists categories, backed by the `/projects` endpoints.
+- Creating a category asks for a name only. New categories use `INR` and no tags
+  by default; the currency is not exposed in the UI yet.
+- Opening a category shows its expenses, net/spent/received totals, and an
+  **Add expense** dialog.
+- Expenses can be marked **Spent** (debit) or **Received** (credit), with an
+  amount, optional description, optional tags, and date.
+- Tags are added with Enter, space, or comma, shown as chips in the expense
+  list, and capped at 20 tags of 32 characters each.
+- The expense list can be filtered by date preset or custom range and by tags;
+  all selected tags must match.
+- Home category blocks show this month's spend. Category pages show a
+  month-over-month insight card with a daily spend strip.
+
+## Production
+
+Set `VITE_API_BASE_URL` to the deployed `picoservice` URL. The UI origin must
+also be listed in the service's `CORS_ALLOWED_ORIGINS`.
