@@ -1,0 +1,37 @@
+- main [ref=e3]:
+  - complementary [ref=e4]:
+    - generic [ref=e5]:
+      - generic [ref=e6]: E
+      - generic [ref=e8]: Expenses
+    - generic [ref=e9]:
+      - heading "See where it goes." [level=2] [ref=e10]
+      - paragraph [ref=e11]: A simple ledger for everyday money. No spreadsheets, no jargon.
+      - generic [ref=e12]:
+        - generic [ref=e13]:
+          - text: This month
+          - generic [ref=e14]: ₹1,749
+        - generic [ref=e15]:
+          - text: Spent
+          - generic [ref=e16]: ₹250
+    - paragraph [ref=e18]: Simple expenses for everyday life.
+  - generic [ref=e20]:
+    - generic [ref=e21]:
+      - generic [ref=e22]:
+        - heading "Welcome back" [level=1] [ref=e23]
+        - generic [ref=e24]: Sign in to manage your expenses.
+      - generic [ref=e26]:
+        - generic [ref=e27]:
+          - generic [ref=e28]: Email
+          - textbox "Email" [active] [ref=e29]:
+            - /placeholder: you@example.com
+        - generic [ref=e30]:
+          - generic [ref=e31]: Password
+          - generic [ref=e32]:
+            - textbox "Password" [ref=e33]:
+              - /placeholder: Your password
+            - button "Show password" [ref=e34]
+        - button "Sign in" [ref=e35]
+    - paragraph [ref=e37]:
+      - text: New here?
+      - link "Create an account" [ref=e38] [cursor=pointer]:
+        - /url: /signup
