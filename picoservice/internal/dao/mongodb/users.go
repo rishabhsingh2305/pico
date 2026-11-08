@@ -29,15 +29,18 @@ func NewUserStore(client *Client) *UserStore {
 }
 
 type userDocument struct {
-	ID                 bson.ObjectID `bson:"_id"`
-	Name               string        `bson:"name"`
-	Email              string        `bson:"email"`
-	PasswordHash       string        `bson:"passwordHash"`
-	EmailVerified      bool          `bson:"emailVerified"`
-	EmailVerifiedAt    *time.Time    `bson:"emailVerifiedAt,omitempty"`
-	VerificationSentAt *time.Time    `bson:"verificationSentAt,omitempty"`
-	CreatedAt          time.Time     `bson:"createdAt"`
-	UpdatedAt          time.Time     `bson:"updatedAt"`
+	ID                      bson.ObjectID `bson:"_id"`
+	Name                    string        `bson:"name"`
+	Email                   string        `bson:"email"`
+	PasswordHash            string        `bson:"passwordHash"`
+	EmailVerified           bool          `bson:"emailVerified"`
+	EmailVerifiedAt         *time.Time    `bson:"emailVerifiedAt,omitempty"`
+	VerificationSentAt      *time.Time    `bson:"verificationSentAt,omitempty"`
+	VerificationOTPHash     string        `bson:"verificationOTPHash,omitempty"`
+	VerificationOTPExpires  *time.Time    `bson:"verificationOTPExpiresAt,omitempty"`
+	VerificationOTPAttempts int           `bson:"verificationOTPAttempts,omitempty"`
+	CreatedAt               time.Time     `bson:"createdAt"`
+	UpdatedAt               time.Time     `bson:"updatedAt"`
 }
 
 func (d userDocument) user() entities.User {
@@ -228,11 +231,18 @@ func (s *UserStore) MarkEmailVerified(ctx context.Context, id, email string, ver
 	err = s.collection.FindOneAndUpdate(
 		ctx,
 		bson.M{"_id": objectID, "email": email},
-		bson.M{"$set": bson.M{
-			"emailVerified":   true,
-			"emailVerifiedAt": verifiedAt,
-			"updatedAt":       verifiedAt,
-		}},
+		bson.M{
+			"$set": bson.M{
+				"emailVerified":   true,
+				"emailVerifiedAt": verifiedAt,
+				"updatedAt":       verifiedAt,
+			},
+			"$unset": bson.M{
+				"verificationOTPHash":      "",
+				"verificationOTPExpiresAt": "",
+				"verificationOTPAttempts":  "",
+			},
+		},
 		options.FindOneAndUpdate().SetReturnDocument(options.After),
 	).Decode(&document)
 	if errors.Is(err, mongo.ErrNoDocuments) {
@@ -258,6 +268,121 @@ func (s *UserStore) SetVerificationSentAt(ctx context.Context, id string, sentAt
 	)
 	if err != nil {
 		return fmt.Errorf("set verification sent time: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return entities.ErrUserNotFound
+	}
+	return nil
+}
+
+// SetVerificationOTP stores a hashed email verification code and its expiry.
+func (s *UserStore) SetVerificationOTP(ctx context.Context, id, hash string, expiresAt time.Time) error {
+	objectID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return entities.ErrUserNotFound
+	}
+
+	result, err := s.collection.UpdateOne(
+		ctx,
+		bson.M{"_id": objectID},
+		bson.M{"$set": bson.M{
+			"verificationOTPHash":      hash,
+			"verificationOTPExpiresAt": expiresAt,
+			"verificationOTPAttempts":  0,
+		}},
+	)
+	if err != nil {
+		return fmt.Errorf("set verification otp: %w", err)
+	}
+	if result.MatchedCount == 0 {
+		return entities.ErrUserNotFound
+	}
+	return nil
+}
+
+// VerificationOTP returns the stored verification code state for an email.
+func (s *UserStore) VerificationOTP(ctx context.Context, email string) (dao.VerificationOTP, error) {
+	var document struct {
+		ID        bson.ObjectID `bson:"_id"`
+		Hash      string        `bson:"verificationOTPHash"`
+		ExpiresAt *time.Time    `bson:"verificationOTPExpiresAt"`
+		Attempts  int           `bson:"verificationOTPAttempts"`
+	}
+
+	err := s.collection.FindOne(
+		ctx,
+		bson.M{"email": email},
+		options.FindOne().SetProjection(bson.M{
+			"_id":                      1,
+			"verificationOTPHash":      1,
+			"verificationOTPExpiresAt": 1,
+			"verificationOTPAttempts":  1,
+		}),
+	).Decode(&document)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return dao.VerificationOTP{}, entities.ErrUserNotFound
+	}
+	if err != nil {
+		return dao.VerificationOTP{}, fmt.Errorf("find verification otp: %w", err)
+	}
+
+	otp := dao.VerificationOTP{
+		UserID:   document.ID.Hex(),
+		Hash:     document.Hash,
+		Attempts: document.Attempts,
+	}
+	if document.ExpiresAt != nil {
+		otp.ExpiresAt = *document.ExpiresAt
+	}
+	return otp, nil
+}
+
+// IncrementVerificationOTPAttempts increments and returns the failed attempt
+// count for a user.
+func (s *UserStore) IncrementVerificationOTPAttempts(ctx context.Context, id string) (int, error) {
+	objectID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return 0, entities.ErrUserNotFound
+	}
+
+	var document struct {
+		Attempts int `bson:"verificationOTPAttempts"`
+	}
+	err = s.collection.FindOneAndUpdate(
+		ctx,
+		bson.M{"_id": objectID},
+		bson.M{"$inc": bson.M{"verificationOTPAttempts": 1}},
+		options.FindOneAndUpdate().
+			SetReturnDocument(options.After).
+			SetProjection(bson.M{"verificationOTPAttempts": 1}),
+	).Decode(&document)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return 0, entities.ErrUserNotFound
+	}
+	if err != nil {
+		return 0, fmt.Errorf("increment verification otp attempts: %w", err)
+	}
+	return document.Attempts, nil
+}
+
+// ClearVerificationOTP removes a stored verification code.
+func (s *UserStore) ClearVerificationOTP(ctx context.Context, id string) error {
+	objectID, err := bson.ObjectIDFromHex(id)
+	if err != nil {
+		return entities.ErrUserNotFound
+	}
+
+	result, err := s.collection.UpdateOne(
+		ctx,
+		bson.M{"_id": objectID},
+		bson.M{"$unset": bson.M{
+			"verificationOTPHash":      "",
+			"verificationOTPExpiresAt": "",
+			"verificationOTPAttempts":  "",
+		}},
+	)
+	if err != nil {
+		return fmt.Errorf("clear verification otp: %w", err)
 	}
 	if result.MatchedCount == 0 {
 		return entities.ErrUserNotFound

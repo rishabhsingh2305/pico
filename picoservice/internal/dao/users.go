@@ -7,6 +7,14 @@ import (
 	"picoservice/internal/entities"
 )
 
+// VerificationOTP contains the stored state for an email verification code.
+type VerificationOTP struct {
+	UserID    string
+	Hash      string
+	ExpiresAt time.Time
+	Attempts  int
+}
+
 // UserDAO persists users. Password hashes are passed separately so they never
 // become part of the public entity.
 type UserDAO interface {
@@ -19,6 +27,10 @@ type UserDAO interface {
 	UpdatePassword(ctx context.Context, id, passwordHash string, updatedAt time.Time) error
 	MarkEmailVerified(ctx context.Context, id, email string, verifiedAt time.Time) (entities.User, error)
 	SetVerificationSentAt(ctx context.Context, id string, sentAt time.Time) error
+	SetVerificationOTP(ctx context.Context, id, hash string, expiresAt time.Time) error
+	VerificationOTP(ctx context.Context, email string) (VerificationOTP, error)
+	IncrementVerificationOTPAttempts(ctx context.Context, id string) (int, error)
+	ClearVerificationOTP(ctx context.Context, id string) error
 	Delete(ctx context.Context, id string) error
 	Exists(ctx context.Context, id string) (bool, error)
 }

@@ -269,6 +269,7 @@ func TestAllowHeadersForParameterizedRoutes(t *testing.T) {
 		{name: "logout", method: http.MethodGet, path: "/auth/logout", wantAllow: "POST"},
 		{name: "session", method: http.MethodPost, path: "/auth/session", wantAllow: "GET, HEAD"},
 		{name: "verify email", method: http.MethodGet, path: "/auth/verify-email", wantAllow: "POST"},
+		{name: "verify email otp", method: http.MethodGet, path: "/auth/verify-email/otp", wantAllow: "POST"},
 		{name: "resend verification", method: http.MethodGet, path: "/auth/verify-email/resend", wantAllow: "POST"},
 		{name: "user item", method: http.MethodPost, path: "/users/user-1", wantAllow: "GET, HEAD, PATCH"},
 		{name: "user password", method: http.MethodDelete, path: "/users/user-1/password", wantAllow: "POST"},

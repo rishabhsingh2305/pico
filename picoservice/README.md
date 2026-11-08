@@ -62,13 +62,16 @@ Passwords are bcrypt-hashed. Password hashes are never returned. There is no
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/auth/verify-email` | Verify with `{"token":"..."}` from the UI link |
-| `POST` | `/auth/verify-email/resend` | Resend with `{"email":"..."}`; returns `202` for valid input and is throttled to once per 60 seconds |
+| `POST` | `/auth/verify-email/otp` | Verify with `{"email":"...","code":"123456"}` |
+| `POST` | `/auth/verify-email/resend` | Resend with `{"email":"..."}`; returns `202 {"status":"sent","retryAfterSeconds":60}` with `Retry-After: 60`, throttled to once per 60 seconds |
 
 Verification links contain a signed JWT valid for 24 hours and return
 `{"status":"verified","userId":"...","email":"..."}`. Signup creates the user
-as unverified. Changing the
-email marks the account unverified and sends a new link. Resend responses are
-deliberately generic so they do not reveal whether an email is registered.
+as unverified. The same email also contains a 6-digit code valid for 10 minutes
+with at most 5 failed attempts. Changing the
+email marks the account unverified and sends a new link and code. Resend
+responses are deliberately generic so they do not reveal whether an email is
+registered.
 
 ### Organizations
 

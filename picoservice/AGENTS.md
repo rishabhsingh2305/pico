@@ -32,9 +32,11 @@
   the token in `localStorage`. Login requires a verified email. The `userId`
   query parameter remains as a temporary, spoofable fallback.
 - Passwords are bcrypt-hashed and never returned. No user or org delete endpoints.
-- Signup creates an unverified user and emails a signed JWT verification link.
-  The link opens the UI, which calls `POST /auth/verify-email`; resend is
-  throttled and generic.
+- Signup creates an unverified user and emails a signed JWT verification link
+  plus a 6-digit code. The link opens the UI, which calls
+  `POST /auth/verify-email`; the code is verified with
+  `POST /auth/verify-email/otp`. Codes expire after 10 minutes with at most 5
+  attempts. Resend rotates both and is throttled and generic.
 - `JWT_SECRET`, `PUBLIC_BASE_URL`, `EMAIL_FROM`, and `SMTP_ADDR` are required.
   `PUBLIC_BASE_URL` is the UI origin and the default CORS origin.
   `CORS_ALLOWED_ORIGINS` optionally overrides the CORS origin list.

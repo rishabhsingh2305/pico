@@ -59,6 +59,7 @@ type UserService struct {
 	UpdateFunc             func(context.Context, services.UpdateUserInput) (entities.User, error)
 	ChangePasswordFunc     func(context.Context, services.ChangePasswordInput) error
 	VerifyEmailFunc        func(context.Context, string) (entities.User, error)
+	VerifyEmailOTPFunc     func(context.Context, string, string) (entities.User, error)
 	ResendVerificationFunc func(context.Context, string) error
 	ExistsFunc             func(context.Context, string) (bool, error)
 	Existing               map[string]bool
@@ -102,6 +103,13 @@ func (s *UserService) ChangePassword(ctx context.Context, in services.ChangePass
 func (s *UserService) VerifyEmail(ctx context.Context, token string) (entities.User, error) {
 	if s.VerifyEmailFunc != nil {
 		return s.VerifyEmailFunc(ctx, token)
+	}
+	return entities.User{}, nil
+}
+
+func (s *UserService) VerifyEmailOTP(ctx context.Context, email, code string) (entities.User, error) {
+	if s.VerifyEmailOTPFunc != nil {
+		return s.VerifyEmailOTPFunc(ctx, email, code)
 	}
 	return entities.User{}, nil
 }

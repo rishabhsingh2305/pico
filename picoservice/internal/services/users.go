@@ -48,10 +48,11 @@ type ListUsersInput struct {
 	Offset int
 }
 
-// EmailVerifier sends and validates email verification links.
+// EmailVerifier sends and validates email verification links and codes.
 type EmailVerifier interface {
 	Send(ctx context.Context, user entities.User) error
 	Verify(ctx context.Context, token string) (entities.User, error)
+	VerifyOTP(ctx context.Context, email, code string) (entities.User, error)
 	Resend(ctx context.Context, email string) error
 }
 
@@ -190,6 +191,9 @@ func (s *UserService) Update(ctx context.Context, in UpdateUserInput) (entities.
 	}
 
 	if emailChanged {
+		if err := s.store.ClearVerificationOTP(opCtx, updated.ID); err != nil {
+			return entities.User{}, fmt.Errorf("clear verification otp: %w", err)
+		}
 		if err := s.verification.Send(ctx, updated); err != nil {
 			return entities.User{}, fmt.Errorf("send verification email: %w", err)
 		}
@@ -201,6 +205,12 @@ func (s *UserService) Update(ctx context.Context, in UpdateUserInput) (entities.
 // verified. It returns the verified user.
 func (s *UserService) VerifyEmail(ctx context.Context, token string) (entities.User, error) {
 	return s.verification.Verify(ctx, token)
+}
+
+// VerifyEmailOTP validates a verification code and marks the user's email as
+// verified. It returns the verified user.
+func (s *UserService) VerifyEmailOTP(ctx context.Context, email, code string) (entities.User, error) {
+	return s.verification.VerifyOTP(ctx, email, code)
 }
 
 // ResendVerification sends a new verification email when the address is

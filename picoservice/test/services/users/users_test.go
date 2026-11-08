@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	"picoservice/internal/dao"
 	"picoservice/internal/entities"
 	"picoservice/internal/services"
 	"picoservice/internal/validation"
@@ -412,6 +413,22 @@ func (s *fakeStore) SetVerificationSentAt(_ context.Context, id string, sentAt t
 	return nil
 }
 
+func (s *fakeStore) SetVerificationOTP(_ context.Context, id, hash string, expiresAt time.Time) error {
+	return nil
+}
+
+func (s *fakeStore) VerificationOTP(_ context.Context, email string) (dao.VerificationOTP, error) {
+	return dao.VerificationOTP{}, entities.ErrUserNotFound
+}
+
+func (s *fakeStore) IncrementVerificationOTPAttempts(_ context.Context, id string) (int, error) {
+	return 0, nil
+}
+
+func (s *fakeStore) ClearVerificationOTP(_ context.Context, id string) error {
+	return nil
+}
+
 func (s *fakeStore) Delete(_ context.Context, id string) error {
 	if _, ok := s.users[id]; !ok {
 		return entities.ErrUserNotFound
@@ -467,6 +484,10 @@ func (v *fakeVerification) Send(_ context.Context, user entities.User) error {
 	}
 	v.sent = append(v.sent, user)
 	return nil
+}
+
+func (v *fakeVerification) VerifyOTP(_ context.Context, email, code string) (entities.User, error) {
+	return entities.User{}, nil
 }
 
 func (v *fakeVerification) Verify(context.Context, string) (entities.User, error) {

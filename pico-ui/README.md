@@ -68,8 +68,10 @@ corepack pnpm dev
 ```
 
 Open `http://localhost:5173`. Signup posts directly to `POST /users`. The
-backend sends a verification email. Clicking the link opens
-`/verify-email#token=...` in the UI, which calls the verification API. After
+backend sends a verification email containing a link and a 6-digit code.
+Clicking the link opens `/verify-email#token=...` in the UI, which calls the
+verification API. The UI currently uses the link; code verification is available
+through `POST /auth/verify-email/otp`. After
 verification, sign in at `/login`; the backend returns an access token, which
 the UI stores in `localStorage` and sends as `Authorization: Bearer`. The UI
 restores the session from `/auth/session` on reload. Then
@@ -123,8 +125,8 @@ token in the `Authorization` header. The API allows the UI origin through CORS.
   errors, pagination, and tag-filter semantics.
 - `src/lib/api-client.ts` parses JSON and throws `ApiError` with the HTTP
   status.
-- `src/features/auth/api.ts` calls `POST /users` and
-  `POST /auth/verify-email`.
+- `src/features/auth/api.ts` calls `POST /users`,
+  `POST /auth/verify-email`, and `POST /auth/verify-email/otp`.
 - `src/features/orgs/api.ts` calls `GET/POST /orgs`, `GET /orgs/{id}`, and
   `PATCH /orgs/{id}` for owner tag edits. `GET /orgs` sends `tags` for
   any-match filtering. Organization creation includes tags. Tags are normalized
@@ -165,7 +167,10 @@ token in the `Authorization` header. The API allows the UI origin through CORS.
   messages.
 - Success responses switch to the check-your-email state.
 - The verification page reads `token` from the URL fragment and posts it to the
-  API, then sends the user to `/login`.
+  API, then sends the user to `/login`. Verification emails also contain a
+  6-digit code, but the UI does not render an OTP form yet.
+- Resend returns `Retry-After: 60` and `retryAfterSeconds: 60` for all accepted
+  requests.
 - `/login` posts credentials to `/auth/login`; the backend returns an access
   token. `AuthProvider` stores it in `localStorage` and restores the session from
   `/auth/session`.
@@ -201,6 +206,7 @@ touch the network.
   out clears the stored token only. The token is in `localStorage`, so it is
   readable by JavaScript if XSS occurs.
 - No resend UI yet.
+- No OTP input in the UI yet; code verification is API-only.
 - No organization settings or membership screens.
 - No standalone project management screens; project creation opens in a dialog
   on the organization page, tag editing is on project cards, and project expenses

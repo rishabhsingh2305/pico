@@ -281,6 +281,84 @@ func TestUserVerifyEmailInternalError(t *testing.T) {
 	assertJSONError(t, rec, http.StatusInternalServerError, "internal server error")
 }
 
+func TestUserVerifyEmailOTP(t *testing.T) {
+	service := &fakes.UserService{
+		VerifyEmailOTPFunc: func(_ context.Context, email, code string) (entities.User, error) {
+			if got, want := email, "ada@example.com"; got != want {
+				t.Fatalf("expected email %q, got %q", want, got)
+			}
+			if got, want := code, "123456"; got != want {
+				t.Fatalf("expected code %q, got %q", want, got)
+			}
+			return entities.User{ID: "user-1", Email: email}, nil
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/auth/verify-email/otp", strings.NewReader(`{"email":"ada@example.com","code":"123456"}`))
+
+	controllers.NewUserController(testLogger(), service).VerifyEmailOTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	var body map[string]string
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := body["status"], "verified"; got != want {
+		t.Fatalf("expected status %q, got %q", want, got)
+	}
+}
+
+func TestUserVerifyEmailOTPErrors(t *testing.T) {
+	tests := []struct {
+		name       string
+		err        error
+		wantStatus int
+		wantError  string
+	}{
+		{
+			name:       "invalid code",
+			err:        entities.ErrInvalidVerificationCode,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "invalid or expired verification code",
+		},
+		{
+			name:       "too many attempts",
+			err:        entities.ErrTooManyVerificationAttempts,
+			wantStatus: http.StatusBadRequest,
+			wantError:  "too many verification attempts",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			service := &fakes.UserService{
+				VerifyEmailOTPFunc: func(context.Context, string, string) (entities.User, error) {
+					return entities.User{}, tt.err
+				},
+			}
+
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/auth/verify-email/otp", strings.NewReader(`{"email":"ada@example.com","code":"123456"}`))
+
+			controllers.NewUserController(testLogger(), service).VerifyEmailOTP(rec, req)
+
+			assertJSONError(t, rec, tt.wantStatus, tt.wantError)
+		})
+	}
+}
+
+func TestUserVerifyEmailOTPInvalidBody(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/auth/verify-email/otp", strings.NewReader(`{"email":"ada@example.com","unknown":true}`))
+
+	controllers.NewUserController(testLogger(), &fakes.UserService{}).VerifyEmailOTP(rec, req)
+
+	assertJSONError(t, rec, http.StatusBadRequest, "invalid request body")
+}
+
 func TestUserResendVerification(t *testing.T) {
 	service := &fakes.UserService{
 		ResendVerificationFunc: func(_ context.Context, email string) error {
@@ -299,12 +377,18 @@ func TestUserResendVerification(t *testing.T) {
 	if rec.Code != http.StatusAccepted {
 		t.Fatalf("expected status %d, got %d", http.StatusAccepted, rec.Code)
 	}
-	var body map[string]string
+	if got, want := rec.Header().Get("Retry-After"), "60"; got != want {
+		t.Fatalf("expected Retry-After %q, got %q", want, got)
+	}
+	var body map[string]any
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if got, want := body["status"], "sent"; got != want {
 		t.Fatalf("expected status %q, got %q", want, got)
+	}
+	if got, want := body["retryAfterSeconds"], float64(60); got != want {
+		t.Fatalf("expected retryAfterSeconds %v, got %v", want, got)
 	}
 }
 

@@ -45,6 +45,19 @@ const verificationHTML = `<!DOCTYPE html>
           </td>
         </tr>
         <tr>
+          <td style="padding:0 32px 24px 32px;">
+            <table role="presentation" width="100%%" cellpadding="0" cellspacing="0" border="0" style="background-color:#f4f1ea;border:1px solid #d8d2c4;border-radius:6px;">
+              <tr>
+                <td align="center" style="padding:18px 16px;">
+                  <p style="margin:0 0 6px 0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:11px;font-weight:600;letter-spacing:0.18em;text-transform:uppercase;color:#6f6a60;">Your verification code</p>
+                  <p style="margin:0;font-family:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;font-size:30px;line-height:1.2;letter-spacing:0.2em;font-weight:700;color:#11100e;">%s</p>
+                  <p style="margin:6px 0 0 0;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:12px;color:#6f6a60;">Expires in 10 minutes</p>
+                </td>
+              </tr>
+            </table>
+          </td>
+        </tr>
+        <tr>
           <td style="padding:0 32px;">
             <table role="presentation" cellpadding="0" cellspacing="0" border="0">
               <tr>
@@ -82,7 +95,7 @@ const verificationHTML = `<!DOCTYPE html>
 `
 
 // BuildVerificationMessage returns a multipart verification email.
-func BuildVerificationMessage(from, to, name, verifyURL string) []byte {
+func BuildVerificationMessage(from, to, name, verifyURL, code string) []byte {
 	var message bytes.Buffer
 
 	fmt.Fprintf(&message, "From: %s\r\n", from)
@@ -98,7 +111,10 @@ func BuildVerificationMessage(from, to, name, verifyURL string) []byte {
 	message.WriteString("Content-Transfer-Encoding: 8bit\r\n")
 	message.WriteString("\r\n")
 	fmt.Fprintf(&message, "Hi %s,\r\n\r\n", name)
-	message.WriteString("Confirm your email address to finish setting up your Pico account:\r\n\r\n")
+	message.WriteString("Your verification code is:\r\n\r\n")
+	fmt.Fprintf(&message, "  %s\r\n\r\n", code)
+	message.WriteString("This code expires in 10 minutes.\r\n\r\n")
+	message.WriteString("Or verify with this link:\r\n\r\n")
 	fmt.Fprintf(&message, "%s\r\n\r\n", verifyURL)
 	message.WriteString("This link expires in 24 hours. If you did not create an account, ignore this email.\r\n")
 	message.WriteString("\r\n")
@@ -109,8 +125,9 @@ func BuildVerificationMessage(from, to, name, verifyURL string) []byte {
 	message.WriteString("\r\n")
 
 	escapedName := html.EscapeString(name)
+	escapedCode := html.EscapeString(code)
 	escapedURL := html.EscapeString(verifyURL)
-	fmt.Fprintf(&message, verificationHTML, escapedName, escapedURL, escapedURL, escapedURL)
+	fmt.Fprintf(&message, verificationHTML, escapedName, escapedCode, escapedURL, escapedURL, escapedURL)
 	fmt.Fprintf(&message, "\r\n--%s--\r\n", verificationBoundary)
 
 	return message.Bytes()

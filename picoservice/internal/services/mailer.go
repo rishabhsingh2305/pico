@@ -4,5 +4,5 @@ import "context"
 
 // Mailer sends transactional email.
 type Mailer interface {
-	SendVerification(ctx context.Context, to, name, verifyURL string) error
+	SendVerification(ctx context.Context, to, name, verifyURL, code string) error
 }

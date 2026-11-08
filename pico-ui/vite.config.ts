@@ -27,6 +27,7 @@ export default defineConfig(({ mode }) => {
     test: {
       environment: "jsdom",
       setupFiles: ["./src/test/setup.ts"],
+      testTimeout: 10000,
       env: {
         VITE_API_BASE_URL: "/api",
       },

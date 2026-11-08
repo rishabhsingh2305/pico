@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"picoservice/internal/dao"
 	"picoservice/internal/entities"
 	"picoservice/internal/services"
 	"picoservice/internal/validation"
@@ -82,8 +83,9 @@ func TestNewVerificationTokensRejectsShortSecret(t *testing.T) {
 }
 
 func TestSend(t *testing.T) {
-	service, _, mailer, tokens := newService(t)
+	service, store, mailer, tokens := newService(t)
 	user := entities.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}
+	store.users[user.ID] = user
 
 	if err := service.Send(context.Background(), user); err != nil {
 		t.Fatalf("send verification: %v", err)
@@ -118,11 +120,120 @@ func TestSend(t *testing.T) {
 	}
 }
 
+func TestSendIncludesOTP(t *testing.T) {
+	service, store, mailer, _ := newService(t)
+	user := entities.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}
+	store.users[user.ID] = user
+
+	if err := service.Send(context.Background(), user); err != nil {
+		t.Fatalf("send verification: %v", err)
+	}
+	if len(mailer.code) != 6 {
+		t.Fatalf("expected a 6-digit code, got %q", mailer.code)
+	}
+}
+
+func TestVerifyOTP(t *testing.T) {
+	service, store, mailer, _ := newService(t)
+	user := entities.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}
+	store.users[user.ID] = user
+
+	if err := service.Send(context.Background(), user); err != nil {
+		t.Fatalf("send verification: %v", err)
+	}
+
+	verified, err := service.VerifyOTP(context.Background(), user.Email, mailer.code)
+	if err != nil {
+		t.Fatalf("verify otp: %v", err)
+	}
+	if !verified.EmailVerified {
+		t.Fatal("expected the email to be verified")
+	}
+	if store.otpHash != "" {
+		t.Fatal("expected the otp to be cleared")
+	}
+}
+
+func TestVerifyOTPRejectsWrongCode(t *testing.T) {
+	service, store, mailer, _ := newService(t)
+	user := entities.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}
+	store.users[user.ID] = user
+
+	if err := service.Send(context.Background(), user); err != nil {
+		t.Fatalf("send verification: %v", err)
+	}
+
+	wrong := "000000"
+	if mailer.code == wrong {
+		wrong = "000001"
+	}
+	if _, err := service.VerifyOTP(context.Background(), user.Email, wrong); !errors.Is(err, entities.ErrInvalidVerificationCode) {
+		t.Fatalf("expected ErrInvalidVerificationCode, got %v", err)
+	}
+	if store.otpAttempts != 1 {
+		t.Fatalf("expected one attempt, got %d", store.otpAttempts)
+	}
+}
+
+func TestVerifyOTPRejectsExpiredCode(t *testing.T) {
+	service, store, mailer, _ := newService(t)
+	user := entities.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}
+	store.users[user.ID] = user
+
+	if err := service.Send(context.Background(), user); err != nil {
+		t.Fatalf("send verification: %v", err)
+	}
+	store.otpExpires = time.Now().UTC().Add(-time.Minute)
+
+	if _, err := service.VerifyOTP(context.Background(), user.Email, mailer.code); !errors.Is(err, entities.ErrInvalidVerificationCode) {
+		t.Fatalf("expected ErrInvalidVerificationCode, got %v", err)
+	}
+}
+
+func TestVerifyOTPRejectsTooManyAttempts(t *testing.T) {
+	service, store, mailer, _ := newService(t)
+	user := entities.User{ID: "user-1", Name: "Ada", Email: "ada@example.com"}
+	store.users[user.ID] = user
+
+	if err := service.Send(context.Background(), user); err != nil {
+		t.Fatalf("send verification: %v", err)
+	}
+	store.otpAttempts = 5
+
+	if _, err := service.VerifyOTP(context.Background(), user.Email, mailer.code); !errors.Is(err, entities.ErrTooManyVerificationAttempts) {
+		t.Fatalf("expected ErrTooManyVerificationAttempts, got %v", err)
+	}
+}
+
+func TestVerifyOTPAlreadyVerified(t *testing.T) {
+	service, store, _, _ := newService(t)
+	user := entities.User{ID: "user-1", Email: "ada@example.com", EmailVerified: true}
+	store.users[user.ID] = user
+
+	verified, err := service.VerifyOTP(context.Background(), user.Email, "123456")
+	if err != nil {
+		t.Fatalf("verify otp: %v", err)
+	}
+	if !verified.EmailVerified {
+		t.Fatal("expected the verified user")
+	}
+}
+
+func TestVerifyOTPUnknownEmail(t *testing.T) {
+	service, _, _, _ := newService(t)
+
+	if _, err := service.VerifyOTP(context.Background(), "missing@example.com", "123456"); !errors.Is(err, entities.ErrInvalidVerificationCode) {
+		t.Fatalf("expected ErrInvalidVerificationCode, got %v", err)
+	}
+}
+
 func TestSendMailerFailure(t *testing.T) {
-	service, _, mailer, _ := newService(t)
+	service, store, mailer, _ := newService(t)
+	user := entities.User{ID: "user-1", Email: "ada@example.com"}
+	store.users[user.ID] = user
 	mailer.err = errors.New("smtp down")
 
-	err := service.Send(context.Background(), entities.User{ID: "user-1", Email: "ada@example.com"})
+	err := service.Send(context.Background(), user)
 	if !errors.Is(err, services.ErrEmailDelivery) {
 		t.Fatalf("expected ErrEmailDelivery, got %v", err)
 	}
@@ -267,8 +378,11 @@ func TestResendMailFailure(t *testing.T) {
 }
 
 type fakeStore struct {
-	users  map[string]entities.User
-	marked []string
+	users       map[string]entities.User
+	marked      []string
+	otpHash     string
+	otpExpires  time.Time
+	otpAttempts int
 }
 
 func (s *fakeStore) FindByID(_ context.Context, id string) (entities.User, error) {
@@ -297,6 +411,9 @@ func (s *fakeStore) MarkEmailVerified(_ context.Context, id, email string, verif
 	user.EmailVerified = true
 	user.EmailVerifiedAt = &verifiedAt
 	s.users[id] = user
+	s.otpHash = ""
+	s.otpExpires = time.Time{}
+	s.otpAttempts = 0
 	return user, nil
 }
 
@@ -310,19 +427,63 @@ func (s *fakeStore) SetVerificationSentAt(_ context.Context, id string, sentAt t
 	return nil
 }
 
+func (s *fakeStore) SetVerificationOTP(_ context.Context, id, hash string, expiresAt time.Time) error {
+	if _, ok := s.users[id]; !ok {
+		return entities.ErrUserNotFound
+	}
+	s.otpHash = hash
+	s.otpExpires = expiresAt
+	s.otpAttempts = 0
+	return nil
+}
+
+func (s *fakeStore) VerificationOTP(_ context.Context, email string) (dao.VerificationOTP, error) {
+	for id, user := range s.users {
+		if user.Email == email {
+			return dao.VerificationOTP{
+				UserID:    id,
+				Hash:      s.otpHash,
+				ExpiresAt: s.otpExpires,
+				Attempts:  s.otpAttempts,
+			}, nil
+		}
+	}
+	return dao.VerificationOTP{}, entities.ErrUserNotFound
+}
+
+func (s *fakeStore) IncrementVerificationOTPAttempts(_ context.Context, id string) (int, error) {
+	if _, ok := s.users[id]; !ok {
+		return 0, entities.ErrUserNotFound
+	}
+	s.otpAttempts++
+	return s.otpAttempts, nil
+}
+
+func (s *fakeStore) ClearVerificationOTP(_ context.Context, id string) error {
+	if _, ok := s.users[id]; !ok {
+		return entities.ErrUserNotFound
+	}
+	s.otpHash = ""
+	s.otpExpires = time.Time{}
+	s.otpAttempts = 0
+	return nil
+}
+
 type fakeMailer struct {
 	calls     int
 	to        string
 	name      string
 	verifyURL string
+	code      string
 	err       error
 }
 
-func (m *fakeMailer) SendVerification(_ context.Context, to, name, verifyURL string) error {
+func (m *fakeMailer) SendVerification(_ context.Context, to, name, verifyURL, code string) error {
 	m.calls++
 	m.to = to
 	m.name = name
 	m.verifyURL = verifyURL
+	m.code = code
 	return m.err
 }
 

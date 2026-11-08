@@ -14,6 +14,7 @@ func authRoutes(users *controllers.UserController, auth *controllers.AuthControl
 	r.Get("/session", auth.Session)
 	r.Head("/session", auth.Session)
 	r.Post("/verify-email", users.VerifyEmail)
+	r.Post("/verify-email/otp", users.VerifyEmailOTP)
 	r.Post("/verify-email/resend", users.ResendVerification)
 
 	return r

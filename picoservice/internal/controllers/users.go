@@ -5,6 +5,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,6 +25,7 @@ type UserService interface {
 	Update(ctx context.Context, in services.UpdateUserInput) (entities.User, error)
 	ChangePassword(ctx context.Context, in services.ChangePasswordInput) error
 	VerifyEmail(ctx context.Context, token string) (entities.User, error)
+	VerifyEmailOTP(ctx context.Context, email, code string) (entities.User, error)
 	ResendVerification(ctx context.Context, email string) error
 }
 
@@ -179,6 +181,34 @@ func (c *UserController) VerifyEmail(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// VerifyEmailOTP handles POST /auth/verify-email/otp.
+func (c *UserController) VerifyEmailOTP(w http.ResponseWriter, r *http.Request) {
+	var request verifyEmailOTPRequest
+	if err := httpx.DecodeJSON(w, r, &request); err != nil {
+		httpx.WriteError(w, r, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	user, err := c.service.VerifyEmailOTP(r.Context(), request.Email, request.Code)
+	if err != nil {
+		switch {
+		case errors.Is(err, entities.ErrInvalidVerificationCode):
+			httpx.WriteError(w, r, http.StatusBadRequest, "invalid or expired verification code")
+		case errors.Is(err, entities.ErrTooManyVerificationAttempts):
+			httpx.WriteError(w, r, http.StatusBadRequest, "too many verification attempts")
+		default:
+			logInternalError(c.logger, w, r, "verify email otp failed", err)
+		}
+		return
+	}
+
+	httpx.WriteJSON(w, r, http.StatusOK, verifyEmailResponse{
+		Status: "verified",
+		UserID: user.ID,
+		Email:  user.Email,
+	})
+}
+
 // ResendVerification handles POST /auth/verify-email/resend. It always
 // returns 202 for accepted requests so callers cannot probe email addresses.
 func (c *UserController) ResendVerification(w http.ResponseWriter, r *http.Request) {
@@ -197,7 +227,11 @@ func (c *UserController) ResendVerification(w http.ResponseWriter, r *http.Reque
 		logError(c.logger, r, "resend verification failed", err)
 	}
 
-	httpx.WriteJSON(w, r, http.StatusAccepted, map[string]string{"status": "sent"})
+	w.Header().Set("Retry-After", strconv.Itoa(int(services.ResendThrottle.Seconds())))
+	httpx.WriteJSON(w, r, http.StatusAccepted, resendVerificationResponse{
+		Status:            "sent",
+		RetryAfterSeconds: int(services.ResendThrottle.Seconds()),
+	})
 }
 
 func (c *UserController) writeError(w http.ResponseWriter, r *http.Request, err error) {
@@ -243,6 +277,16 @@ type resendVerificationRequest struct {
 
 type verifyEmailRequest struct {
 	Token string `json:"token"`
+}
+
+type verifyEmailOTPRequest struct {
+	Email string `json:"email"`
+	Code  string `json:"code"`
+}
+
+type resendVerificationResponse struct {
+	Status            string `json:"status"`
+	RetryAfterSeconds int    `json:"retryAfterSeconds"`
 }
 
 type verifyEmailResponse struct {

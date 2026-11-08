@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 
+	"picoservice/internal/dao"
 	"picoservice/internal/entities"
 )
 
@@ -18,8 +19,9 @@ const (
 	verificationAudience = "email-verification"
 	verificationPurpose  = "email_verification"
 	verificationTokenTTL = 24 * time.Hour
-	resendThrottle       = time.Minute
-	emailSendTimeout     = 5 * time.Second
+	// ResendThrottle is the minimum interval between verification resends.
+	ResendThrottle   = time.Minute
+	emailSendTimeout = 5 * time.Second
 )
 
 var (
@@ -36,6 +38,10 @@ type VerificationUserStore interface {
 	FindByEmail(ctx context.Context, email string) (entities.User, error)
 	MarkEmailVerified(ctx context.Context, id, email string, verifiedAt time.Time) (entities.User, error)
 	SetVerificationSentAt(ctx context.Context, id string, sentAt time.Time) error
+	SetVerificationOTP(ctx context.Context, id, hash string, expiresAt time.Time) error
+	VerificationOTP(ctx context.Context, email string) (dao.VerificationOTP, error)
+	IncrementVerificationOTPAttempts(ctx context.Context, id string) (int, error)
+	ClearVerificationOTP(ctx context.Context, id string) error
 }
 
 // VerificationClaims contains the email verification token claims.
@@ -104,12 +110,14 @@ func (t *VerificationTokens) Parse(raw string) (VerificationClaims, error) {
 	return claims, nil
 }
 
-// EmailVerificationService sends and validates email verification links.
+// EmailVerificationService sends and validates email verification links and
+// codes.
 type EmailVerificationService struct {
 	users   VerificationUserStore
 	tokens  *VerificationTokens
 	mailer  Mailer
 	baseURL string
+	otp     *OTPHasher
 }
 
 // NewEmailVerificationService returns a verification service. baseURL is the
@@ -120,21 +128,34 @@ func NewEmailVerificationService(users VerificationUserStore, tokens *Verificati
 		tokens:  tokens,
 		mailer:  mailer,
 		baseURL: strings.TrimRight(baseURL, "/"),
+		otp:     newOTPHasher(tokens.secret),
 	}
 }
 
-// Send generates a token and emails the verification link to user.
+// Send generates a token and verification code and emails them to user.
 func (s *EmailVerificationService) Send(ctx context.Context, user entities.User) error {
-	token, err := s.tokens.Issue(user, time.Now().UTC())
+	now := time.Now().UTC()
+	token, err := s.tokens.Issue(user, now)
 	if err != nil {
 		return fmt.Errorf("issue verification token: %w", err)
+	}
+
+	code, err := generateOTP()
+	if err != nil {
+		return err
+	}
+
+	otpCtx, otpCancel := context.WithTimeout(ctx, operationTimeout)
+	defer otpCancel()
+	if err := s.users.SetVerificationOTP(otpCtx, user.ID, s.otp.Hash(code), now.Add(otpTTL)); err != nil {
+		return fmt.Errorf("store verification otp: %w", err)
 	}
 
 	verifyURL := s.baseURL + "/verify-email#token=" + url.QueryEscape(token)
 	sendCtx, cancel := context.WithTimeout(ctx, emailSendTimeout)
 	defer cancel()
 
-	if err := s.mailer.SendVerification(sendCtx, user.Email, user.Name, verifyURL); err != nil {
+	if err := s.mailer.SendVerification(sendCtx, user.Email, user.Name, verifyURL, code); err != nil {
 		return fmt.Errorf("%w: %w", ErrEmailDelivery, err)
 	}
 	return nil
@@ -175,6 +196,80 @@ func (s *EmailVerificationService) Verify(ctx context.Context, token string) (en
 	return verified, nil
 }
 
+// VerifyOTP validates a verification code and marks the matching user's email
+// as verified.
+func (s *EmailVerificationService) VerifyOTP(ctx context.Context, rawEmail, code string) (entities.User, error) {
+	email, err := validateEmail(rawEmail)
+	if err != nil {
+		return entities.User{}, entities.ErrInvalidVerificationCode
+	}
+
+	code = strings.TrimSpace(code)
+	if !isOTP(code) {
+		return entities.User{}, entities.ErrInvalidVerificationCode
+	}
+
+	opCtx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
+
+	user, err := s.users.FindByEmail(opCtx, email)
+	if errors.Is(err, entities.ErrUserNotFound) {
+		return entities.User{}, entities.ErrInvalidVerificationCode
+	}
+	if err != nil {
+		return entities.User{}, fmt.Errorf("find user: %w", err)
+	}
+	if user.EmailVerified {
+		return user, nil
+	}
+
+	otp, err := s.users.VerificationOTP(opCtx, email)
+	if errors.Is(err, entities.ErrUserNotFound) {
+		return entities.User{}, entities.ErrInvalidVerificationCode
+	}
+	if err != nil {
+		return entities.User{}, fmt.Errorf("get verification otp: %w", err)
+	}
+	if otp.Hash == "" || otp.ExpiresAt.IsZero() || !otp.ExpiresAt.After(time.Now().UTC()) {
+		return entities.User{}, entities.ErrInvalidVerificationCode
+	}
+	if otp.Attempts >= otpMaxAttempts {
+		return entities.User{}, entities.ErrTooManyVerificationAttempts
+	}
+
+	if !s.otp.Compare(otp.Hash, code) {
+		attempts, err := s.users.IncrementVerificationOTPAttempts(opCtx, user.ID)
+		if err != nil {
+			return entities.User{}, fmt.Errorf("increment verification attempts: %w", err)
+		}
+		if attempts >= otpMaxAttempts {
+			return entities.User{}, entities.ErrTooManyVerificationAttempts
+		}
+		return entities.User{}, entities.ErrInvalidVerificationCode
+	}
+
+	verified, err := s.users.MarkEmailVerified(opCtx, user.ID, user.Email, time.Now().UTC())
+	if errors.Is(err, entities.ErrUserNotFound) {
+		return entities.User{}, entities.ErrInvalidVerificationCode
+	}
+	if err != nil {
+		return entities.User{}, fmt.Errorf("mark email verified: %w", err)
+	}
+	return verified, nil
+}
+
+func isOTP(code string) bool {
+	if len(code) != otpLength {
+		return false
+	}
+	for _, r := range code {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
 // Resend sends a new verification email when the user exists, is unverified,
 // and is outside the resend throttle window.
 func (s *EmailVerificationService) Resend(ctx context.Context, rawEmail string) error {
@@ -197,7 +292,7 @@ func (s *EmailVerificationService) Resend(ctx context.Context, rawEmail string) 
 	}
 
 	now := time.Now().UTC()
-	if user.VerificationSentAt != nil && now.Sub(*user.VerificationSentAt) < resendThrottle {
+	if user.VerificationSentAt != nil && now.Sub(*user.VerificationSentAt) < ResendThrottle {
 		return nil
 	}
 

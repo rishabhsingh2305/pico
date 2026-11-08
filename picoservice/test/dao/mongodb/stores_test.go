@@ -113,6 +113,39 @@ func TestStoresIntegration(t *testing.T) {
 		t.Fatalf("expected user %q, got %q", user.ID, foundByEmail.ID)
 	}
 
+	otpExpires := now.Add(10 * time.Minute)
+	if err := userStore.SetVerificationOTP(ctx, user.ID, "otp-hash", otpExpires); err != nil {
+		t.Fatalf("set verification otp: %v", err)
+	}
+	otp, err := userStore.VerificationOTP(ctx, user.Email)
+	if err != nil {
+		t.Fatalf("get verification otp: %v", err)
+	}
+	if got, want := otp.Hash, "otp-hash"; got != want {
+		t.Fatalf("expected otp hash %q, got %q", want, got)
+	}
+	if otp.Attempts != 0 {
+		t.Fatalf("expected zero attempts, got %d", otp.Attempts)
+	}
+	if !otp.ExpiresAt.Equal(otpExpires) {
+		t.Fatalf("expected expiry %v, got %v", otpExpires, otp.ExpiresAt)
+	}
+	if attempts, err := userStore.IncrementVerificationOTPAttempts(ctx, user.ID); err != nil {
+		t.Fatalf("increment otp attempts: %v", err)
+	} else if attempts != 1 {
+		t.Fatalf("expected one attempt, got %d", attempts)
+	}
+	if err := userStore.ClearVerificationOTP(ctx, user.ID); err != nil {
+		t.Fatalf("clear verification otp: %v", err)
+	}
+	otp, err = userStore.VerificationOTP(ctx, user.Email)
+	if err != nil {
+		t.Fatalf("get cleared verification otp: %v", err)
+	}
+	if otp.Hash != "" {
+		t.Fatalf("expected the otp to be cleared, got %q", otp.Hash)
+	}
+
 	verified, err := userStore.MarkEmailVerified(ctx, user.ID, user.Email, now)
 	if err != nil {
 		t.Fatalf("mark email verified: %v", err)

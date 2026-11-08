@@ -74,7 +74,7 @@ func TestSendVerificationRejectsInvalidRecipient(t *testing.T) {
 		t.Fatalf("create sender: %v", err)
 	}
 
-	if err := sender.SendVerification(context.Background(), "not-an-email", "Ada", "http://localhost/verify"); err == nil {
+	if err := sender.SendVerification(context.Background(), "not-an-email", "Ada", "http://localhost/verify", "123456"); err == nil {
 		t.Fatal("expected an invalid recipient error")
 	}
 }
@@ -85,6 +85,7 @@ func TestBuildVerificationMessage(t *testing.T) {
 		"ada@example.com",
 		"<Ada>",
 		"https://example.com/auth/verify-email?token=abc&next=1",
+		"123456",
 	))
 
 	checks := []string{
@@ -98,6 +99,10 @@ func TestBuildVerificationMessage(t *testing.T) {
 		"&lt;Ada&gt;",
 		"https://example.com/auth/verify-email?token=abc&amp;next=1",
 		"Verify email",
+		"123456",
+		"Your verification code",
+		"Expires in 10 minutes",
+		"This code expires in 10 minutes.",
 		"background-color:#f4f1ea",
 		"background-color:#fbf8f1",
 		"background-color:#c63c1e",

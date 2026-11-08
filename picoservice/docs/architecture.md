@@ -83,6 +83,9 @@ users
   emailVerified       bool
   emailVerifiedAt     time | null
   verificationSentAt  time | null
+  verificationOTPHash string
+  verificationOTPExpiresAt time | null
+  verificationOTPAttempts int
   createdAt           time
   updatedAt           time
 
@@ -183,12 +186,14 @@ is a temporary fallback.
 | Method | Path | Success | Notes |
 | --- | --- | --- | --- |
 | POST | `/auth/verify-email` | 200 | `{"token":"..."}`; validates the JWT, marks the email verified, and returns `status`, `userId`, and `email` |
-| POST | `/auth/verify-email/resend` | 202 | `{"email"}`; generic for unknown or verified addresses and throttled to one send per 60 seconds |
+| POST | `/auth/verify-email/otp` | 200 | `{"email":"...","code":"123456"}`; validates the code and returns `status`, `userId`, and `email` |
+| POST | `/auth/verify-email/resend` | 202 | `{"email"}`; returns `{"status":"sent","retryAfterSeconds":60}` and `Retry-After: 60`; generic for unknown or verified addresses and throttled to one send per 60 seconds |
 
 Verification tokens are HS256 JWTs valid for 24 hours and are sent as links in
-email. Verification is idempotent. Invalid, expired, or mismatched tokens
-return `400` with a generic message. Resend requests for unknown or already
-verified addresses still return `202` to avoid enumeration.
+email. Each email also contains a 6-digit code valid for 10 minutes with at most
+5 failed attempts. Verification is idempotent. Invalid, expired, or mismatched
+tokens or codes return `400` with a generic message. Resend requests for unknown
+or already verified addresses still return `202` to avoid enumeration.
 
 ### Organizations
 
@@ -312,18 +317,23 @@ best-effort cleanup.
   `{PUBLIC_BASE_URL}/verify-email#token=...`, where `PUBLIC_BASE_URL` is the UI
   origin. The UI reads the fragment and calls `POST /auth/verify-email` with the
   token in the JSON body.
+- The same email contains a 6-digit code. `POST /auth/verify-email/otp` accepts
+  `{"email":"...","code":"..."}` and marks the email verified.
+- Codes expire after 10 minutes and allow at most 5 failed attempts. Only an
+  HMAC-SHA256 hash is stored, keyed with `JWT_SECRET`.
 - Tokens use HS256 with `JWT_SECRET` (at least 32 bytes). Claims are `sub`
   (user ID), `email`, `purpose=email_verification`, issuer, audience, `iat`, and
   `exp`. Tokens expire after 24 hours.
-- Verification loads the user, compares the token email with the current email,
-  and marks the user verified. Replaying a valid link is idempotent.
-- Changing the email address clears verification and sends a new link. If
-  delivery fails, the new address remains stored and unverified; resend can
+- Verification loads the user, compares the token or code with the stored
+  state, and marks the user verified. Replaying a valid link is idempotent.
+- Changing the email address clears verification and sends a new link and code.
+  If delivery fails, the new address remains stored and unverified; resend can
   retry.
 - Signup deletes the new user as a best-effort cleanup when the email cannot be
   sent, so the caller can retry.
-- Resend is throttled to one send per 60 seconds and always returns `202` for
-  unknown or verified addresses to prevent enumeration.
+- Resend is throttled to one send per 60 seconds and always returns `202` with
+  `Retry-After: 60` and `{"status":"sent","retryAfterSeconds":60}` for unknown
+  or verified addresses to prevent enumeration. It rotates the code.
 - SMTP uses STARTTLS when the server advertises it. `SMTP_USERNAME` and
   `SMTP_PASSWORD` are optional and must be set together.
 

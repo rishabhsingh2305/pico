@@ -36,6 +36,9 @@
   tag toggles it in the compact filter toolbar.
 - `/api-docs` is a public, searchable, in-app API reference covering every
   backend endpoint. Content lives in typed data under `src/features/api-docs`.
+- Verification emails contain a link and a 6-digit code. The UI verifies via
+  the link only; `POST /auth/verify-email/otp` is API-only for now. Resend
+  rotates the code and returns `Retry-After: 60`.
 - Organization settings, memberships, project rename/delete, and expense edit are
   not implemented yet.
 - Login posts to `/auth/login`; the backend returns an access token.

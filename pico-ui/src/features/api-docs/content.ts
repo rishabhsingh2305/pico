@@ -368,7 +368,7 @@ export const API_SECTIONS: ApiSection[] = [
     id: "email-verification",
     title: "Email verification",
     description:
-      "Verification links contain a signed JWT valid for 24 hours. Email verification proves email ownership, but it is not an access token.",
+      "Verification emails contain a signed JWT link valid for 24 hours and a 6-digit code valid for 10 minutes. Email verification proves email ownership, but it is not an access token.",
     endpoints: [
       {
         id: "auth-verify-email",
@@ -394,24 +394,50 @@ export const API_SECTIONS: ApiSection[] = [
         ],
       },
       {
+        id: "auth-verify-email-otp",
+        method: "POST",
+        path: "/auth/verify-email/otp",
+        title: "Verify an email with a code",
+        summary:
+          "Validates the 6-digit code from the verification email and marks the matching email as verified.",
+        access: "Public",
+        requestBody: `{\n  "email": "ada@example.com",\n  "code": "123456"\n}`,
+        response: {
+          status: 200,
+          description: "The email is verified. Verification is idempotent.",
+          body: `{\n  "status": "verified",\n  "userId": "64f1a2b3c4d5e6f7890a5678",\n  "email": "ada@example.com"\n}`,
+        },
+        errors: [
+          "400 — invalid, expired, or missing code",
+          "400 — too many failed attempts",
+          "500 — unexpected verification failure",
+        ],
+        notes: [
+          "Codes expire after 10 minutes and allow at most 5 failed attempts.",
+          "Resending a verification email rotates the code.",
+        ],
+      },
+      {
         id: "auth-resend-verification",
         method: "POST",
         path: "/auth/verify-email/resend",
         title: "Resend verification email",
         summary:
-          "Sends another verification email to a registered, unverified address.",
+          "Sends another verification email with a new link and code to a registered, unverified address.",
         access: "Public",
         requestBody: `{\n  "email": "ada@example.com"\n}`,
         response: {
           status: 202,
           description:
-            "Request accepted. The response is intentionally generic for unknown and already-verified addresses.",
-          body: '{\n  "status": "sent"\n}',
+            "Request accepted. The response is intentionally generic for unknown and already-verified addresses. Retry-After: 60 is also returned.",
+          body: '{\n  "status": "sent",\n  "retryAfterSeconds": 60\n}',
         },
         errors: ["400 — malformed email or invalid JSON"],
         notes: [
           "Resend is throttled to once per 60 seconds per user.",
           "Unknown and already-verified addresses still return 202 to prevent account enumeration.",
+          "Each resend rotates the 6-digit code.",
+          "Retry-After and retryAfterSeconds are always 60, even when no email was sent, to avoid enumeration.",
         ],
       },
     ],

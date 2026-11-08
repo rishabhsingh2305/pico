@@ -21,6 +21,12 @@ var (
 	// ErrInvalidToken is returned for malformed, expired, or invalid access
 	// tokens.
 	ErrInvalidToken = errors.New("invalid or expired token")
+	// ErrInvalidVerificationCode is returned for a wrong, expired, or missing
+	// email verification code.
+	ErrInvalidVerificationCode = errors.New("invalid or expired verification code")
+	// ErrTooManyVerificationAttempts is returned after too many failed code
+	// attempts.
+	ErrTooManyVerificationAttempts = errors.New("too many verification attempts")
 	// ErrPasswordMismatch is returned by a Hasher when a password does not
 	// match a stored hash.
 	ErrPasswordMismatch = errors.New("password does not match")

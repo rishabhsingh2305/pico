@@ -79,8 +79,8 @@ func NewSMTP(cfg Config) (*Sender, error) {
 	}, nil
 }
 
-// SendVerification sends a verification link to the recipient.
-func (s *Sender) SendVerification(ctx context.Context, to, name, verifyURL string) error {
+// SendVerification sends a verification link and code to the recipient.
+func (s *Sender) SendVerification(ctx context.Context, to, name, verifyURL, code string) error {
 	if strings.ContainsAny(to, "\r\n") {
 		return fmt.Errorf("invalid recipient address")
 	}
@@ -88,7 +88,7 @@ func (s *Sender) SendVerification(ctx context.Context, to, name, verifyURL strin
 		return fmt.Errorf("invalid recipient address: %w", err)
 	}
 
-	message := BuildVerificationMessage(s.from, to, name, verifyURL)
+	message := BuildVerificationMessage(s.from, to, name, verifyURL, code)
 
 	dialer := net.Dialer{Timeout: s.timeout}
 	conn, err := dialer.DialContext(ctx, "tcp", s.addr)

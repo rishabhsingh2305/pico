@@ -19,11 +19,13 @@ browser
   -> JSON response
 ```
 
-The backend sends a verification email as part of `POST /users`. The email link
-opens the UI at `/verify-email#token=...`; the UI reads the fragment and calls
-the API. After verification the user signs in at `/login`, which returns an
-access token. `AuthProvider` stores it in `localStorage` and restores the
-session from `/auth/session` on load.
+The backend sends a verification email as part of `POST /users`. The email
+contains a link and a 6-digit code. The link opens the UI at
+`/verify-email#token=...`; the UI reads the fragment and calls the API. The UI
+uses the link only for now; code verification is available through
+`POST /auth/verify-email/otp`. After verification the user signs in at
+`/login`, which returns an access token. `AuthProvider` stores it in
+`localStorage` and restores the session from `/auth/session` on load.
 
 ## Structure
 
@@ -166,6 +168,11 @@ stored token and calls `/auth/logout`.
 The fragment is not sent to the static host or its access logs. The token is
 sent to the API only in the POST body. Verification does not create a session;
 the user signs in afterwards.
+
+The same email also contains a 6-digit code valid for 10 minutes with at most 5
+attempts. The UI does not render an OTP form yet; clients can call
+`POST /auth/verify-email/otp` with `{"email":"...","code":"..."}`. Resend
+rotates the code and returns `Retry-After: 60` plus `retryAfterSeconds: 60`.
 
 ## Authenticated workspace
 
@@ -414,6 +421,35 @@ Request:
 
 Success: `200` with `{"status":"verified","userId":"...","email":"..."}`.
 Invalid, expired, or mismatched tokens return `400` with a generic message.
+
+### `POST /auth/verify-email/otp`
+
+Request:
+
+```json
+{
+  "email": "ada@example.com",
+  "code": "123456"
+}
+```
+
+Success: `200` with `{"status":"verified","userId":"...","email":"..."}`.
+Invalid or expired codes return `400`; too many failed attempts also return
+`400` with a distinct message.
+
+### `POST /auth/verify-email/resend`
+
+Request:
+
+```json
+{
+  "email": "ada@example.com"
+}
+```
+
+Success: `202` with `{"status":"sent","retryAfterSeconds":60}` and the
+`Retry-After: 60` header. The response is generic for unknown or verified
+addresses and each resend rotates the code.
 
 ### `GET /orgs?userId=...&tags=food,travel&limit=100`
 
@@ -767,6 +803,7 @@ it and refreshes the current page and totals.
 - The legacy `userId` query parameter is still sent alongside the bearer token
   until the backend removes the temporary fallback.
 - No resend UI; an expired link has no recovery path in the UI yet.
+- No OTP input in the UI yet; code verification is API-only.
 - No organization settings or membership screens.
 - The editorial visual system currently covers the shell, page headers, org
   list/detail, filter toolbars, and the project ledger. Auth, dialogs, and API
