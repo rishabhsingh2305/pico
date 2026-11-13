@@ -1,11 +1,14 @@
 import { AppRouter } from "@/app/router"
+import { QueryProvider } from "@/app/query-provider"
 import { AuthProvider } from "@/features/auth/auth-provider"
 
 export function App() {
   return (
-    <AuthProvider>
-      <AppRouter />
-    </AuthProvider>
+    <QueryProvider>
+      <AuthProvider>
+        <AppRouter />
+      </AuthProvider>
+    </QueryProvider>
   )
 }
 

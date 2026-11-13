@@ -10,6 +10,7 @@ and project debits and credits.
 ```text
 browser
   -> React signup / login / verification / dashboard / organization / project / expense pages
+  -> TanStack Query hooks (cache, dedupe, invalidation)
   -> requestJSON (fetch, credentials: omit)
   -> VITE_API_BASE_URL (default http://localhost:8080) or the production API origin
   -> picoservice Lambda Function URL
@@ -32,7 +33,10 @@ uses the link only for now; code verification is available through
 ```text
 src/
 ├── app/
-│   └── router.tsx                   # Route table
+│   ├── router.tsx                   # Route table
+│   ├── query-client.ts              # TanStack Query client defaults
+│   ├── query-keys.ts                # Shared query key factory
+│   └── query-provider.tsx           # QueryClientProvider wiring
 ├── components/
 │   ├── app-shell.tsx                # Sidebar shell for signed-in screens
 │   ├── page-header.tsx              # Shared page title and actions
@@ -708,11 +712,16 @@ The signup form has three fields and one request. A pure validation function and
 local state are enough. Add a form library only when multiple forms repeat the
 same behavior.
 
-### Fetch wrapper instead of a data library
+### TanStack Query for server data
 
-`requestJSON` provides typed JSON parsing and a single `ApiError` shape. Caching
-and retries are not needed for one request. Add a data library when list/detail
-screens need shared caching.
+Feature `api.ts` modules still own `requestJSON` and the wire contract.
+TanStack Query owns fetching, caching, and invalidation. Query keys live in
+`src/app/query-keys.ts`; the client and provider live in `src/app`. Org and
+project records are cached by ID, and project pages seed their project-detail
+cache from the project list. Expense list and summary queries are keyed by
+project plus filters, so pagination reuses the page cache and does not refetch
+the summary. Mutations invalidate the affected query roots instead of manually
+reloading effects. UI-only state remains local React state.
 
 ### Strong generated-code lint exception
 
@@ -841,7 +850,10 @@ it and refreshes the current page and totals.
   because the list is assembled from membership IDs. A merged membership/org
   query would be needed at larger counts.
 - Date filters use the browser's local timezone; there is no timezone selector.
-- No global state or server-state cache.
+- TanStack Query caches server data for 30 seconds by default; a stale project can
+  briefly appear until a mutation invalidates its query or the cache expires.
+- The organization list and dashboard still use effect-based fetching. Migrate
+  them to TanStack Query incrementally; the org/project pages are already on it.
 - No deployment configuration or static-host SPA rewrite.
 - `VITE_API_BASE_URL` is fixed at build time, so each environment needs its own
   build.

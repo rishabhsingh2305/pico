@@ -603,11 +603,14 @@ describe("ProjectDetailPage", () => {
     expect(await screen.findByText("Lunch")).toBeInTheDocument()
     expect(screen.getByText(/1 expense · .*12\.99/)).toBeInTheDocument()
 
-    const lastExpenseURL = expenseListURLs(fetchMock).at(-1)
-    expect(lastExpenseURL?.searchParams.get("offset")).toBe("0")
-    expect(lastExpenseURL?.searchParams.get("tags")).toBeNull()
-    expect(lastExpenseURL?.searchParams.get("from")).toBeNull()
-    expect(lastExpenseURL?.searchParams.get("to")).toBeNull()
+    const unfilteredURL = expenseListURLs(fetchMock).find(
+      (url) =>
+        url.searchParams.get("offset") === "0" &&
+        url.searchParams.get("tags") === null &&
+        url.searchParams.get("from") === null &&
+        url.searchParams.get("to") === null
+    )
+    expect(unfilteredURL).toBeDefined()
   })
 
   it("normalizes a custom range selected end-first", async () => {

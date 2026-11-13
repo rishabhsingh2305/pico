@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState, type UIEvent } from "react"
 import { Link, useParams } from "react-router"
 import {
   ArrowLeftIcon,
@@ -31,26 +31,12 @@ import {
   formatExpenseDateShort,
   formatMoney,
 } from "@/features/expenses/format"
-import {
-  dailyDebitTotals,
-  monthRange,
-  percentChange,
-  previousMonthRange,
-} from "@/features/expenses/months"
 import type { Expense, ExpenseSummaryItem } from "@/features/expenses/types"
 import { usePageTitle } from "@/hooks/use-page-title"
 import { ApiError } from "@/lib/api-client"
 import { cn } from "@/lib/utils"
 
 type Status = "loading" | "ready" | "error"
-
-type Insight = {
-  currentTotal: number
-  previousTotal: number
-  dailyTotals: number[]
-  monthLabel: string
-  truncated: boolean
-}
 
 export function CategoryPage() {
   const { categoryId = "" } = useParams()
@@ -72,16 +58,32 @@ export function CategoryPage() {
   const [filters, setFilters] = useState<AppliedFilters>(defaultFilters)
   const [filterSheetOpen, setFilterSheetOpen] = useState(false)
   const [reload, setReload] = useState(0)
+  const [totalsCollapsed, setTotalsCollapsed] = useState(false)
+  const listRef = useRef<HTMLDivElement>(null)
+  const lastScrollTop = useRef(0)
+  const lastListHeight = useRef(0)
+  const scrollAccumulator = useRef(0)
+  const ignoreScrollUntil = useRef(0)
+  const scrollFrame = useRef<number | null>(null)
+  const scrollLockTimer = useRef<number | null>(null)
+  const totalsCollapsedRef = useRef(false)
 
   const [isFormOpen, setIsFormOpen] = useState(false)
-  const [insight, setInsight] = useState<Insight | null>(null)
-  const [insightStatus, setInsightStatus] = useState<
-    "loading" | "ready" | "error"
-  >("loading")
 
   const activeCount = activeFilterCount(filters)
 
   usePageTitle(category ? `${category.name} · Expenses` : "Category · Expenses")
+
+  useEffect(() => {
+    return () => {
+      if (scrollFrame.current !== null) {
+        window.cancelAnimationFrame(scrollFrame.current)
+      }
+      if (scrollLockTimer.current !== null) {
+        window.clearTimeout(scrollLockTimer.current)
+      }
+    }
+  }, [])
 
   useEffect(() => {
     if (!categoryId) {
@@ -193,59 +195,6 @@ export function CategoryPage() {
     }
   }, [orgId, categoryId, filters, logout, expensesAttempt, reload])
 
-  useEffect(() => {
-    if (!categoryId) {
-      return
-    }
-
-    let cancelled = false
-    const current = monthRange()
-    const previous = previousMonthRange()
-
-    Promise.all([
-      listExpenses(orgId, categoryId, {
-        from: current.from,
-        to: current.to,
-        limit: 100,
-      }),
-      summarizeExpenses(orgId, categoryId, {
-        from: current.from,
-        to: current.to,
-      }),
-      summarizeExpenses(orgId, categoryId, {
-        from: previous.from,
-        to: previous.to,
-      }),
-    ])
-      .then(([currentMonth, currentSummary, previousSummary]) => {
-        if (cancelled) {
-          return
-        }
-        setInsight({
-          currentTotal: currentSummary.items[0]?.totalDebit ?? 0,
-          previousTotal: previousSummary.items[0]?.totalDebit ?? 0,
-          dailyTotals: dailyDebitTotals(currentMonth.items, current.start),
-          monthLabel: current.label,
-          truncated: currentMonth.nextOffset !== null,
-        })
-        setInsightStatus("ready")
-      })
-      .catch(async (caught: unknown) => {
-        if (cancelled) {
-          return
-        }
-        if (caught instanceof ApiError && caught.status === 401) {
-          await logout()
-          return
-        }
-        setInsightStatus("error")
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [orgId, categoryId, logout, reload])
-
   const retryCategory = useCallback(() => {
     setCategoryStatus("loading")
     setCategoryError("")
@@ -258,19 +207,116 @@ export function CategoryPage() {
     setExpensesAttempt((current) => current + 1)
   }, [])
 
-  const handleCreated = useCallback(() => {
+  function handleCreated() {
+    resetListPosition()
     setReload((current) => current + 1)
-  }, [])
+  }
+
+  function setCollapsed(next: boolean) {
+    if (totalsCollapsedRef.current === next) {
+      return
+    }
+    totalsCollapsedRef.current = next
+    scrollAccumulator.current = 0
+    ignoreScrollUntil.current = window.performance.now() + 260
+    setTotalsCollapsed(next)
+
+    if (scrollLockTimer.current !== null) {
+      window.clearTimeout(scrollLockTimer.current)
+    }
+    scrollLockTimer.current = window.setTimeout(() => {
+      if (listRef.current) {
+        lastScrollTop.current = listRef.current.scrollTop
+        lastListHeight.current = listRef.current.clientHeight
+      }
+      scrollAccumulator.current = 0
+    }, 260)
+  }
+
+  function resetListPosition() {
+    if (listRef.current) {
+      listRef.current.scrollTop = 0
+      lastListHeight.current = listRef.current.clientHeight
+    }
+    if (scrollLockTimer.current !== null) {
+      window.clearTimeout(scrollLockTimer.current)
+      scrollLockTimer.current = null
+    }
+    ignoreScrollUntil.current = 0
+    lastScrollTop.current = 0
+    scrollAccumulator.current = 0
+    totalsCollapsedRef.current = false
+    setTotalsCollapsed(false)
+  }
+
+  function processScroll(element: HTMLDivElement) {
+    const top = element.scrollTop
+    const height = element.clientHeight
+
+    // A header height transition changes the scroll container height. Treat the
+    // resulting scroll event as layout movement, not user intent.
+    if (
+      lastListHeight.current !== 0 &&
+      Math.abs(height - lastListHeight.current) > 4
+    ) {
+      lastListHeight.current = height
+      lastScrollTop.current = top
+      scrollAccumulator.current = 0
+      return
+    }
+    lastListHeight.current = height
+
+    if (window.performance.now() < ignoreScrollUntil.current) {
+      lastScrollTop.current = top
+      return
+    }
+
+    const delta = top - lastScrollTop.current
+    lastScrollTop.current = top
+
+    if (top <= 16) {
+      scrollAccumulator.current = 0
+      setCollapsed(false)
+      return
+    }
+    if (delta === 0) {
+      return
+    }
+
+    if (delta > 0 !== scrollAccumulator.current > 0) {
+      scrollAccumulator.current = 0
+    }
+    scrollAccumulator.current += delta
+
+    if (scrollAccumulator.current > 32 && top > 40) {
+      setCollapsed(true)
+    } else if (scrollAccumulator.current < -32) {
+      setCollapsed(false)
+    }
+  }
+
+  function handleListScroll(event: UIEvent<HTMLDivElement>) {
+    const element = event.currentTarget
+    if (scrollFrame.current !== null) {
+      return
+    }
+    scrollFrame.current = window.requestAnimationFrame(() => {
+      scrollFrame.current = null
+      processScroll(element)
+    })
+  }
 
   function updateFilters(updater: (current: AppliedFilters) => AppliedFilters) {
     setExpensesStatus("loading")
     setFilters(updater)
+    resetListPosition()
   }
 
   function applyFilters(next: AppliedFilters) {
     setExpensesStatus("loading")
     setFilters(next)
     setFilterSheetOpen(false)
+    resetListPosition()
   }
 
   function removeDateFilter() {
@@ -356,43 +402,106 @@ export function CategoryPage() {
                 </div>
               </section>
 
-              <div className="mt-3 grid grid-cols-2 border-2 border-foreground sm:mt-4 sm:grid-cols-3">
-                <div className="col-span-2 flex items-center justify-between border-b-2 border-foreground bg-accent p-3 text-accent-foreground sm:col-span-1 sm:block sm:border-r-2 sm:border-b-0 sm:p-5">
-                  <span className="text-[0.65rem] font-semibold sm:text-xs">
-                    Net
-                  </span>
-                  <MoneyValue
-                    minor={summary?.netTotal ?? 0}
-                    currency={category.currency}
-                    className="font-display text-lg leading-none whitespace-nowrap sm:mt-1 sm:block sm:text-3xl"
-                  />
+              <div className="mt-3 sm:mt-4">
+                <div
+                  aria-hidden={totalsCollapsed}
+                  className={cn(
+                    "grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
+                    totalsCollapsed
+                      ? "grid-rows-[0fr] opacity-0"
+                      : "grid-rows-[1fr] opacity-100"
+                  )}
+                >
+                  <div className="min-h-0 overflow-hidden">
+                    <div className="grid grid-cols-2 border-2 border-foreground sm:grid-cols-3">
+                      <div className="col-span-2 flex items-center justify-between border-b-2 border-foreground bg-accent p-3 text-accent-foreground sm:col-span-1 sm:block sm:border-r-2 sm:border-b-0 sm:p-5">
+                        <span className="text-[0.65rem] font-semibold sm:text-xs">
+                          Net
+                        </span>
+                        <MoneyValue
+                          minor={summary?.netTotal ?? 0}
+                          currency={category.currency}
+                          className="font-display text-lg leading-none whitespace-nowrap sm:mt-1 sm:block sm:text-3xl"
+                        />
+                      </div>
+                      <div className="border-r-2 border-foreground bg-destructive p-3 text-destructive-foreground sm:p-5">
+                        <span className="text-[0.65rem] font-semibold sm:text-xs">
+                          Spent
+                        </span>
+                        <MoneyValue
+                          minor={summary?.totalDebit ?? 0}
+                          currency={category.currency}
+                          className="mt-1 block font-display text-sm leading-none whitespace-nowrap sm:text-3xl"
+                        />
+                      </div>
+                      <div className="bg-card p-3 text-card-foreground sm:p-5">
+                        <span className="text-[0.65rem] font-semibold sm:text-xs">
+                          Received
+                        </span>
+                        <MoneyValue
+                          minor={summary?.totalCredit ?? 0}
+                          currency={category.currency}
+                          className="mt-1 block font-display text-sm leading-none whitespace-nowrap sm:text-3xl"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div className="border-r-2 border-foreground bg-destructive p-3 text-destructive-foreground sm:p-5">
-                  <span className="text-[0.65rem] font-semibold sm:text-xs">
-                    Spent
-                  </span>
-                  <MoneyValue
-                    minor={summary?.totalDebit ?? 0}
-                    currency={category.currency}
-                    className="mt-1 block font-display text-sm leading-none whitespace-nowrap sm:text-3xl"
-                  />
-                </div>
-                <div className="bg-card p-3 text-card-foreground sm:p-5">
-                  <span className="text-[0.65rem] font-semibold sm:text-xs">
-                    Received
-                  </span>
-                  <MoneyValue
-                    minor={summary?.totalCredit ?? 0}
-                    currency={category.currency}
-                    className="mt-1 block font-display text-sm leading-none whitespace-nowrap sm:text-3xl"
-                  />
+
+                <div
+                  aria-hidden={!totalsCollapsed}
+                  className={cn(
+                    "grid transition-[grid-template-rows,opacity] duration-200 ease-out motion-reduce:transition-none",
+                    totalsCollapsed
+                      ? "grid-rows-[1fr] opacity-100"
+                      : "grid-rows-[0fr] opacity-0"
+                  )}
+                >
+                  <div className="min-h-0 overflow-hidden">
+                    <div className="flex border-2 border-foreground">
+                      <div className="min-w-0 flex-1 border-r-2 border-foreground bg-accent px-2.5 py-2 text-accent-foreground">
+                        <span className="block text-[0.55rem] font-semibold uppercase opacity-80">
+                          Net
+                        </span>
+                        <MoneyValue
+                          minor={summary?.netTotal ?? 0}
+                          currency={category.currency}
+                          className="mt-0.5 block truncate font-display text-sm leading-none"
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1 border-r-2 border-foreground bg-destructive px-2.5 py-2 text-destructive-foreground">
+                        <span className="block text-[0.55rem] font-semibold uppercase opacity-80">
+                          Spent
+                        </span>
+                        <MoneyValue
+                          minor={summary?.totalDebit ?? 0}
+                          currency={category.currency}
+                          className="mt-0.5 block truncate font-display text-sm leading-none"
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1 bg-card px-2.5 py-2 text-card-foreground">
+                        <span className="block text-[0.55rem] font-semibold uppercase opacity-80">
+                          Received
+                        </span>
+                        <MoneyValue
+                          minor={summary?.totalCredit ?? 0}
+                          currency={category.currency}
+                          className="mt-0.5 block truncate font-display text-sm leading-none"
+                        />
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
             </>
           ) : null}
         </div>
 
-        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
+        <div
+          ref={listRef}
+          onScroll={handleListScroll}
+          className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4 [overflow-anchor:none]"
+        >
           <div className="flex flex-col gap-4">
             {activeCount > 0 ? (
               <ActiveFilters
@@ -401,15 +510,6 @@ export function CategoryPage() {
                 onRemoveTag={removeTagFilter}
                 onClear={clearFilters}
               />
-            ) : null}
-
-            {activeCount === 0 &&
-            categoryStatus === "ready" &&
-            category &&
-            insightStatus === "ready" &&
-            insight &&
-            (insight.currentTotal > 0 || insight.previousTotal > 0) ? (
-              <InsightCard insight={insight} currency={category.currency} />
             ) : null}
 
             {categoryStatus === "error" ? (
@@ -630,85 +730,6 @@ function ExpenseTable({
           </span>
         </div>
       ))}
-    </div>
-  )
-}
-
-function InsightCard({
-  insight,
-  currency,
-}: {
-  insight: Insight
-  currency: string
-}) {
-  const change = percentChange(insight.currentTotal, insight.previousTotal)
-  const max = Math.max(...insight.dailyTotals, 1)
-
-  return (
-    <div className="border-2 border-foreground bg-card p-4 sm:p-5">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <span className="text-xs font-semibold text-muted-foreground">
-            {insight.monthLabel}
-          </span>
-          <MoneyValue
-            minor={insight.currentTotal}
-            currency={currency}
-            className="mt-1 block font-display text-3xl leading-none"
-          />
-        </div>
-        <div className="text-right">
-          <span className="text-xs font-semibold text-muted-foreground">
-            vs last month
-          </span>
-          <span
-            className={cn(
-              "mt-1 block font-display text-lg leading-none",
-              change === null
-                ? "text-muted-foreground"
-                : change > 0
-                  ? "text-destructive"
-                  : change < 0
-                    ? "text-primary"
-                    : "text-muted-foreground"
-            )}
-          >
-            {change === null
-              ? "New"
-              : change === 0
-                ? "No change"
-                : `${change > 0 ? "↑" : "↓"} ${Math.abs(change).toFixed(0)}%`}
-          </span>
-          <MoneyValue
-            minor={insight.previousTotal}
-            currency={currency}
-            className="mt-1 block text-[0.65rem] text-muted-foreground"
-          />
-        </div>
-      </div>
-
-      <div className="mt-4 flex h-16 items-end gap-0.5" aria-hidden="true">
-        {insight.dailyTotals.map((total, index) => {
-          const height = max > 0 ? Math.max(4, (total / max) * 100) : 4
-          const isMax = total === max && max > 0
-          return (
-            <div
-              key={index}
-              className={cn(
-                "flex-1",
-                isMax ? "bg-destructive" : total > 0 ? "bg-primary" : "bg-muted"
-              )}
-              style={{ height: `${height}%` }}
-            />
-          )
-        })}
-      </div>
-
-      {insight.truncated ? (
-        <p className="mt-2 text-[0.65rem] text-muted-foreground">
-          Trend based on the latest 100 expenses.
-        </p>
-      ) : null}
     </div>
   )
 }

@@ -1,7 +1,7 @@
 # pico-ui
 
 The browser client for picoservice. Built with React 19, TypeScript, Vite,
-Tailwind CSS 4, shadcn/ui, and React Router.
+Tailwind CSS 4, shadcn/ui, React Router, and TanStack Query.
 
 Current scope: signup, login, email verification, an organization dashboard,
 organization list/create, project list/create, and project expenses.

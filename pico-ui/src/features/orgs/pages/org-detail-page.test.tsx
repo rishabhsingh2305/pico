@@ -340,14 +340,14 @@ describe("OrgDetailPage", () => {
       screen.getByRole("button", { name: "Filter by travel" })
     )
 
-    await waitFor(() => {
-      expect(
-        projectListURLs(fetchMock).at(-1)?.searchParams.get("tags")
-      ).toBeNull()
-    })
     expect(
       await screen.findByRole("link", { name: "Food" })
     ).toBeInTheDocument()
+    expect(
+      projectListURLs(fetchMock).some(
+        (url) => url.searchParams.get("tags") === null
+      )
+    ).toBe(true)
   })
 
   it("shows a filtered empty state and clears the filter", async () => {

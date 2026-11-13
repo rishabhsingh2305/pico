@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useState } from "react"
 import { Link, useNavigate, useParams } from "react-router"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
   ArrowLeftIcon,
   CircleAlertIcon,
@@ -24,16 +25,15 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
+import { queryKeys } from "@/app/query-keys"
 import { useAuth, useSession } from "@/features/auth/auth-provider"
 import { isSessionInvalidError, type Session } from "@/features/auth/session"
 import { getOrg } from "@/features/orgs/api"
 import { orgErrorMessage } from "@/features/orgs/error-message"
-import type { Org } from "@/features/orgs/types"
 import { CreateProjectForm } from "@/features/projects/components/create-project-form"
 import { ProjectCard } from "@/features/projects/components/project-card"
 import { ProjectFilterForm } from "@/features/projects/components/project-filter-form"
 import { listProjects } from "@/features/projects/api"
-import type { Project } from "@/features/projects/types"
 import { usePageTitle } from "@/hooks/use-page-title"
 import { ApiError } from "@/lib/api-client"
 
@@ -48,19 +48,37 @@ function OrgDetailView({ session }: { session: Session }) {
   const { orgId = "" } = useParams<{ orgId: string }>()
   const navigate = useNavigate()
   const { logout } = useAuth()
+  const queryClient = useQueryClient()
   const projectDialogTriggerId = useId()
 
-  const [org, setOrg] = useState<Org | null>(null)
-  const [status, setStatus] = useState<LoadStatus>("loading")
-  const [error, setError] = useState("")
-  const [attempt, setAttempt] = useState(0)
-
-  const [projects, setProjects] = useState<Project[]>([])
-  const [projectsStatus, setProjectsStatus] = useState<LoadStatus>("loading")
-  const [projectsError, setProjectsError] = useState("")
   const [projectTags, setProjectTags] = useState<string[]>([])
-  const [projectsAttempt, setProjectsAttempt] = useState(0)
   const [isProjectDialogOpen, setIsProjectDialogOpen] = useState(false)
+
+  const orgQuery = useQuery({
+    queryKey: queryKeys.org(session.userId, orgId),
+    queryFn: () => getOrg(session.userId, orgId),
+  })
+  const projectsQuery = useQuery({
+    queryKey: queryKeys.projects(session.userId, orgId, projectTags),
+    queryFn: () => listProjects(session.userId, orgId, projectTags),
+  })
+
+  const org = orgQuery.data ?? null
+  const projects = projectsQuery.data ?? []
+  const status: LoadStatus = orgQuery.isPending
+    ? "loading"
+    : orgQuery.isError
+      ? "error"
+      : "ready"
+  const error = orgQuery.isError ? orgAccessErrorMessage(orgQuery.error) : ""
+  const projectsStatus: LoadStatus = projectsQuery.isPending
+    ? "loading"
+    : projectsQuery.isError
+      ? "error"
+      : "ready"
+  const projectsError = projectsQuery.isError
+    ? orgAccessErrorMessage(projectsQuery.error)
+    : ""
 
   usePageTitle(org ? `${org.name} · Pico` : "Organization · Pico")
 
@@ -70,75 +88,33 @@ function OrgDetailView({ session }: { session: Session }) {
   }, [logout, navigate])
 
   useEffect(() => {
-    let cancelled = false
-
-    getOrg(session.userId, orgId)
-      .then((loadedOrg) => {
-        if (!cancelled) {
-          setOrg(loadedOrg)
-          setStatus("ready")
-        }
-      })
-      .catch((loadError: unknown) => {
-        if (cancelled) {
-          return
-        }
-        if (isSessionInvalidError(loadError)) {
-          sessionInvalid()
-          return
-        }
-        setError(orgAccessErrorMessage(loadError))
-        setStatus("error")
-      })
-
-    return () => {
-      cancelled = true
+    const queryError = orgQuery.error ?? projectsQuery.error
+    if (queryError && isSessionInvalidError(queryError)) {
+      sessionInvalid()
     }
-  }, [orgId, session.userId, attempt, sessionInvalid])
+  }, [orgQuery.error, projectsQuery.error, sessionInvalid])
 
   useEffect(() => {
-    let cancelled = false
-
-    listProjects(session.userId, orgId, projectTags)
-      .then((loadedProjects) => {
-        if (!cancelled) {
-          setProjects(loadedProjects)
-          setProjectsError("")
-          setProjectsStatus("ready")
-        }
-      })
-      .catch((loadError: unknown) => {
-        if (cancelled) {
-          return
-        }
-        if (isSessionInvalidError(loadError)) {
-          sessionInvalid()
-          return
-        }
-        setProjectsError(orgAccessErrorMessage(loadError))
-        setProjectsStatus("error")
-      })
-
-    return () => {
-      cancelled = true
+    if (!projectsQuery.data) {
+      return
     }
-  }, [orgId, session.userId, projectTags, projectsAttempt, sessionInvalid])
+    for (const project of projectsQuery.data) {
+      queryClient.setQueryData(
+        queryKeys.project(session.userId, orgId, project.id),
+        project
+      )
+    }
+  }, [projectsQuery.data, orgId, queryClient, session.userId])
 
   function retry() {
-    setStatus("loading")
-    setError("")
-    setAttempt((current) => current + 1)
+    void orgQuery.refetch()
   }
 
   function retryProjects() {
-    setProjectsStatus("loading")
-    setProjectsError("")
-    setProjectsAttempt((current) => current + 1)
+    void projectsQuery.refetch()
   }
 
   function changeProjectTags(nextTags: string[]) {
-    setProjectsStatus("loading")
-    setProjectsError("")
     setProjectTags(nextTags)
   }
 
@@ -151,13 +127,18 @@ function OrgDetailView({ session }: { session: Session }) {
 
   function handleProjectCreated() {
     setIsProjectDialogOpen(false)
-    setProjectsStatus("loading")
-    setProjectsAttempt((current) => current + 1)
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.projectsRoot(session.userId, orgId),
+    })
   }
 
   function handleProjectTagsUpdated() {
-    setProjectsStatus("loading")
-    setProjectsAttempt((current) => current + 1)
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.projectsRoot(session.userId, orgId),
+    })
+    void queryClient.invalidateQueries({
+      queryKey: ["project", session.userId, orgId],
+    })
   }
 
   const showProjectFilter = projects.length > 0 || projectTags.length > 0

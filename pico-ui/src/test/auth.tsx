@@ -1,5 +1,6 @@
 import type { ReactNode } from "react"
 
+import { QueryProvider } from "@/app/query-provider"
 import { AuthProvider } from "@/features/auth/auth-provider"
 import type { Session } from "@/features/auth/session"
 
@@ -15,5 +16,9 @@ export function AuthTestProvider({
   children: ReactNode
   session?: Session | null
 }) {
-  return <AuthProvider initialSession={session}>{children}</AuthProvider>
+  return (
+    <QueryProvider>
+      <AuthProvider initialSession={session}>{children}</AuthProvider>
+    </QueryProvider>
+  )
 }

@@ -32,14 +32,15 @@ the target with `VITE_API_PROXY_TARGET`.
   by default; the currency is not exposed in the UI yet.
 - Opening a category shows its expenses, net/spent/received totals from
   `/expenses/summary`, and an **Add expense** dialog.
+- The totals collapse into a compact strip when scrolling down the expense list
+  and expand again when scrolling back toward the top.
 - Expenses can be marked **Spent** (debit) or **Received** (credit), with an
   amount, optional description, optional tags, and date.
 - Tags are added with Enter, space, or comma, shown as chips in the expense
   list, and capped at 20 tags of 32 characters each.
 - The expense list can be filtered by date preset or custom range and by tags;
   all selected tags must match.
-- Home category blocks show this month's spend. Category pages show a
-  month-over-month insight card with a daily spend strip.
+- Home category blocks show this month's spend.
 
 ## Production
 

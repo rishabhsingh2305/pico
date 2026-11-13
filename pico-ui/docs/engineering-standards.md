@@ -40,8 +40,9 @@ app grows.
 - Keep hooks at the top level. Do not call hooks conditionally.
 - Give every list item a stable key.
 - Keep props small and typed. Pass data and callbacks rather than global state.
-- Use local state first. Introduce context or a store only after a repeated
-  cross-tree need.
+- Use TanStack Query for server data and local React state for UI-only state.
+  Do not copy query data into local state or add another global store. Query keys
+  live in `src/app/query-keys.ts`; invalidate the affected root after mutations.
 - Do not add `useMemo` or `useCallback` without a measured or structural reason.
 - Forms use controlled inputs and a pure `validate` function. Server errors are
   rendered in an alert and cleared on the next edit.

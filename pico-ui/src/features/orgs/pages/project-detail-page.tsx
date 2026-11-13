@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useId, useState } from "react"
 import { useNavigate, useParams } from "react-router"
+import { useQuery, useQueryClient } from "@tanstack/react-query"
 import { ArrowLeftIcon, CircleAlertIcon, PlusIcon } from "lucide-react"
 
 import { AppShell } from "@/components/app-shell"
@@ -16,6 +17,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Spinner } from "@/components/ui/spinner"
+import { queryKeys } from "@/app/query-keys"
 import { useAuth, useSession } from "@/features/auth/auth-provider"
 import { isSessionInvalidError, type Session } from "@/features/auth/session"
 import { CreateExpenseForm } from "@/features/expenses/components/create-expense-form"
@@ -29,16 +31,10 @@ import {
 import { expenseErrorMessage } from "@/features/expenses/error-message"
 import type { ExpenseFilters } from "@/features/expenses/filters"
 import { formatMoney } from "@/features/expenses/money"
-import type {
-  Expense,
-  ExpensePage,
-  ExpenseSummaryItem,
-} from "@/features/expenses/types"
+import type { Expense, ExpensePage } from "@/features/expenses/types"
 import { getOrg } from "@/features/orgs/api"
 import { orgErrorMessage } from "@/features/orgs/error-message"
-import type { Org } from "@/features/orgs/types"
 import { getProject } from "@/features/projects/api"
-import type { Project } from "@/features/projects/types"
 import { usePageTitle } from "@/hooks/use-page-title"
 import { ApiError } from "@/lib/api-client"
 import { cn } from "cn"
@@ -65,24 +61,85 @@ function ProjectDetailView({ session }: { session: Session }) {
   const { logout } = useAuth()
   const expenseDialogTriggerId = useId()
 
-  const [org, setOrg] = useState<Org | null>(null)
-  const [project, setProject] = useState<Project | null>(null)
-  const [status, setStatus] = useState<LoadStatus>("loading")
-  const [error, setError] = useState("")
-  const [attempt, setAttempt] = useState(0)
-
-  const [expensePage, setExpensePage] = useState<ExpensePage>(EMPTY_PAGE)
-  const [expensesStatus, setExpensesStatus] = useState<LoadStatus>("loading")
-  const [expensesError, setExpensesError] = useState("")
-  const [summary, setSummary] = useState<ExpenseSummaryItem | null>(null)
-  const [summaryError, setSummaryError] = useState("")
   const [deleteError, setDeleteError] = useState("")
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [filters, setFilters] = useState<ExpenseFilters>({ tags: [] })
   const [offset, setOffset] = useState(0)
-  const [refreshKey, setRefreshKey] = useState(0)
-  const [summaryKey, setSummaryKey] = useState(0)
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false)
+  const queryClient = useQueryClient()
+
+  const orgQuery = useQuery({
+    queryKey: queryKeys.org(session.userId, orgId),
+    queryFn: () => getOrg(session.userId, orgId),
+  })
+  const projectQuery = useQuery({
+    queryKey: queryKeys.project(session.userId, orgId, projectId),
+    queryFn: () => getProject(session.userId, orgId, projectId),
+  })
+  const expensesQuery = useQuery({
+    queryKey: queryKeys.expenses(
+      session.userId,
+      orgId,
+      projectId,
+      filters,
+      offset
+    ),
+    queryFn: () =>
+      listExpenses({
+        userId: session.userId,
+        orgId,
+        projectId,
+        tags: filters.tags,
+        from: filters.from,
+        to: filters.to,
+        limit: PAGE_SIZE,
+        offset,
+      }),
+  })
+  const summaryQuery = useQuery({
+    queryKey: queryKeys.expenseSummary(
+      session.userId,
+      orgId,
+      projectId,
+      filters
+    ),
+    queryFn: () =>
+      summarizeExpenses({
+        userId: session.userId,
+        orgId,
+        projectId,
+        tags: filters.tags,
+        from: filters.from,
+        to: filters.to,
+      }),
+  })
+
+  const org = orgQuery.data ?? null
+  const project = projectQuery.data ?? null
+  const expensePage: ExpensePage = expensesQuery.data ?? EMPTY_PAGE
+  const summary = summaryQuery.data?.items[0] ?? null
+  const status: LoadStatus =
+    orgQuery.isPending || projectQuery.isPending
+      ? "loading"
+      : orgQuery.isError || projectQuery.isError
+        ? "error"
+        : "ready"
+  const error =
+    orgQuery.error || projectQuery.error
+      ? projectErrorMessage(orgQuery.error ?? projectQuery.error)
+      : ""
+  const expensesStatus: LoadStatus = expensesQuery.isPending
+    ? "loading"
+    : expensesQuery.isError
+      ? "error"
+      : "ready"
+  const expensesError = expensesQuery.isError
+    ? projectErrorMessage(expensesQuery.error)
+    : ""
+  const summaryError = summaryQuery.isError
+    ? expenseErrorMessage(summaryQuery.error)
+    : ""
+  const isUpdating = expensesQuery.isFetching && !expensesQuery.isPending
 
   usePageTitle(project ? `${project.name} · Pico` : "Project · Pico")
 
@@ -92,161 +149,53 @@ function ProjectDetailView({ session }: { session: Session }) {
   }, [logout, navigate])
 
   useEffect(() => {
-    let cancelled = false
-
-    Promise.all([
-      getOrg(session.userId, orgId),
-      getProject(session.userId, orgId, projectId),
-    ])
-      .then(([loadedOrg, loadedProject]) => {
-        if (!cancelled) {
-          setOrg(loadedOrg)
-          setProject(loadedProject)
-          setStatus("ready")
-        }
-      })
-      .catch((loadError: unknown) => {
-        if (cancelled) {
-          return
-        }
-        if (isSessionInvalidError(loadError)) {
-          sessionInvalid()
-          return
-        }
-        setError(projectErrorMessage(loadError))
-        setStatus("error")
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [orgId, projectId, session.userId, attempt, sessionInvalid])
-
-  useEffect(() => {
-    let cancelled = false
-
-    listExpenses({
-      userId: session.userId,
-      orgId,
-      projectId,
-      tags: filters.tags,
-      from: filters.from,
-      to: filters.to,
-      limit: PAGE_SIZE,
-      offset,
-    })
-      .then((loadedPage) => {
-        if (!cancelled) {
-          setExpensePage(loadedPage)
-          setExpensesError("")
-          setExpensesStatus("ready")
-        }
-      })
-      .catch((loadError: unknown) => {
-        if (cancelled) {
-          return
-        }
-        if (isSessionInvalidError(loadError)) {
-          sessionInvalid()
-          return
-        }
-        setExpensesError(projectErrorMessage(loadError))
-        setExpensesStatus("error")
-      })
-
-    return () => {
-      cancelled = true
+    const queryError =
+      orgQuery.error ??
+      projectQuery.error ??
+      expensesQuery.error ??
+      summaryQuery.error
+    if (queryError && isSessionInvalidError(queryError)) {
+      sessionInvalid()
     }
   }, [
-    orgId,
-    projectId,
-    session.userId,
-    filters,
-    offset,
-    refreshKey,
+    orgQuery.error,
+    projectQuery.error,
+    expensesQuery.error,
+    summaryQuery.error,
     sessionInvalid,
   ])
 
-  useEffect(() => {
-    let cancelled = false
-
-    summarizeExpenses({
-      userId: session.userId,
-      orgId,
-      projectId,
-      tags: filters.tags,
-      from: filters.from,
-      to: filters.to,
-    })
-      .then((loaded) => {
-        if (!cancelled) {
-          setSummary(loaded.items[0] ?? null)
-          setSummaryError("")
-        }
-      })
-      .catch((loadError: unknown) => {
-        if (cancelled) {
-          return
-        }
-        if (isSessionInvalidError(loadError)) {
-          sessionInvalid()
-          return
-        }
-        setSummaryError(expenseErrorMessage(loadError))
-      })
-
-    return () => {
-      cancelled = true
-    }
-  }, [orgId, projectId, session.userId, filters, summaryKey, sessionInvalid])
-
   function retryProject() {
-    setStatus("loading")
-    setError("")
-    setAttempt((current) => current + 1)
+    void Promise.all([orgQuery.refetch(), projectQuery.refetch()])
   }
 
   function retryExpenses() {
-    setExpensesStatus("loading")
-    setExpensesError("")
-    setSummaryError("")
-    setRefreshKey((current) => current + 1)
-    setSummaryKey((current) => current + 1)
+    void Promise.all([expensesQuery.refetch(), summaryQuery.refetch()])
   }
 
   function handleFiltersApplied(nextFilters: ExpenseFilters) {
-    setExpensesStatus("loading")
-    setExpensesError("")
-    setSummaryError("")
     setDeleteError("")
     setFilters(nextFilters)
     setOffset(0)
   }
 
   function handleFiltersCleared() {
-    setExpensesStatus("loading")
-    setExpensesError("")
-    setSummaryError("")
     setDeleteError("")
     setFilters({ tags: [] })
     setOffset(0)
   }
 
   function handleExpenseChanged() {
-    setExpensesStatus("loading")
-    setExpensesError("")
-    setSummaryError("")
     setDeleteError("")
-    setRefreshKey((current) => current + 1)
-    setSummaryKey((current) => current + 1)
+    void queryClient.invalidateQueries({
+      queryKey: queryKeys.expenseRoot(session.userId, orgId, projectId),
+    })
   }
 
   function changePage(nextOffset: number) {
     if (nextOffset === offset) {
       return
     }
-    setExpensesStatus("loading")
-    setExpensesError("")
     setDeleteError("")
     setOffset(nextOffset)
   }
@@ -257,12 +206,11 @@ function ProjectDetailView({ session }: { session: Session }) {
     try {
       await deleteExpense(session.userId, orgId, expense.id)
       const remainingCount = summary ? summary.totalCount - 1 : null
-      setExpensesStatus("loading")
-      setSummaryKey((current) => current + 1)
+      void queryClient.invalidateQueries({
+        queryKey: queryKeys.expenseRoot(session.userId, orgId, projectId),
+      })
       if (remainingCount !== null && offset > 0 && remainingCount <= offset) {
         setOffset(Math.max(0, offset - PAGE_SIZE))
-      } else {
-        setRefreshKey((current) => current + 1)
       }
     } catch (deleteFailure) {
       if (isSessionInvalidError(deleteFailure)) {
@@ -443,7 +391,7 @@ function ProjectDetailView({ session }: { session: Session }) {
                       <span className="font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase">
                         {currency}
                       </span>
-                      {expensesStatus === "loading" ? (
+                      {isUpdating ? (
                         <span className="flex items-center gap-1.5 font-mono text-[10px] tracking-[0.12em] text-muted-foreground uppercase">
                           <Spinner className="size-3" />
                           Updating

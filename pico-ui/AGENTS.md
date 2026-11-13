@@ -71,7 +71,7 @@
 
 ```text
 src/
-├── app/                    # Router and app-level composition
+├── app/                    # Router, query client, query keys, providers
 ├── components/
 │   ├── app-shell.tsx         # Sidebar workspace shell for signed-in screens
 │   ├── page-header.tsx       # Shared page title and actions
@@ -113,6 +113,10 @@ Boundaries:
   `verbatimModuleSyntax` and `erasableSyntaxOnly` are enabled.
 - **API calls:** only feature `api.ts` modules may call `requestJSON`. Components
   never call `fetch` directly. Use `ApiError` and map statuses to safe messages.
+- **Queries:** read server data with TanStack Query. Keep query keys in
+  `src/app/query-keys.ts` and derive them from IDs and filters. Use
+  `invalidateQueries` after mutations. Do not copy server data into local state
+  unless it is genuinely UI-owned.
 - **List totals:** expense list responses return `items` and `nextOffset` only.
   `totalCount`, `totalDebit`, `totalCredit`, and `netTotal` come from
   `GET /expenses/summary` over the full filtered set. Never derive them from the
@@ -125,10 +129,11 @@ Boundaries:
 - **Tag filters:** project and organization tags filter server-side with
   any-match semantics; expense tags require all tags to match. Keep this
   difference explicit in the UI and docs.
-- **State:** local React state first. Do not add a global store or data-fetching
-  library until there is a repeated need. The authenticated session lives in
-  `AuthProvider`, restores from `/auth/session`, and stores the access token in
-  `localStorage`. Never store passwords there.
+- **State:** local React state for UI state; TanStack Query for server data.
+  Query keys live in `src/app/query-keys.ts`, and the provider wraps the app in
+  `src/app/query-provider.tsx`. Do not add another global store. The
+  authenticated session lives in `AuthProvider`, restores from `/auth/session`,
+  and stores the access token in `localStorage`. Never store passwords there.
 - **Forms:** controlled fields with a small pure validation function. Mirror
   backend constraints (name 120 bytes, email 254 bytes, password 8–72 bytes).
   Projects own a currency; expense amounts are positive decimal values converted

@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react"
+import { render, screen, waitFor } from "@testing-library/react"
 import { MemoryRouter } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -95,6 +95,63 @@ describe("AppRouter", () => {
       await screen.findByRole("heading", { name: "Dashboard" })
     ).toBeInTheDocument()
     expect(await screen.findByText("Nothing to summarize")).toBeInTheDocument()
+  })
+
+  it("reuses cached org and project data when opening a project", async () => {
+    const org = {
+      id: "org-1",
+      name: "Acme",
+      userId: "user-1",
+      tags: [],
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    }
+    const project = {
+      id: "project-1",
+      orgId: "org-1",
+      userId: "user-1",
+      name: "General",
+      currency: "USD",
+      tags: [],
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+    }
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input), "http://localhost")
+      if (url.pathname === "/api/orgs/org-1") {
+        return jsonResponse(org)
+      }
+      if (url.pathname === "/api/projects") {
+        return jsonResponse({ items: [project] })
+      }
+      if (url.pathname === "/api/projects/project-1") {
+        return jsonResponse(project)
+      }
+      if (url.pathname === "/api/expenses/summary") {
+        return jsonResponse({ items: [] })
+      }
+      if (url.pathname === "/api/expenses") {
+        return jsonResponse({ items: [], nextOffset: null })
+      }
+      return jsonResponse({ error: "not found" }, 404)
+    })
+    vi.stubGlobal("fetch", fetchMock)
+
+    renderRouter("/orgs/org-1", session)
+
+    const projectLink = await screen.findByRole("link", { name: "General" })
+    await projectLink.click()
+
+    expect(
+      await screen.findByRole("heading", { name: "General" })
+    ).toBeInTheDocument()
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([url]) =>
+          String(url).startsWith("/api/projects/project-1?")
+        )
+      ).toBe(false)
+    })
   })
 
   it("renders the public API docs route", async () => {
