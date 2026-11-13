@@ -15,6 +15,7 @@ import (
 type routeProbe struct {
 	router  *chi.Mux
 	methods []string
+	exact   map[string]map[string]struct{}
 }
 
 // methodNotAllowed responds with a JSON 405 and derives the Allow header from
@@ -22,9 +23,17 @@ type routeProbe struct {
 func methodNotAllowed(probe *routeProbe) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		allowed := make([]string, 0, len(probe.methods))
-		for _, method := range probe.methods {
-			if probe.router.Match(chi.NewRouteContext(), method, r.URL.Path) {
-				allowed = append(allowed, method)
+		if exact := probe.exact[normalizeRoute(r.URL.Path)]; exact != nil {
+			for _, method := range probe.methods {
+				if _, ok := exact[method]; ok {
+					allowed = append(allowed, method)
+				}
+			}
+		} else {
+			for _, method := range probe.methods {
+				if probe.router.Match(chi.NewRouteContext(), method, r.URL.Path) {
+					allowed = append(allowed, method)
+				}
 			}
 		}
 
@@ -43,6 +52,7 @@ func newMethodProbe(routes chi.Routes) (*routeProbe, error) {
 	probe := chi.NewRouter()
 	seen := make(map[string]struct{})
 	methodSet := make(map[string]struct{})
+	exact := make(map[string]map[string]struct{})
 	handler := http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
 
 	err := chi.Walk(routes, func(method, route string, _ http.Handler, _ ...func(http.Handler) http.Handler) error {
@@ -55,6 +65,12 @@ func newMethodProbe(routes chi.Routes) (*routeProbe, error) {
 		methodSet[method] = struct{}{}
 
 		probe.Method(method, route, handler)
+		if !strings.Contains(route, "{") {
+			if exact[route] == nil {
+				exact[route] = make(map[string]struct{})
+			}
+			exact[route][method] = struct{}{}
+		}
 		return nil
 	})
 	if err != nil {
@@ -73,7 +89,7 @@ func newMethodProbe(routes chi.Routes) (*routeProbe, error) {
 		return methods[i] < methods[j]
 	})
 
-	return &routeProbe{router: probe, methods: methods}, nil
+	return &routeProbe{router: probe, methods: methods, exact: exact}, nil
 }
 
 func normalizeRoute(route string) string {

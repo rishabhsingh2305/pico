@@ -3,6 +3,7 @@ import type {
   CreateExpenseInput,
   Expense,
   ExpenseListResponse,
+  ExpenseSummary,
   Org,
 } from "@/features/expenses/types"
 
@@ -39,18 +40,27 @@ export type ListExpensesOptions = {
   to?: string
   tags?: string[]
   limit?: number
+  projectIds?: string[]
 }
 
-export function listExpenses(
+export type SummarizeExpensesOptions = {
+  from?: string
+  to?: string
+  tags?: string[]
+  projectIds?: string[]
+}
+
+function expenseQuery(
   orgId: string,
-  projectId: string,
-  options: ListExpensesOptions = {}
-): Promise<ExpenseListResponse> {
-  const query = new URLSearchParams({
-    orgId,
-    projectId,
-    limit: String(options.limit ?? EXPENSE_LIST_LIMIT),
-  })
+  projectId: string | undefined,
+  options: SummarizeExpensesOptions
+): URLSearchParams {
+  const query = new URLSearchParams({ orgId })
+  if (options.projectIds && options.projectIds.length > 0) {
+    query.set("projectIds", options.projectIds.join(","))
+  } else if (projectId) {
+    query.set("projectId", projectId)
+  }
   if (options.from) {
     query.set("from", options.from)
   }
@@ -60,7 +70,28 @@ export function listExpenses(
   if (options.tags && options.tags.length > 0) {
     query.set("tags", options.tags.join(","))
   }
+  return query
+}
+
+export function listExpenses(
+  orgId: string,
+  projectId: string,
+  options: ListExpensesOptions = {}
+): Promise<ExpenseListResponse> {
+  const query = expenseQuery(orgId, projectId, options)
+  query.set("limit", String(options.limit ?? EXPENSE_LIST_LIMIT))
   return requestJSON<ExpenseListResponse>(`/expenses?${query}`, {
+    method: "GET",
+  })
+}
+
+export function summarizeExpenses(
+  orgId: string,
+  projectId?: string,
+  options: SummarizeExpensesOptions = {}
+): Promise<ExpenseSummary> {
+  const query = expenseQuery(orgId, projectId, options)
+  return requestJSON<ExpenseSummary>(`/expenses/summary?${query}`, {
     method: "GET",
   })
 }

@@ -8,9 +8,33 @@ import (
 )
 
 const (
-	tagMaxLength = 32
-	maxTags      = 20
+	tagMaxLength  = 32
+	maxTags       = 20
+	maxProjectIDs = 100
 )
+
+// normalizeProjectIDs trims, deduplicates, and sorts filter project IDs. Empty
+// values are ignored because the filter is optional.
+func normalizeProjectIDs(projectIDs []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(projectIDs))
+	normalized := make([]string, 0, len(projectIDs))
+	for _, raw := range projectIDs {
+		projectID := strings.TrimSpace(raw)
+		if projectID == "" {
+			continue
+		}
+		if _, ok := seen[projectID]; ok {
+			continue
+		}
+		seen[projectID] = struct{}{}
+		normalized = append(normalized, projectID)
+	}
+	if len(normalized) > maxProjectIDs {
+		return nil, &validation.Error{Field: "projectIds", Message: "projectIds must contain at most 100 items"}
+	}
+	slices.Sort(normalized)
+	return normalized, nil
+}
 
 // normalizeTagFilter trims, deduplicates, and sorts filter tags. Empty values
 // are ignored because filters are optional.

@@ -1,9 +1,9 @@
-import type { ExpensePage } from "@/features/expenses/types"
+import type { ExpenseSummaryItem } from "@/features/expenses/types"
 import type { Project } from "@/features/projects/types"
 
 export type ProjectTotals = {
   project: Project
-  totals: ExpensePage
+  totals: ExpenseSummaryItem
 }
 
 export type CurrencySummary = {

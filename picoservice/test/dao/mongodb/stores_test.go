@@ -281,6 +281,18 @@ func TestStoresIntegration(t *testing.T) {
 		t.Fatalf("expected tags %v, got %v", want, got)
 	}
 
+	secondProject, err := projectStore.Insert(ctx, entities.Project{
+		OrgID:     org.ID,
+		UserID:    user.ID,
+		Name:      "Berlin",
+		Currency:  "EUR",
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("insert second project: %v", err)
+	}
+
 	expenseStore := mongodb.NewExpenseStore(client)
 	expense, err := expenseStore.Insert(ctx, entities.Expense{
 		OrgID:     org.ID,
@@ -326,12 +338,25 @@ func TestStoresIntegration(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("insert legacy expense: %v", err)
 	}
+	if _, err := expenseStore.Insert(ctx, entities.Expense{
+		OrgID:     org.ID,
+		UserID:    user.ID,
+		ProjectID: secondProject.ID,
+		Type:      entities.ExpenseTypeDebit,
+		Amount:    500,
+		Currency:  "EUR",
+		SpentAt:   now,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("insert second project expense: %v", err)
+	}
 
 	expenseList, err := expenseStore.List(ctx, dao.ExpenseFilter{
-		OrgID:     org.ID,
-		ProjectID: project.ID,
-		Tags:      []string{"food"},
-		Limit:     20,
+		OrgID:      org.ID,
+		ProjectIDs: []string{project.ID},
+		Tags:       []string{"food"},
+		Limit:      20,
 	})
 	if err != nil {
 		t.Fatalf("list expenses: %v", err)
@@ -343,41 +368,65 @@ func TestStoresIntegration(t *testing.T) {
 		t.Fatalf("expected type %q, got %q", want, got)
 	}
 
-	summary, err := expenseStore.Summarize(ctx, dao.ExpenseFilter{
-		OrgID:     org.ID,
-		ProjectID: project.ID,
-		Tags:      []string{"food"},
-		Limit:     1,
+	summary, err := expenseStore.SummarizeByProject(ctx, dao.ExpenseFilter{
+		OrgID:      org.ID,
+		ProjectIDs: []string{project.ID},
+		Tags:       []string{"food"},
+		Limit:      1,
 	})
 	if err != nil {
 		t.Fatalf("summarize expenses: %v", err)
 	}
-	if got, want := summary.Count, int64(1); got != want {
+	if got, want := len(summary), 1; got != want {
+		t.Fatalf("expected %d summary group, got %d", want, got)
+	}
+	if got, want := summary[0].Count, int64(1); got != want {
 		t.Fatalf("expected summary count %d, got %d", want, got)
 	}
-	if got, want := summary.DebitAmount, int64(1234); got != want {
+	if got, want := summary[0].DebitAmount, int64(1234); got != want {
 		t.Fatalf("expected summary debit %d, got %d", want, got)
 	}
-	if got, want := summary.CreditAmount, int64(0); got != want {
+	if got, want := summary[0].CreditAmount, int64(0); got != want {
 		t.Fatalf("expected summary credit %d, got %d", want, got)
 	}
 
-	allSummary, err := expenseStore.Summarize(ctx, dao.ExpenseFilter{
-		OrgID:     org.ID,
-		ProjectID: project.ID,
-		Limit:     1,
+	allSummary, err := expenseStore.SummarizeByProject(ctx, dao.ExpenseFilter{
+		OrgID:      org.ID,
+		ProjectIDs: []string{project.ID},
+		Limit:      1,
 	})
 	if err != nil {
 		t.Fatalf("summarize all expenses: %v", err)
 	}
-	if got, want := allSummary.Count, int64(3); got != want {
+	if got, want := len(allSummary), 1; got != want {
+		t.Fatalf("expected %d summary group, got %d", want, got)
+	}
+	if got, want := allSummary[0].Count, int64(3); got != want {
 		t.Fatalf("expected all summary count %d, got %d", want, got)
 	}
-	if got, want := allSummary.DebitAmount, int64(1934); got != want {
+	if got, want := allSummary[0].DebitAmount, int64(1934); got != want {
 		t.Fatalf("expected all summary debit %d, got %d", want, got)
 	}
-	if got, want := allSummary.CreditAmount, int64(5000); got != want {
+	if got, want := allSummary[0].CreditAmount, int64(5000); got != want {
 		t.Fatalf("expected all summary credit %d, got %d", want, got)
+	}
+
+	orgSummary, err := expenseStore.SummarizeByProject(ctx, dao.ExpenseFilter{OrgID: org.ID})
+	if err != nil {
+		t.Fatalf("summarize org expenses: %v", err)
+	}
+	if got, want := len(orgSummary), 2; got != want {
+		t.Fatalf("expected %d summary groups, got %d", want, got)
+	}
+	byCurrency := make(map[string]dao.ExpenseSummaryGroup, len(orgSummary))
+	for _, group := range orgSummary {
+		byCurrency[group.Currency] = group
+	}
+	if got, want := byCurrency["USD"].Count, int64(3); got != want {
+		t.Fatalf("expected USD summary count %d, got %d", want, got)
+	}
+	if got, want := byCurrency["EUR"].DebitAmount, int64(500); got != want {
+		t.Fatalf("expected EUR summary debit %d, got %d", want, got)
 	}
 
 	amount := int64(4321)

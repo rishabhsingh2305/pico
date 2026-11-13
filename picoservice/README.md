@@ -9,9 +9,10 @@ users, organizations, memberships, projects, and expenses.
 ## Endpoints
 
 All request and response bodies are JSON. List responses accept `limit` and
-`offset` query parameters (default `20`, maximum `100`). Most list responses use
-`{"items":[...]}`; expense lists also return filtered totals. Read endpoints
-also support `HEAD`, except the email verification action, which is `POST` only.
+`offset` query parameters (default `20`, maximum `100`). Expense lists use
+`{"items":[...],"nextOffset":...}`; expense totals come from
+`GET /expenses/summary`. Read endpoints also support `HEAD`, except the email
+verification action, which is `POST` only.
 
 When pico-ui is running, open `http://localhost:5173/api-docs` for a searchable
 in-app API guide with endpoint examples and copy buttons. This README remains the
@@ -125,7 +126,8 @@ There is no project delete endpoint.
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/expenses?orgId=&userId=` | Create an expense |
-| `GET` | `/expenses?orgId=&userId=` | List expenses; filters: `projectId`, `tags`, `tag`, `from`, `to` |
+| `GET` | `/expenses?orgId=&userId=` | List expenses; filters: `projectId`, `projectIds`, `tags`, `tag`, `from`, `to` |
+| `GET` | `/expenses/summary?orgId=&userId=` | Totals grouped by project and currency; same filters |
 | `GET` | `/expenses/{expenseID}?orgId=&userId=` | Get an expense |
 | `PATCH` | `/expenses/{expenseID}?orgId=&userId=` | Update fields |
 | `DELETE` | `/expenses/{expenseID}?orgId=&userId=` | Delete an expense |
@@ -156,26 +158,40 @@ and `currency` cannot change.
 
 `GET /expenses` accepts `tags=food,travel` (or repeated `tags` parameters) and
 requires every listed tag to match. `tag` remains as a single-tag fallback.
-`from` and `to` are inclusive RFC 3339 bounds. Pagination applies only to the
-returned `items`.
-
-The list response includes totals over every expense matching the filters,
-ignoring `limit` and `offset`:
+`from` and `to` are inclusive RFC 3339 bounds. `projectId` selects one project;
+`projectIds` selects several as a comma-separated list (or repeated parameter),
+up to 100 IDs. Do not send both. The list response contains only the current page
+and `nextOffset`:
 
 ```json
 {
   "items": [],
-  "totalCount": 42,
-  "totalDebit": 100000,
-  "totalCredit": 123456,
-  "netTotal": 23456
+  "nextOffset": 20
+}
+```
+
+`nextOffset` is `null` on the last page. List responses do not compute totals.
+
+`GET /expenses/summary` accepts the same filters, has no pagination, and returns
+totals grouped by project and currency:
+
+```json
+{
+  "items": [
+    {
+      "projectId": "64f...",
+      "currency": "INR",
+      "totalCount": 42,
+      "totalDebit": 100000,
+      "totalCredit": 123456,
+      "netTotal": 23456
+    }
+  ]
 }
 ```
 
 `totalDebit` and `totalCredit` are sums in minor units. `netTotal` is
-`totalCredit - totalDebit`. When `projectId` is set, the totals use the
-project's currency. An organization-wide total across projects with different
-currencies would need grouping by currency.
+`totalCredit - totalDebit`. Amounts are never added across currencies.
 
 ### Common behavior
 
@@ -386,8 +402,11 @@ curl -sS -X POST 'http://localhost:8080/expenses?orgId=ORG_ID&userId=USER_ID' \
   -H 'Content-Type: application/json' \
   -d '{"projectId":"PROJECT_ID","type":"credit","amount":5000,"description":"Client payment","spentAt":"2026-01-03T09:00:00Z"}'
 
-# List one project page and totals over every matching expense.
+# List one project page.
 curl -sS 'http://localhost:8080/expenses?orgId=ORG_ID&userId=USER_ID&projectId=PROJECT_ID&tags=food,travel&from=2026-01-01T00%3A00%3A00Z&to=2026-01-31T23%3A59%3A59Z&limit=20&offset=0'
+
+# Summarize the same filters by project and currency.
+curl -sS 'http://localhost:8080/expenses/summary?orgId=ORG_ID&userId=USER_ID&projectId=PROJECT_ID&tags=food,travel&from=2026-01-01T00%3A00%3A00Z&to=2026-01-31T23%3A59%3A59Z'
 ```
 
 Set `PORT` to use a different port:

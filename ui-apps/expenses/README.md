@@ -30,8 +30,8 @@ the target with `VITE_API_PROXY_TARGET`.
 - The main page lists categories, backed by the `/projects` endpoints.
 - Creating a category asks for a name only. New categories use `INR` and no tags
   by default; the currency is not exposed in the UI yet.
-- Opening a category shows its expenses, net/spent/received totals, and an
-  **Add expense** dialog.
+- Opening a category shows its expenses, net/spent/received totals from
+  `/expenses/summary`, and an **Add expense** dialog.
 - Expenses can be marked **Spent** (debit) or **Received** (credit), with an
   amount, optional description, optional tags, and date.
 - Tags are added with Enter, space, or comma, shown as chips in the expense

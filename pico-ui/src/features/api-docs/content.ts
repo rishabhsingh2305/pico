@@ -819,8 +819,7 @@ export const API_SECTIONS: ApiSection[] = [
         method: "GET",
         path: "/expenses?orgId=...&userId=...&projectId=...&tags=...&from=...&to=...&limit=20&offset=0",
         title: "List expenses",
-        summary:
-          "Returns one page of expenses plus totals over every expense matching the filters.",
+        summary: "Returns one page of expenses.",
         access: "Member",
         queryParams: [
           orgIdParam,
@@ -829,6 +828,12 @@ export const API_SECTIONS: ApiSection[] = [
             name: "projectId",
             required: false,
             description: "Limit results to one project.",
+          },
+          {
+            name: "projectIds",
+            required: false,
+            description:
+              "Comma-separated project IDs, up to 100. Do not combine with projectId.",
           },
           {
             name: "tags",
@@ -857,13 +862,10 @@ export const API_SECTIONS: ApiSection[] = [
         response: {
           status: 200,
           description:
-            "The current page plus totals over the full filtered set. Totals ignore limit and offset.",
+            "The current page and the offset for the next page, or null on the last page.",
           body: `{
   "items": [${expenseExample}],
-  "totalCount": 42,
-  "totalDebit": 100000,
-  "totalCredit": 123456,
-  "netTotal": 23456
+  "nextOffset": 20
 }`,
         },
         errors: [
@@ -873,10 +875,70 @@ export const API_SECTIONS: ApiSection[] = [
         ],
         notes: [
           "tags=food,travel requires both tags.",
-          "totalDebit and totalCredit are minor-unit sums; netTotal is totalCredit - totalDebit.",
-          "Totals cover every matching expense and ignore limit and offset. When projectId is supplied, they use the project's currency.",
+          "nextOffset is null when there are no more results.",
+          "Use GET /expenses/summary for totals over the full filtered set.",
           "Records without a type are treated as debit.",
-          "An organization-wide total across currencies is not meaningful and would need grouping by currency.",
+        ],
+      },
+      {
+        id: "expenses-summary",
+        method: "GET",
+        path: "/expenses/summary?orgId=...&userId=...&projectId=...&tags=...&from=...&to=...",
+        title: "Summarize expenses",
+        summary:
+          "Returns expense totals grouped by project and currency for the full filtered set.",
+        access: "Member",
+        queryParams: [
+          orgIdParam,
+          userIdParam,
+          {
+            name: "projectId",
+            required: false,
+            description: "Limit the summary to one project.",
+          },
+          {
+            name: "tags",
+            required: false,
+            description:
+              "Comma-separated tags. Every listed tag must be present.",
+          },
+          {
+            name: "from",
+            required: false,
+            description: "Inclusive RFC 3339 lower bound for spentAt.",
+          },
+          {
+            name: "to",
+            required: false,
+            description: "Inclusive RFC 3339 upper bound for spentAt.",
+          },
+        ],
+        response: {
+          status: 200,
+          description: "One totals row per project and currency.",
+          body: `{
+  "items": [
+    {
+      "projectId": "64f...",
+      "currency": "USD",
+      "totalCount": 42,
+      "totalDebit": 100000,
+      "totalCredit": 123456,
+      "netTotal": 23456
+    }
+  ]
+}`,
+        },
+        errors: [
+          "400 — invalid date",
+          "403 — not a member",
+          "404 — organization not found",
+        ],
+        notes: [
+          "Totals cover every matching expense; this endpoint has no pagination.",
+          "Amounts are grouped by project and currency and never added across currencies.",
+          "netTotal is totalCredit - totalDebit.",
+          "Records without a type are treated as debit.",
         ],
       },
       {

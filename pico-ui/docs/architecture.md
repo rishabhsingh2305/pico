@@ -10,12 +10,12 @@ and project debits and credits.
 ```text
 browser
   -> React signup / login / verification / dashboard / organization / project / expense pages
-  -> requestJSON (fetch, credentials: include)
+  -> requestJSON (fetch, credentials: omit)
   -> VITE_API_BASE_URL (default http://localhost:8080) or the production API origin
   -> picoservice Lambda Function URL
   -> POST /users, POST /auth/login, POST /auth/logout, GET /auth/session,
      POST /auth/verify-email, GET/POST /orgs, GET/POST /projects,
-     GET/POST/DELETE /expenses
+     GET/POST/DELETE /expenses, GET /expenses/summary
   -> JSON response
 ```
 
@@ -220,9 +220,9 @@ global dashboard or organization switcher.
 - Recent activity lists the latest six expenses for the organization. Each row
   shows its own currency code because the list may mix currencies.
 - The dashboard loads `GET /orgs/{orgID}`, `GET /projects`, one
-  `GET /expenses?projectId=...&limit=1` per project for totals, and one
-  organization-wide `GET /expenses?limit=6` for recent activity. It never derives
-  totals from a returned page.
+  `GET /expenses/summary` for all project totals, and one organization-wide
+  `GET /expenses?limit=6` for recent activity. It never derives totals from a
+  returned page and never issues one totals request per project.
 - Empty states cover an organization with no projects and no recent activity.
   Network and access errors offer a retry.
 
@@ -255,6 +255,9 @@ project expense page.
 - Clicking a project name or arrow opens its expense page.
 - The project page loads the organization, project, and that project's debits and
   credits.
+- If the project list is paginated, request its summary with `projectIds` from the
+  current page and merge rows by `projectId`, zero-filling projects without
+  matching expenses. Never map projects to summary rows by array position.
 - The project identity (eyebrow, name, organization, tags) and the New expense
   action sit in a compact toolbar above the net hero. On large screens the net
   hero spans the full width, the filter toolbar follows, and the ledger fills the
@@ -314,13 +317,15 @@ project expense page.
   RFC 3339 timestamps to the API.
 - The client rejects an inverted range before making a request; the backend
   validates it again.
-- `totalCount`, `totalDebit`, `totalCredit`, and `netTotal` describe every
-  expense matching the filters. They come from the API and are never derived
-  from the current page. `netTotal` is `totalCredit - totalDebit`.
-- The list shows 20 expenses per page. Previous and Next change only `offset`;
-  the server-computed totals stay the same.
+- `totalCount`, `totalDebit`, `totalCredit`, and `netTotal` come from
+  `GET /expenses/summary` and describe every expense matching the filters. They
+  are never derived from the current page. `netTotal` is
+  `totalCredit - totalDebit`.
+- The list shows 20 expenses per page. `GET /expenses` returns `items` and
+  `nextOffset`; Previous and Next change only `offset`. Changing pages does not
+  refetch the summary.
 - Applying filters resets `offset` to zero. Clear resets tags and dates and
-  reloads the first page.
+  reloads the first page and summary.
 - Totals are in minor units and are formatted with the project currency. The
   list rows show a debit or credit badge and a signed amount; the large animated
   total shows the net, with credit and debit figures beside it.
@@ -535,26 +540,45 @@ Request with either or both fields:
 Success: `200` with the updated project. At least one field is required.
 `tags: []` clears all project tags.
 
-### `GET /expenses?orgId=...&userId=...&projectId=...&tags=...&from=...&to=...&limit=20&offset=0`
+### `GET /expenses?orgId=...&userId=...&projectId=...&projectIds=...&tags=...&from=...&to=...&limit=20&offset=0`
 
 Success: `200` with:
 
 ```json
 {
   "items": [],
-  "totalCount": 42,
-  "totalDebit": 100000,
-  "totalCredit": 123456,
-  "netTotal": 23456
+  "nextOffset": 20
 }
 ```
 
-Expenses are scoped to the organization. `projectId` limits them to one project.
+Expenses are scoped to the organization. `projectId` limits them to one project;
+`projectIds` limits them to up to 100 comma-separated projects. Do not send both.
 `tags=food,travel` requires every tag to match. `tag` remains available as a
 single-tag fallback. `from` and `to` are inclusive RFC 3339 bounds. `limit` and
-`offset` paginate `items` only; `totalCount`, `totalDebit`, and `totalCredit`
-cover every matching expense, and `netTotal` is `totalCredit - totalDebit`.
-Totals are in minor units and, on the project page, use that project's currency.
+`offset` paginate `items` only. `nextOffset` is `null` on the last page.
+
+### `GET /expenses/summary?orgId=...&userId=...&projectId=...&projectIds=...&tags=...&from=...&to=...`
+
+Success: `200` with totals grouped by project and currency:
+
+```json
+{
+  "items": [
+    {
+      "projectId": "...",
+      "currency": "USD",
+      "totalCount": 42,
+      "totalDebit": 100000,
+      "totalCredit": 123456,
+      "netTotal": 23456
+    }
+  ]
+}
+```
+
+The summary accepts the same filters as the list and has no pagination.
+`netTotal` is `totalCredit - totalDebit`. Amounts are never added across
+currencies.
 
 ### `POST /expenses?orgId=...&userId=...`
 
@@ -758,23 +782,21 @@ one data module, while the backend documents remain the canonical contract. The
 tradeoff is that contract changes must update both places; the docs rule records
 that obligation.
 
-### Server-side filtered totals
+### Separate page and summary reads
 
-The expense list response carries debit, credit, and net totals computed by the
-backend over the same filters without pagination. The UI never sums the current
-page, so paging does not change the displayed total and filters are the single
-source of truth. A client-side total would be wrong as soon as there is more
-than one page.
+`GET /expenses` returns one page and `nextOffset`; it never runs an aggregate.
+`GET /expenses/summary` computes totals over the filtered set, grouped by project
+and currency. The UI never sums the current page, so paging does not change the
+displayed total and filters are the single source of truth. A page request stays
+bounded by its limit, and all project summaries arrive in one request instead of
+one request per project.
 
 ### Currency-grouped dashboard totals
 
 An organization can hold projects in different currencies, and minor units are
-not comparable across them. The dashboard therefore loads each project's totals
-with `limit=1` and groups them by currency before summing. A single
-organization-wide expense total would be numerically wrong for mixed-currency
-organizations. The tradeoff is one totals request per project; at the current
-scale that is acceptable, and a future backend summary endpoint can replace it
-without changing the screen.
+not comparable across them. The dashboard loads one grouped summary and sums
+within each currency before displaying it. A single organization-wide expense
+total would be numerically wrong for mixed-currency organizations.
 
 ### Viewport-contained project ledger
 
@@ -818,8 +840,6 @@ it and refreshes the current page and totals.
 - Server-side organization tag filtering applies within the 100-membership page
   because the list is assembled from membership IDs. A merged membership/org
   query would be needed at larger counts.
-- The dashboard issues one totals request per project. A backend summary
-  endpoint grouped by currency and project would remove this N+1 pattern.
 - Date filters use the browser's local timezone; there is no timezone selector.
 - No global state or server-state cache.
 - No deployment configuration or static-host SPA rewrite.

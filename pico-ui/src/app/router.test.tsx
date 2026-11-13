@@ -76,13 +76,13 @@ describe("AppRouter", () => {
         if (method === "GET" && url.pathname === "/api/projects") {
           return jsonResponse({ items: [] })
         }
+        if (method === "GET" && url.pathname === "/api/expenses/summary") {
+          return jsonResponse({ items: [] })
+        }
         if (method === "GET" && url.pathname === "/api/expenses") {
           return jsonResponse({
             items: [],
-            totalCount: 0,
-            totalDebit: 0,
-            totalCredit: 0,
-            netTotal: 0,
+            nextOffset: null,
           })
         }
         return jsonResponse({ error: "not found" }, 404)

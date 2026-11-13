@@ -92,10 +92,6 @@ function jsonResponse(body: unknown, status = 200): Response {
   } as Response
 }
 
-function emptyPage(totals: Totals = usdTotals) {
-  return { items: [], ...totals }
-}
-
 type ApiOptions = {
   orgResponse?: Response
   projects?: Project[]
@@ -120,17 +116,23 @@ function apiHandler(options: ApiOptions = {}) {
       return jsonResponse({ items: options.projects ?? [] })
     }
 
+    if (url.pathname === "/api/expenses/summary") {
+      return jsonResponse({
+        items: Object.entries(options.totals ?? {}).map(
+          ([projectId, totals]) => ({
+            projectId,
+            currency:
+              projectId === berlin.id ? berlin.currency : general.currency,
+            ...totals,
+          })
+        ),
+      })
+    }
+
     if (url.pathname === "/api/expenses") {
-      const projectId = url.searchParams.get("projectId")
-      if (projectId) {
-        return jsonResponse(emptyPage(options.totals?.[projectId]))
-      }
       return jsonResponse({
         items: options.recent ?? [],
-        totalCount: 0,
-        totalDebit: 0,
-        totalCredit: 0,
-        netTotal: 0,
+        nextOffset: null,
       })
     }
 
@@ -221,23 +223,21 @@ describe("OrgDashboardPage", () => {
     )
     expect(orgCall).toBeDefined()
 
-    const expenseRequests = fetchMock.mock.calls
-      .filter(
-        ([url, init]) =>
-          String(url).startsWith("/api/expenses?") &&
-          (init?.method ?? "GET") === "GET"
-      )
+    const summaryRequest = fetchMock.mock.calls
       .map(([url]) => new URL(String(url), "http://localhost"))
+      .find((url) => url.pathname === "/api/expenses/summary")
+    expect(summaryRequest).toBeDefined()
 
-    const projectRequest = expenseRequests.find(
-      (url) => url.searchParams.get("projectId") === general.id
-    )
-    expect(projectRequest?.searchParams.get("limit")).toBe("1")
-
-    const recentRequest = expenseRequests.find(
-      (url) => !url.searchParams.has("projectId")
-    )
+    const recentRequest = fetchMock.mock.calls
+      .map(([url]) => new URL(String(url), "http://localhost"))
+      .find((url) => url.pathname === "/api/expenses")
     expect(recentRequest?.searchParams.get("limit")).toBe("6")
+
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).startsWith("/api/expenses?projectId=")
+      )
+    ).toBe(false)
   })
 
   it("groups mixed currencies and switches the active currency", async () => {

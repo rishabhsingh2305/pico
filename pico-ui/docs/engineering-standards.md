@@ -82,15 +82,15 @@ app grows.
 - Never display raw server errors, stack traces, or request internals.
 - Never log passwords, tokens, or full request bodies.
 - Use the backend's error envelope `{"error":"message"}`.
-- For paginated lists with totals, render the server's `totalCount`,
-  `totalDebit`, `totalCredit`, and `netTotal` for the full filtered set.
-  `netTotal` is `totalCredit - totalDebit`; never sum only the loaded page.
-- Changing filters resets `offset` to zero; changing pages must not change the
-  totals. Reload the current page after create or delete so the totals stay
-  correct.
+- Expense list responses return `items` and `nextOffset` only. Render
+  `totalCount`, `totalDebit`, `totalCredit`, and `netTotal` from
+  `GET /expenses/summary`; never sum the loaded page.
+- Changing filters resets `offset` to zero. Changing pages must not refetch the
+  summary. Reload the current page and summary after create or delete so both
+  stay correct.
 - Dashboard and workspace summaries must group minor-unit totals by currency.
-  Never add amounts across currencies. Fetch per-project totals from the API
-  rather than summing returned page items.
+  Never add amounts across currencies. Fetch grouped totals from the summary
+  endpoint rather than issuing one request per project.
 - Keep `/api-docs` content in sync with the backend contract. The backend README
   is canonical; `src/features/api-docs/content.ts` is the curated UI guide.
 

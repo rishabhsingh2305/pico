@@ -16,9 +16,9 @@ import {
   summarizeCurrencies,
   type ProjectTotals,
 } from "@/features/dashboard/data"
-import { listExpenses } from "@/features/expenses/api"
+import { listExpenses, summarizeExpenses } from "@/features/expenses/api"
 import { expenseErrorMessage } from "@/features/expenses/error-message"
-import type { Expense } from "@/features/expenses/types"
+import type { Expense, ExpenseSummaryItem } from "@/features/expenses/types"
 import { getOrg } from "@/features/orgs/api"
 import type { Org } from "@/features/orgs/types"
 import { listProjects } from "@/features/projects/api"
@@ -64,9 +64,14 @@ function OrgDashboardView({ session }: { session: Session }) {
 
     async function load() {
       try {
-        const [loadedOrg, projects, recentPage] = await Promise.all([
+        const [loadedOrg, projects, summary, recentPage] = await Promise.all([
           getOrg(session.userId, orgId),
           listProjects(session.userId, orgId),
+          summarizeExpenses({
+            userId: session.userId,
+            orgId,
+            tags: [],
+          }),
           listExpenses({
             userId: session.userId,
             orgId,
@@ -76,19 +81,15 @@ function OrgDashboardView({ session }: { session: Session }) {
           }),
         ])
 
-        const projectTotals = await Promise.all(
-          projects.map(async (project) => ({
-            project,
-            totals: await listExpenses({
-              userId: session.userId,
-              orgId,
-              projectId: project.id,
-              tags: [],
-              limit: 1,
-              offset: 0,
-            }),
-          }))
+        const totalsByProject = new Map(
+          summary.items.map((item) => [item.projectId, item])
         )
+        const projectTotals = projects.map((project) => ({
+          project,
+          totals:
+            totalsByProject.get(project.id) ??
+            zeroTotals(project.id, project.currency),
+        }))
 
         if (!cancelled) {
           setOrg(loadedOrg)
@@ -196,6 +197,17 @@ function OrgDashboardView({ session }: { session: Session }) {
       </div>
     </AppShell>
   )
+}
+
+function zeroTotals(projectId: string, currency: string): ExpenseSummaryItem {
+  return {
+    projectId,
+    currency,
+    totalCount: 0,
+    totalDebit: 0,
+    totalCredit: 0,
+    netTotal: 0,
+  }
 }
 
 function dashboardErrorMessage(error: unknown): string {

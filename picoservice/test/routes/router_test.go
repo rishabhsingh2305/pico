@@ -280,6 +280,7 @@ func TestAllowHeadersForParameterizedRoutes(t *testing.T) {
 		{name: "projects collection", method: http.MethodDelete, path: "/projects", wantAllow: "GET, HEAD, POST"},
 		{name: "project item", method: http.MethodDelete, path: "/projects/project-1", wantAllow: "GET, HEAD, PATCH"},
 		{name: "expenses collection", method: http.MethodDelete, path: "/expenses", wantAllow: "GET, HEAD, POST"},
+		{name: "expense summary", method: http.MethodPost, path: "/expenses/summary", wantAllow: "GET, HEAD"},
 		{name: "expense item", method: http.MethodPost, path: "/expenses/expense-1", wantAllow: "GET, HEAD, PATCH, DELETE"},
 	}
 

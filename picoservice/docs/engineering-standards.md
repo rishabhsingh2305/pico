@@ -109,10 +109,14 @@ them when the service grows.
 - Set `Allow` on 405 responses; derive it from the router tree, never from a
   global method list.
 - HEAD responses carry headers and no body.
-- List responses that include totals must compute them over the full filtered
-  set and must not apply `limit` or `offset` to the summary query. Never make
-  clients derive totals from one page. Expense totals are split into debit and
-  credit sums, with net computed as credit minus debit.
+- List endpoints return one page and pagination metadata. They must not run an
+  unbounded aggregate over the same filter. Expense totals live on
+  `GET /expenses/summary`; they cover the full filtered set but are never
+  computed by the list query. Never make clients derive totals from one page.
+- Aggregate endpoints group server-side. Clients must not issue one totals
+  request per project, category, or row. Amounts are grouped by currency and
+  never added across currencies. Expense totals are split into debit and credit
+  sums, with net computed as credit minus debit.
 - Expense amounts are positive; `type` carries debit/credit direction. Missing
   types default to debit on create, read, and aggregation.
 - Keep filter semantics explicit in the API contract and docs. Project tags use
@@ -149,6 +153,21 @@ them when the service grows.
 - `mongo.Connect` is lazy: do not ping at startup. Connectivity checks belong in
   `/ready`.
 - Every database call takes a `context.Context` and a timeout.
+- Every list query must have an index that supports its equality filters and sort
+  order. Range filters may share the same compound index when the sort follows
+  the range field. Add or change indexes in
+  `internal/dao/mongodb/indexes.go`, then run `make indexes`.
+- Tag indexes are multikey. Verify with `explain("executionStats")` that a
+  tag-filtered query does not fall back to a collection scan or an unnecessary
+  blocking sort.
+- List queries return one page. Aggregate queries live on separate summary
+  endpoints; do not compute totals in the list path. Do not use `$facet` to
+  combine an unbounded summary with a page.
+- Offset pagination is acceptable for small, bounded lists. Use cursor
+  pagination for deep or high-volume lists.
+- Index changes are migrations: add a new index before deploying dependent code,
+  verify it, then remove the old index in a separate change. Never reuse an index
+  name with different keys.
 - Controllers depend on small consumer-side service interfaces, not on the
   driver or `*mongo.Client`.
 - DAO contracts live in `internal/dao`. Concrete stores live in
@@ -208,6 +227,10 @@ them when the service grows.
 - [ ] `make check` passes.
 - [ ] `sam validate --lint` passes for template changes.
 - [ ] `make indexes` is documented/updated for index changes.
+- [ ] New or changed query patterns were checked with `explain` and are covered
+      by an index.
+- [ ] List handlers do not run unbounded aggregates, and clients do not issue
+      one totals request per item.
 - [ ] `README.md` and `docs/architecture.md` are updated for contract changes.
 - [ ] No generated, secret, or unrelated files are included.
 

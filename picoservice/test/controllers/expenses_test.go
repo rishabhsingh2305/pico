@@ -116,10 +116,11 @@ func TestExpenseListSingleTagFallback(t *testing.T) {
 }
 
 func TestExpenseListResponse(t *testing.T) {
+	nextOffset := 3
 	service := &fakes.ExpenseService{
 		ListFunc: func(_ context.Context, in services.ListExpensesInput) (services.ExpenseList, error) {
-			if got, want := in.ProjectID, "project-1"; got != want {
-				t.Fatalf("expected project %q, got %q", want, got)
+			if got, want := in.ProjectIDs, []string{"project-1"}; len(got) != len(want) || got[0] != want[0] {
+				t.Fatalf("expected projects %v, got %v", want, got)
 			}
 			if got, want := in.Tags, []string{"food", "travel"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
 				t.Fatalf("expected tags %v, got %v", want, got)
@@ -128,10 +129,7 @@ func TestExpenseListResponse(t *testing.T) {
 				Items: []entities.Expense{
 					{ID: "expense-1", Currency: "USD", Type: entities.ExpenseTypeDebit, Amount: 1299},
 				},
-				TotalCount:  4,
-				TotalDebit:  1000,
-				TotalCredit: 9876,
-				NetTotal:    8876,
+				NextOffset: &nextOffset,
 			}, nil
 		},
 	}
@@ -146,11 +144,8 @@ func TestExpenseListResponse(t *testing.T) {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
 	var body struct {
-		Items       []map[string]any `json:"items"`
-		TotalCount  int64            `json:"totalCount"`
-		TotalDebit  int64            `json:"totalDebit"`
-		TotalCredit int64            `json:"totalCredit"`
-		NetTotal    int64            `json:"netTotal"`
+		Items      []map[string]any `json:"items"`
+		NextOffset *int             `json:"nextOffset"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -161,18 +156,90 @@ func TestExpenseListResponse(t *testing.T) {
 	if got, want := body.Items[0]["type"], "debit"; got != want {
 		t.Fatalf("expected item type %q, got %v", want, got)
 	}
-	if got, want := body.TotalCount, int64(4); got != want {
+	if body.NextOffset == nil || *body.NextOffset != 3 {
+		t.Fatalf("expected next offset 3, got %v", body.NextOffset)
+	}
+	if _, exists := body.Items[0]["totalDebit"]; exists {
+		t.Fatal("did not expect totals on the list response")
+	}
+}
+
+func TestExpenseSummaryResponse(t *testing.T) {
+	service := &fakes.ExpenseService{
+		SummarizeFunc: func(_ context.Context, in services.SummarizeExpensesInput) ([]services.ExpenseSummaryGroup, error) {
+			if got, want := in.ProjectIDs, []string{"project-1", "project-2"}; len(got) != len(want) || got[0] != want[0] || got[1] != want[1] {
+				t.Fatalf("expected projects %v, got %v", want, got)
+			}
+			if got, want := in.Tags, []string{"food", "travel"}; len(got) != len(want) {
+				t.Fatalf("expected tags %v, got %v", want, got)
+			}
+			return []services.ExpenseSummaryGroup{
+				{ProjectID: "project-1", Currency: "USD", Count: 4, DebitAmount: 1000, CreditAmount: 9876},
+			}, nil
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/expenses/summary?orgId=org-1&userId=user-1&projectIds=project-1,project-2&tags=food,travel", nil)
+	req = withIdentity(req, "org-1", "user-1")
+
+	controllers.NewExpenseController(testLogger(), service).Summarize(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	var body struct {
+		Items []struct {
+			ProjectID   string `json:"projectId"`
+			Currency    string `json:"currency"`
+			TotalCount  int64  `json:"totalCount"`
+			TotalDebit  int64  `json:"totalDebit"`
+			TotalCredit int64  `json:"totalCredit"`
+			NetTotal    int64  `json:"netTotal"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := len(body.Items), 1; got != want {
+		t.Fatalf("expected %d item, got %d", want, got)
+	}
+	item := body.Items[0]
+	if got, want := item.ProjectID, "project-1"; got != want {
+		t.Fatalf("expected project %q, got %q", want, got)
+	}
+	if got, want := item.TotalCount, int64(4); got != want {
 		t.Fatalf("expected total count %d, got %d", want, got)
 	}
-	if got, want := body.TotalDebit, int64(1000); got != want {
+	if got, want := item.TotalDebit, int64(1000); got != want {
 		t.Fatalf("expected total debit %d, got %d", want, got)
 	}
-	if got, want := body.TotalCredit, int64(9876); got != want {
+	if got, want := item.TotalCredit, int64(9876); got != want {
 		t.Fatalf("expected total credit %d, got %d", want, got)
 	}
-	if got, want := body.NetTotal, int64(8876); got != want {
+	if got, want := item.NetTotal, int64(8876); got != want {
 		t.Fatalf("expected net total %d, got %d", want, got)
 	}
+}
+
+func TestExpenseSummaryRejectsMixedProjectFilters(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/expenses/summary?orgId=org-1&userId=user-1&projectId=project-1&projectIds=project-2", nil)
+	req = withIdentity(req, "org-1", "user-1")
+
+	controllers.NewExpenseController(testLogger(), &fakes.ExpenseService{}).Summarize(rec, req)
+
+	assertJSONError(t, rec, http.StatusBadRequest, "use projectId or projectIds, not both")
+}
+
+func TestExpenseSummaryBadTime(t *testing.T) {
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodGet, "/expenses/summary?orgId=org-1&userId=user-1&to=not-a-time", nil)
+	req = withIdentity(req, "org-1", "user-1")
+
+	controllers.NewExpenseController(testLogger(), &fakes.ExpenseService{}).Summarize(rec, req)
+
+	assertJSONError(t, rec, http.StatusBadRequest, "to must be an RFC3339 timestamp")
 }
 
 func TestExpenseDelete(t *testing.T) {

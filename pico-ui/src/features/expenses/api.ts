@@ -3,12 +3,14 @@ import type {
   CreateExpenseInput,
   Expense,
   ExpensePage,
+  ExpenseSummary,
 } from "@/features/expenses/types"
 
 export type ListExpensesParams = {
   userId: string
   orgId: string
   projectId?: string
+  projectIds?: string[]
   tags: string[]
   from?: string
   to?: string
@@ -16,16 +18,32 @@ export type ListExpensesParams = {
   offset: number
 }
 
-export async function listExpenses(
-  params: ListExpensesParams
-): Promise<ExpensePage> {
+export type SummarizeExpensesParams = {
+  userId: string
+  orgId: string
+  projectId?: string
+  projectIds?: string[]
+  tags: string[]
+  from?: string
+  to?: string
+}
+
+function expenseQuery(params: {
+  userId: string
+  orgId: string
+  projectId?: string
+  projectIds?: string[]
+  tags: string[]
+  from?: string
+  to?: string
+}): URLSearchParams {
   const query = new URLSearchParams({
     orgId: params.orgId,
     userId: params.userId,
-    limit: String(params.limit),
-    offset: String(params.offset),
   })
-  if (params.projectId) {
+  if (params.projectIds && params.projectIds.length > 0) {
+    query.set("projectIds", params.projectIds.join(","))
+  } else if (params.projectId) {
     query.set("projectId", params.projectId)
   }
   if (params.tags.length > 0) {
@@ -37,8 +55,26 @@ export async function listExpenses(
   if (params.to) {
     query.set("to", params.to)
   }
+  return query
+}
+
+export async function listExpenses(
+  params: ListExpensesParams
+): Promise<ExpensePage> {
+  const query = expenseQuery(params)
+  query.set("limit", String(params.limit))
+  query.set("offset", String(params.offset))
 
   return requestJSON<ExpensePage>(`/expenses?${query}`, { method: "GET" })
+}
+
+export function summarizeExpenses(
+  params: SummarizeExpensesParams
+): Promise<ExpenseSummary> {
+  const query = expenseQuery(params)
+  return requestJSON<ExpenseSummary>(`/expenses/summary?${query}`, {
+    method: "GET",
+  })
 }
 
 export function createExpense(

@@ -3,6 +3,7 @@ package expensestest
 import (
 	"context"
 	"errors"
+	"strconv"
 	"testing"
 	"time"
 
@@ -136,9 +137,12 @@ func TestListRejectsInvertedRange(t *testing.T) {
 	}
 }
 
-func TestListReturnsSummaryAndNormalizesTags(t *testing.T) {
+func TestListReturnsNextOffsetAndNormalizesTags(t *testing.T) {
 	store := &fakeStore{
-		summary: dao.ExpenseSummary{Count: 4, DebitAmount: 1000, CreditAmount: 9876},
+		items: []entities.Expense{
+			{ID: "expense-1"},
+			{ID: "expense-2"},
+		},
 	}
 	service := services.NewExpenseService(store, &fakeProjectChecker{})
 
@@ -150,20 +154,14 @@ func TestListReturnsSummaryAndNormalizesTags(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list expenses: %v", err)
 	}
-	if got, want := result.TotalCount, int64(4); got != want {
-		t.Fatalf("expected total count %d, got %d", want, got)
+	if got, want := len(result.Items), 1; got != want {
+		t.Fatalf("expected %d item, got %d", want, got)
 	}
-	if got, want := result.TotalDebit, int64(1000); got != want {
-		t.Fatalf("expected total debit %d, got %d", want, got)
+	if result.NextOffset == nil || *result.NextOffset != 1 {
+		t.Fatalf("expected next offset 1, got %v", result.NextOffset)
 	}
-	if got, want := result.TotalCredit, int64(9876); got != want {
-		t.Fatalf("expected total credit %d, got %d", want, got)
-	}
-	if got, want := result.NetTotal, int64(8876); got != want {
-		t.Fatalf("expected net total %d, got %d", want, got)
-	}
-	if got, want := store.lastFilter.Limit, 1; got != want {
-		t.Fatalf("expected limit %d, got %d", want, got)
+	if got, want := store.lastFilter.Limit, 2; got != want {
+		t.Fatalf("expected requested limit %d, got %d", want, got)
 	}
 	if got, want := len(store.lastFilter.Tags), 2; got != want {
 		t.Fatalf("expected %d normalized tags, got %v", want, store.lastFilter.Tags)
@@ -173,6 +171,85 @@ func TestListReturnsSummaryAndNormalizesTags(t *testing.T) {
 	}
 	if got, want := store.lastFilter.Tags[1], "travel"; got != want {
 		t.Fatalf("expected second tag %q, got %q", want, got)
+	}
+}
+
+func TestListOmitsNextOffsetOnLastPage(t *testing.T) {
+	store := &fakeStore{items: []entities.Expense{{ID: "expense-1"}}}
+	service := services.NewExpenseService(store, &fakeProjectChecker{})
+
+	result, err := service.List(context.Background(), services.ListExpensesInput{
+		OrgID: "org-1",
+		Limit: 1,
+	})
+	if err != nil {
+		t.Fatalf("list expenses: %v", err)
+	}
+	if result.NextOffset != nil {
+		t.Fatalf("expected no next offset, got %v", *result.NextOffset)
+	}
+}
+
+func TestSummarizeNormalizesFilters(t *testing.T) {
+	store := &fakeStore{
+		summary: []dao.ExpenseSummaryGroup{
+			{ProjectID: "project-1", Currency: "USD", Count: 2, DebitAmount: 300, CreditAmount: 100},
+		},
+	}
+	service := services.NewExpenseService(store, &fakeProjectChecker{})
+
+	result, err := service.Summarize(context.Background(), services.SummarizeExpensesInput{
+		OrgID:      "org-1",
+		ProjectIDs: []string{" project-1 "},
+		Tags:       []string{" food ", "food", "travel"},
+	})
+	if err != nil {
+		t.Fatalf("summarize expenses: %v", err)
+	}
+	if got, want := len(result), 1; got != want {
+		t.Fatalf("expected %d group, got %d", want, got)
+	}
+	if got, want := result[0].ProjectID, "project-1"; got != want {
+		t.Fatalf("expected project %q, got %q", want, got)
+	}
+	if got, want := store.lastFilter.ProjectIDs, []string{"project-1"}; len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("expected filter projects %v, got %v", want, got)
+	}
+	if got, want := len(store.lastFilter.Tags), 2; got != want {
+		t.Fatalf("expected %d normalized tags, got %v", want, store.lastFilter.Tags)
+	}
+}
+
+func TestSummarizeRejectsTooManyProjectIDs(t *testing.T) {
+	projectIDs := make([]string, 0, 101)
+	for index := 0; index < 101; index++ {
+		projectIDs = append(projectIDs, "project-"+strconv.Itoa(index))
+	}
+	service := services.NewExpenseService(&fakeStore{}, &fakeProjectChecker{})
+
+	_, err := service.Summarize(context.Background(), services.SummarizeExpensesInput{
+		OrgID:      "org-1",
+		ProjectIDs: projectIDs,
+	})
+	var validationErr *validation.Error
+	if !errors.As(err, &validationErr) {
+		t.Fatalf("expected validation error, got %v", err)
+	}
+}
+
+func TestSummarizeRejectsInvertedRange(t *testing.T) {
+	service := services.NewExpenseService(&fakeStore{}, &fakeProjectChecker{})
+	from := time.Now()
+	to := from.Add(-time.Hour)
+
+	_, err := service.Summarize(context.Background(), services.SummarizeExpensesInput{
+		OrgID: "org-1",
+		From:  &from,
+		To:    &to,
+	})
+	var validationErr *validation.Error
+	if !errors.As(err, &validationErr) {
+		t.Fatalf("expected validation error, got %v", err)
 	}
 }
 
@@ -268,7 +345,8 @@ type fakeStore struct {
 	deletedID    string
 	lastUpdate   dao.ExpenseUpdate
 	lastFilter   dao.ExpenseFilter
-	summary      dao.ExpenseSummary
+	items        []entities.Expense
+	summary      []dao.ExpenseSummaryGroup
 }
 
 func (s *fakeStore) Insert(_ context.Context, expense entities.Expense) (entities.Expense, error) {
@@ -282,10 +360,10 @@ func (s *fakeStore) FindByID(_ context.Context, _, _ string) (entities.Expense, 
 
 func (s *fakeStore) List(_ context.Context, filter dao.ExpenseFilter) ([]entities.Expense, error) {
 	s.lastFilter = filter
-	return []entities.Expense{}, nil
+	return s.items, nil
 }
 
-func (s *fakeStore) Summarize(_ context.Context, filter dao.ExpenseFilter) (dao.ExpenseSummary, error) {
+func (s *fakeStore) SummarizeByProject(_ context.Context, filter dao.ExpenseFilter) ([]dao.ExpenseSummaryGroup, error) {
 	s.lastFilter = filter
 	return s.summary, nil
 }

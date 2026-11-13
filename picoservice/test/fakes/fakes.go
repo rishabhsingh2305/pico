@@ -289,11 +289,12 @@ func (s *ProjectService) Update(ctx context.Context, in services.UpdateProjectIn
 
 // ExpenseService is a configurable fake expense service.
 type ExpenseService struct {
-	CreateFunc func(context.Context, services.CreateExpenseInput) (entities.Expense, error)
-	ListFunc   func(context.Context, services.ListExpensesInput) (services.ExpenseList, error)
-	GetFunc    func(context.Context, string, string) (entities.Expense, error)
-	UpdateFunc func(context.Context, services.UpdateExpenseInput) (entities.Expense, error)
-	DeleteFunc func(context.Context, string, string) error
+	CreateFunc    func(context.Context, services.CreateExpenseInput) (entities.Expense, error)
+	ListFunc      func(context.Context, services.ListExpensesInput) (services.ExpenseList, error)
+	SummarizeFunc func(context.Context, services.SummarizeExpensesInput) ([]services.ExpenseSummaryGroup, error)
+	GetFunc       func(context.Context, string, string) (entities.Expense, error)
+	UpdateFunc    func(context.Context, services.UpdateExpenseInput) (entities.Expense, error)
+	DeleteFunc    func(context.Context, string, string) error
 }
 
 func (s *ExpenseService) Create(ctx context.Context, in services.CreateExpenseInput) (entities.Expense, error) {
@@ -308,6 +309,13 @@ func (s *ExpenseService) List(ctx context.Context, in services.ListExpensesInput
 		return s.ListFunc(ctx, in)
 	}
 	return services.ExpenseList{Items: []entities.Expense{}}, nil
+}
+
+func (s *ExpenseService) Summarize(ctx context.Context, in services.SummarizeExpensesInput) ([]services.ExpenseSummaryGroup, error) {
+	if s.SummarizeFunc != nil {
+		return s.SummarizeFunc(ctx, in)
+	}
+	return []services.ExpenseSummaryGroup{}, nil
 }
 
 func (s *ExpenseService) Get(ctx context.Context, orgID, id string) (entities.Expense, error) {

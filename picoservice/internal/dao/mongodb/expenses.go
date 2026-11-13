@@ -139,62 +139,80 @@ func (s *ExpenseStore) List(ctx context.Context, in dao.ExpenseFilter) ([]entiti
 	return items, nil
 }
 
-// Summarize returns count and amount totals for every expense matching the
-// filter. Pagination fields are ignored.
-func (s *ExpenseStore) Summarize(ctx context.Context, in dao.ExpenseFilter) (dao.ExpenseSummary, error) {
+// SummarizeByProject returns count and amount totals grouped by project and
+// currency for every expense matching the filter. Pagination is ignored.
+func (s *ExpenseStore) SummarizeByProject(ctx context.Context, in dao.ExpenseFilter) ([]dao.ExpenseSummaryGroup, error) {
 	pipeline := mongo.Pipeline{
 		bson.D{{Key: "$match", Value: expenseMatch(in)}},
-		bson.D{{Key: "$addFields", Value: bson.M{
-			"effectiveType": bson.M{"$ifNull": []any{"$type", string(entities.ExpenseTypeDebit)}},
-		}}},
 		bson.D{{Key: "$group", Value: bson.M{
-			"_id":   nil,
+			"_id": bson.M{
+				"projectId": "$projectId",
+				"currency":  bson.M{"$ifNull": []any{"$currency", "USD"}},
+			},
 			"count": bson.M{"$sum": 1},
 			"debit": bson.M{"$sum": bson.M{"$cond": []any{
-				bson.M{"$eq": []any{"$effectiveType", string(entities.ExpenseTypeDebit)}},
+				bson.M{"$eq": []any{
+					bson.M{"$ifNull": []any{"$type", string(entities.ExpenseTypeDebit)}},
+					string(entities.ExpenseTypeDebit),
+				}},
 				"$amount",
 				0,
 			}}},
 			"credit": bson.M{"$sum": bson.M{"$cond": []any{
-				bson.M{"$eq": []any{"$effectiveType", string(entities.ExpenseTypeCredit)}},
+				bson.M{"$eq": []any{
+					bson.M{"$ifNull": []any{"$type", string(entities.ExpenseTypeDebit)}},
+					string(entities.ExpenseTypeCredit),
+				}},
 				"$amount",
 				0,
 			}}},
+		}}},
+		bson.D{{Key: "$sort", Value: bson.D{
+			{Key: "_id.projectId", Value: 1},
+			{Key: "_id.currency", Value: 1},
 		}}},
 	}
 
 	cursor, err := s.collection.Aggregate(ctx, pipeline)
 	if err != nil {
-		return dao.ExpenseSummary{}, fmt.Errorf("summarize expenses: %w", err)
+		return nil, fmt.Errorf("summarize expenses: %w", err)
 	}
 
 	var results []struct {
+		ID struct {
+			ProjectID string `bson:"projectId"`
+			Currency  string `bson:"currency"`
+		} `bson:"_id"`
 		Count  int64 `bson:"count"`
 		Debit  int64 `bson:"debit"`
 		Credit int64 `bson:"credit"`
 	}
 	if err := cursor.All(ctx, &results); err != nil {
 		_ = cursor.Close(ctx)
-		return dao.ExpenseSummary{}, fmt.Errorf("decode expense summary: %w", err)
+		return nil, fmt.Errorf("decode expense summary: %w", err)
 	}
 	if err := cursor.Close(ctx); err != nil {
-		return dao.ExpenseSummary{}, fmt.Errorf("close expense summary cursor: %w", err)
+		return nil, fmt.Errorf("close expense summary cursor: %w", err)
 	}
-	if len(results) == 0 {
-		return dao.ExpenseSummary{}, nil
+
+	groups := make([]dao.ExpenseSummaryGroup, 0, len(results))
+	for _, result := range results {
+		groups = append(groups, dao.ExpenseSummaryGroup{
+			ProjectID:    result.ID.ProjectID,
+			Currency:     result.ID.Currency,
+			Count:        result.Count,
+			DebitAmount:  result.Debit,
+			CreditAmount: result.Credit,
+		})
 	}
-	return dao.ExpenseSummary{
-		Count:        results[0].Count,
-		DebitAmount:  results[0].Debit,
-		CreditAmount: results[0].Credit,
-	}, nil
+	return groups, nil
 }
 
 func expenseMatch(in dao.ExpenseFilter) bson.M {
 	filter := bson.M{"orgId": in.OrgID}
 
-	if in.ProjectID != "" {
-		filter["projectId"] = in.ProjectID
+	if len(in.ProjectIDs) > 0 {
+		filter["projectId"] = bson.M{"$in": in.ProjectIDs}
 	}
 	if len(in.Tags) > 0 {
 		filter["tags"] = bson.M{"$all": in.Tags}

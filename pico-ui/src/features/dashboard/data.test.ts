@@ -6,7 +6,7 @@ import {
   summarizeCurrencies,
   type ProjectTotals,
 } from "@/features/dashboard/data"
-import type { ExpensePage } from "@/features/expenses/types"
+import type { ExpenseSummaryItem } from "@/features/expenses/types"
 import type { Project } from "@/features/projects/types"
 
 function makeProject(overrides: Partial<Project> = {}): Project {
@@ -23,9 +23,12 @@ function makeProject(overrides: Partial<Project> = {}): Project {
   }
 }
 
-function makeTotals(overrides: Partial<ExpensePage> = {}): ExpensePage {
+function makeTotals(
+  overrides: Partial<ExpenseSummaryItem> = {}
+): ExpenseSummaryItem {
   return {
-    items: [],
+    projectId: "project-1",
+    currency: "USD",
     totalCount: 0,
     totalDebit: 0,
     totalCredit: 0,
@@ -36,7 +39,7 @@ function makeTotals(overrides: Partial<ExpensePage> = {}): ExpensePage {
 
 function makeEntry(
   project: Partial<Project>,
-  totals: Partial<ExpensePage>
+  totals: Partial<ExpenseSummaryItem>
 ): ProjectTotals {
   return { project: makeProject(project), totals: makeTotals(totals) }
 }

@@ -48,23 +48,37 @@ type UpdateExpenseInput struct {
 
 // ListExpensesInput contains the expense list filters.
 type ListExpensesInput struct {
-	OrgID     string
-	ProjectID string
-	Tags      []string
-	From      *time.Time
-	To        *time.Time
-	Limit     int
-	Offset    int
+	OrgID      string
+	ProjectIDs []string
+	Tags       []string
+	From       *time.Time
+	To         *time.Time
+	Limit      int
+	Offset     int
 }
 
-// ExpenseList contains one page of expenses and totals over every expense
-// matching the filter.
+// SummarizeExpensesInput contains the filters for grouped expense totals.
+type SummarizeExpensesInput struct {
+	OrgID      string
+	ProjectIDs []string
+	Tags       []string
+	From       *time.Time
+	To         *time.Time
+}
+
+// ExpenseList contains one page of expenses.
 type ExpenseList struct {
-	Items       []entities.Expense
-	TotalCount  int64
-	TotalDebit  int64
-	TotalCredit int64
-	NetTotal    int64
+	Items      []entities.Expense
+	NextOffset *int
+}
+
+// ExpenseSummaryGroup contains totals for one project and currency.
+type ExpenseSummaryGroup struct {
+	ProjectID    string
+	Currency     string
+	Count        int64
+	DebitAmount  int64
+	CreditAmount int64
 }
 
 // ExpenseService applies expense validation and business rules.
@@ -152,8 +166,7 @@ func (s *ExpenseService) Get(ctx context.Context, orgID, id string) (entities.Ex
 	return expense, nil
 }
 
-// List returns a page of expenses scoped to orgID, plus totals over every
-// expense matching the filters.
+// List returns a page of expenses scoped to orgID.
 func (s *ExpenseService) List(ctx context.Context, in ListExpensesInput) (ExpenseList, error) {
 	limit, offset, err := validation.Pagination(in.Limit, in.Offset)
 	if err != nil {
@@ -163,14 +176,19 @@ func (s *ExpenseService) List(ctx context.Context, in ListExpensesInput) (Expens
 		return ExpenseList{}, &validation.Error{Field: "from", Message: "from must be before to"}
 	}
 
+	projectIDs, err := normalizeProjectIDs(in.ProjectIDs)
+	if err != nil {
+		return ExpenseList{}, err
+	}
+
 	filter := dao.ExpenseFilter{
-		OrgID:     in.OrgID,
-		ProjectID: strings.TrimSpace(in.ProjectID),
-		Tags:      normalizeTagFilter(in.Tags),
-		From:      in.From,
-		To:        in.To,
-		Limit:     limit,
-		Offset:    offset,
+		OrgID:      in.OrgID,
+		ProjectIDs: projectIDs,
+		Tags:       normalizeTagFilter(in.Tags),
+		From:       in.From,
+		To:         in.To,
+		Limit:      limit + 1,
+		Offset:     offset,
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
@@ -180,17 +198,54 @@ func (s *ExpenseService) List(ctx context.Context, in ListExpensesInput) (Expens
 	if err != nil {
 		return ExpenseList{}, fmt.Errorf("list expenses: %w", err)
 	}
-	summary, err := s.store.Summarize(ctx, filter)
-	if err != nil {
-		return ExpenseList{}, fmt.Errorf("summarize expenses: %w", err)
+
+	var nextOffset *int
+	if len(items) > limit {
+		items = items[:limit]
+		next := offset + limit
+		nextOffset = &next
 	}
-	return ExpenseList{
-		Items:       items,
-		TotalCount:  summary.Count,
-		TotalDebit:  summary.DebitAmount,
-		TotalCredit: summary.CreditAmount,
-		NetTotal:    summary.CreditAmount - summary.DebitAmount,
-	}, nil
+	return ExpenseList{Items: items, NextOffset: nextOffset}, nil
+}
+
+// Summarize returns totals grouped by project and currency.
+func (s *ExpenseService) Summarize(ctx context.Context, in SummarizeExpensesInput) ([]ExpenseSummaryGroup, error) {
+	if in.From != nil && in.To != nil && in.From.After(*in.To) {
+		return nil, &validation.Error{Field: "from", Message: "from must be before to"}
+	}
+
+	projectIDs, err := normalizeProjectIDs(in.ProjectIDs)
+	if err != nil {
+		return nil, err
+	}
+
+	filter := dao.ExpenseFilter{
+		OrgID:      in.OrgID,
+		ProjectIDs: projectIDs,
+		Tags:       normalizeTagFilter(in.Tags),
+		From:       in.From,
+		To:         in.To,
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
+
+	groups, err := s.store.SummarizeByProject(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("summarize expenses: %w", err)
+	}
+
+	summary := make([]ExpenseSummaryGroup, 0, len(groups))
+	for _, group := range groups {
+		summary = append(summary, ExpenseSummaryGroup{
+			ProjectID:    group.ProjectID,
+			Currency:     group.Currency,
+			Count:        group.Count,
+			DebitAmount:  group.DebitAmount,
+			CreditAmount: group.CreditAmount,
+		})
+	}
+	return summary, nil
 }
 
 // Update applies partial changes to an expense.

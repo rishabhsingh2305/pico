@@ -15,6 +15,9 @@ func expenseRoutes(h *controllers.ExpenseController, requireMember func(http.Han
 	r.With(requireMember).Head("/", h.List)
 	r.With(requireMember).Post("/", h.Create)
 
+	r.With(requireMember).Get("/summary", h.Summarize)
+	r.With(requireMember).Head("/summary", h.Summarize)
+
 	r.Route("/{expenseID}", func(r chi.Router) {
 		r.With(requireMember).Get("/", h.Get)
 		r.With(requireMember).Head("/", h.Get)

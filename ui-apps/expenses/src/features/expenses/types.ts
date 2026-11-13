@@ -22,10 +22,20 @@ export type Expense = {
 
 export type ExpenseListResponse = {
   items: Expense[]
+  nextOffset: number | null
+}
+
+export type ExpenseSummaryItem = {
+  projectId: string
+  currency: string
   totalCount: number
   totalDebit: number
   totalCredit: number
   netTotal: number
+}
+
+export type ExpenseSummary = {
+  items: ExpenseSummaryItem[]
 }
 
 export type CreateExpenseInput = {

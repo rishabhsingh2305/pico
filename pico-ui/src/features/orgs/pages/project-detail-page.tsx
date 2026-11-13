@@ -21,11 +21,19 @@ import { isSessionInvalidError, type Session } from "@/features/auth/session"
 import { CreateExpenseForm } from "@/features/expenses/components/create-expense-form"
 import { ExpenseFilterForm } from "@/features/expenses/components/expense-filter-form"
 import { ExpenseList } from "@/features/expenses/components/expense-list"
-import { deleteExpense, listExpenses } from "@/features/expenses/api"
+import {
+  deleteExpense,
+  listExpenses,
+  summarizeExpenses,
+} from "@/features/expenses/api"
 import { expenseErrorMessage } from "@/features/expenses/error-message"
 import type { ExpenseFilters } from "@/features/expenses/filters"
 import { formatMoney } from "@/features/expenses/money"
-import type { Expense, ExpensePage } from "@/features/expenses/types"
+import type {
+  Expense,
+  ExpensePage,
+  ExpenseSummaryItem,
+} from "@/features/expenses/types"
 import { getOrg } from "@/features/orgs/api"
 import { orgErrorMessage } from "@/features/orgs/error-message"
 import type { Org } from "@/features/orgs/types"
@@ -40,10 +48,7 @@ type LoadStatus = "loading" | "ready" | "error"
 const PAGE_SIZE = 20
 const EMPTY_PAGE: ExpensePage = {
   items: [],
-  totalCount: 0,
-  totalDebit: 0,
-  totalCredit: 0,
-  netTotal: 0,
+  nextOffset: null,
 }
 
 export function ProjectDetailPage() {
@@ -69,11 +74,14 @@ function ProjectDetailView({ session }: { session: Session }) {
   const [expensePage, setExpensePage] = useState<ExpensePage>(EMPTY_PAGE)
   const [expensesStatus, setExpensesStatus] = useState<LoadStatus>("loading")
   const [expensesError, setExpensesError] = useState("")
+  const [summary, setSummary] = useState<ExpenseSummaryItem | null>(null)
+  const [summaryError, setSummaryError] = useState("")
   const [deleteError, setDeleteError] = useState("")
   const [deletingId, setDeletingId] = useState<string | null>(null)
   const [filters, setFilters] = useState<ExpenseFilters>({ tags: [] })
   const [offset, setOffset] = useState(0)
   const [refreshKey, setRefreshKey] = useState(0)
+  const [summaryKey, setSummaryKey] = useState(0)
   const [isExpenseDialogOpen, setIsExpenseDialogOpen] = useState(false)
 
   usePageTitle(project ? `${project.name} · Pico` : "Project · Pico")
@@ -159,6 +167,39 @@ function ProjectDetailView({ session }: { session: Session }) {
     sessionInvalid,
   ])
 
+  useEffect(() => {
+    let cancelled = false
+
+    summarizeExpenses({
+      userId: session.userId,
+      orgId,
+      projectId,
+      tags: filters.tags,
+      from: filters.from,
+      to: filters.to,
+    })
+      .then((loaded) => {
+        if (!cancelled) {
+          setSummary(loaded.items[0] ?? null)
+          setSummaryError("")
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (cancelled) {
+          return
+        }
+        if (isSessionInvalidError(loadError)) {
+          sessionInvalid()
+          return
+        }
+        setSummaryError(expenseErrorMessage(loadError))
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [orgId, projectId, session.userId, filters, summaryKey, sessionInvalid])
+
   function retryProject() {
     setStatus("loading")
     setError("")
@@ -168,12 +209,15 @@ function ProjectDetailView({ session }: { session: Session }) {
   function retryExpenses() {
     setExpensesStatus("loading")
     setExpensesError("")
+    setSummaryError("")
     setRefreshKey((current) => current + 1)
+    setSummaryKey((current) => current + 1)
   }
 
   function handleFiltersApplied(nextFilters: ExpenseFilters) {
     setExpensesStatus("loading")
     setExpensesError("")
+    setSummaryError("")
     setDeleteError("")
     setFilters(nextFilters)
     setOffset(0)
@@ -182,6 +226,7 @@ function ProjectDetailView({ session }: { session: Session }) {
   function handleFiltersCleared() {
     setExpensesStatus("loading")
     setExpensesError("")
+    setSummaryError("")
     setDeleteError("")
     setFilters({ tags: [] })
     setOffset(0)
@@ -190,8 +235,10 @@ function ProjectDetailView({ session }: { session: Session }) {
   function handleExpenseChanged() {
     setExpensesStatus("loading")
     setExpensesError("")
+    setSummaryError("")
     setDeleteError("")
     setRefreshKey((current) => current + 1)
+    setSummaryKey((current) => current + 1)
   }
 
   function changePage(nextOffset: number) {
@@ -209,9 +256,10 @@ function ProjectDetailView({ session }: { session: Session }) {
     setDeleteError("")
     try {
       await deleteExpense(session.userId, orgId, expense.id)
-      const remainingCount = expensePage.totalCount - 1
+      const remainingCount = summary ? summary.totalCount - 1 : null
       setExpensesStatus("loading")
-      if (offset > 0 && remainingCount <= offset) {
+      setSummaryKey((current) => current + 1)
+      if (remainingCount !== null && offset > 0 && remainingCount <= offset) {
         setOffset(Math.max(0, offset - PAGE_SIZE))
       } else {
         setRefreshKey((current) => current + 1)
@@ -232,13 +280,17 @@ function ProjectDetailView({ session }: { session: Session }) {
     filters.from !== undefined ||
     filters.to !== undefined
   const currency = project?.currency ?? "USD"
-  const summary = `${expensePage.totalCount} ${
-    expensePage.totalCount === 1 ? "expense" : "expenses"
-  } · ${formatMoney(expensePage.netTotal, currency)} net · ${formatMoney(
-    expensePage.totalCredit,
+  const totalCount = summary?.totalCount ?? 0
+  const netTotal = summary?.netTotal ?? 0
+  const totalCredit = summary?.totalCredit ?? 0
+  const totalDebit = summary?.totalDebit ?? 0
+  const summaryText = `${totalCount} ${
+    totalCount === 1 ? "expense" : "expenses"
+  } · ${formatMoney(netTotal, currency)} net · ${formatMoney(
+    totalCredit,
     currency
-  )} credit · ${formatMoney(expensePage.totalDebit, currency)} debit`
-  const showingStart = expensePage.totalCount === 0 ? 0 : offset + 1
+  )} credit · ${formatMoney(totalDebit, currency)} debit`
+  const showingStart = totalCount === 0 ? 0 : offset + 1
   const showingEnd = offset + expensePage.items.length
 
   return (
@@ -359,14 +411,14 @@ function ProjectDetailView({ session }: { session: Session }) {
                 <span
                   className={cn(
                     "absolute inset-y-0 left-0 w-1.5 lg:hidden",
-                    expensePage.netTotal < 0 ? "bg-primary" : "bg-chart-2"
+                    netTotal < 0 ? "bg-primary" : "bg-chart-2"
                   )}
                   aria-hidden="true"
                 />
                 <span
                   className={cn(
                     "absolute inset-x-0 top-0 hidden h-1.5 lg:block",
-                    expensePage.netTotal < 0 ? "bg-primary" : "bg-chart-2"
+                    netTotal < 0 ? "bg-primary" : "bg-chart-2"
                   )}
                   aria-hidden="true"
                 />
@@ -381,12 +433,11 @@ function ProjectDetailView({ session }: { session: Session }) {
                         aria-hidden="true"
                       >
                         <span className="text-chart-2">
-                          {formatMoney(expensePage.totalCredit, currency)}{" "}
-                          credit
+                          {formatMoney(totalCredit, currency)} credit
                         </span>
                         <span className="px-1.5">−</span>
                         <span className="text-primary">
-                          {formatMoney(expensePage.totalDebit, currency)} debit
+                          {formatMoney(totalDebit, currency)} debit
                         </span>
                       </p>
                       <span className="font-mono text-[10px] tracking-[0.16em] text-muted-foreground uppercase">
@@ -403,12 +454,10 @@ function ProjectDetailView({ session }: { session: Session }) {
 
                   <span
                     aria-hidden="true"
-                    className={cn(
-                      expensePage.netTotal < 0 && "text-destructive"
-                    )}
+                    className={cn(netTotal < 0 && "text-destructive")}
                   >
                     <CountUp
-                      value={expensePage.netTotal}
+                      value={netTotal}
                       format={(amount) => formatMoney(amount, currency)}
                       className="mt-3 block max-w-full font-display text-metric-fluid whitespace-nowrap tabular-nums"
                       durationMs={800}
@@ -416,7 +465,7 @@ function ProjectDetailView({ session }: { session: Session }) {
                   </span>
 
                   <p className="sr-only" aria-live="polite">
-                    {summary}
+                    {summaryText}
                   </p>
                 </div>
               </div>
@@ -435,6 +484,23 @@ function ProjectDetailView({ session }: { session: Session }) {
                 <Alert variant="destructive">
                   <CircleAlertIcon aria-hidden="true" />
                   <AlertDescription>{deleteError}</AlertDescription>
+                </Alert>
+              ) : null}
+
+              {summaryError ? (
+                <Alert variant="destructive">
+                  <CircleAlertIcon aria-hidden="true" />
+                  <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+                    <span>{summaryError}</span>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={retryExpenses}
+                    >
+                      Try again
+                    </Button>
+                  </AlertDescription>
                 </Alert>
               ) : null}
 
@@ -477,13 +543,14 @@ function ProjectDetailView({ session }: { session: Session }) {
                     />
                   </div>
 
-                  {expensePage.totalCount > 0 ? (
+                  {totalCount > 0 ? (
                     <ExpensePagination
                       showingStart={showingStart}
                       showingEnd={showingEnd}
-                      totalCount={expensePage.totalCount}
+                      totalCount={totalCount}
                       offset={offset}
                       pageSize={PAGE_SIZE}
+                      nextOffset={expensePage.nextOffset}
                       onChange={changePage}
                     />
                   ) : null}
@@ -518,6 +585,7 @@ function ExpensePagination({
   totalCount,
   offset,
   pageSize,
+  nextOffset,
   onChange,
 }: {
   showingStart: number
@@ -525,6 +593,7 @@ function ExpensePagination({
   totalCount: number
   offset: number
   pageSize: number
+  nextOffset: number | null
   onChange: (offset: number) => void
 }) {
   return (
@@ -552,8 +621,12 @@ function ExpensePagination({
           type="button"
           variant="outline"
           size="sm"
-          disabled={offset + pageSize >= totalCount}
-          onClick={() => onChange(offset + pageSize)}
+          disabled={nextOffset === null}
+          onClick={() => {
+            if (nextOffset !== null) {
+              onChange(nextOffset)
+            }
+          }}
         >
           Next
         </Button>

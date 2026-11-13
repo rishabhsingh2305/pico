@@ -79,6 +79,20 @@ type ApiOptions = {
 function stubApi(options: ApiOptions = {}) {
   const expenses = [...(options.expenses ?? [])]
 
+  function filterExpenses(url: URL): Expense[] {
+    const tags = (url.searchParams.get("tags") ?? "")
+      .split(",")
+      .filter((tag) => tag !== "")
+    const from = url.searchParams.get("from")
+    const to = url.searchParams.get("to")
+
+    return expenses
+      .filter((expense) => tags.every((tag) => expense.tags.includes(tag)))
+      .filter((expense) => !from || expense.spentAt >= from)
+      .filter((expense) => !to || expense.spentAt <= to)
+      .sort((left, right) => right.spentAt.localeCompare(left.spentAt))
+  }
+
   const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
     const url = new URL(String(input), "http://localhost")
     const method = init?.method ?? "GET"
@@ -89,24 +103,8 @@ function stubApi(options: ApiOptions = {}) {
     if (method === "GET" && url.pathname === "/api/projects/project-1") {
       return options.projectResponse ?? jsonResponse(project)
     }
-    if (method === "GET" && url.pathname === "/api/expenses") {
-      if (options.listExpensesResponse) {
-        return options.listExpensesResponse
-      }
-
-      const limit = Number(url.searchParams.get("limit") ?? "20")
-      const offset = Number(url.searchParams.get("offset") ?? "0")
-      const tags = (url.searchParams.get("tags") ?? "")
-        .split(",")
-        .filter((tag) => tag !== "")
-      const from = url.searchParams.get("from")
-      const to = url.searchParams.get("to")
-
-      const filtered = expenses
-        .filter((expense) => tags.every((tag) => expense.tags.includes(tag)))
-        .filter((expense) => !from || expense.spentAt >= from)
-        .filter((expense) => !to || expense.spentAt <= to)
-        .sort((left, right) => right.spentAt.localeCompare(left.spentAt))
+    if (method === "GET" && url.pathname === "/api/expenses/summary") {
+      const filtered = filterExpenses(url)
       const totalDebit = filtered
         .filter((expense) => expense.type !== "credit")
         .reduce((total, expense) => total + expense.amount, 0)
@@ -115,11 +113,36 @@ function stubApi(options: ApiOptions = {}) {
         .reduce((total, expense) => total + expense.amount, 0)
 
       return jsonResponse({
-        items: filtered.slice(offset, offset + limit),
-        totalCount: filtered.length,
-        totalDebit,
-        totalCredit,
-        netTotal: totalCredit - totalDebit,
+        items:
+          filtered.length === 0
+            ? []
+            : [
+                {
+                  projectId: project.id,
+                  currency: project.currency,
+                  totalCount: filtered.length,
+                  totalDebit,
+                  totalCredit,
+                  netTotal: totalCredit - totalDebit,
+                },
+              ],
+      })
+    }
+    if (method === "GET" && url.pathname === "/api/expenses") {
+      if (options.listExpensesResponse) {
+        return options.listExpensesResponse
+      }
+
+      const limit = Number(url.searchParams.get("limit") ?? "20")
+      const offset = Number(url.searchParams.get("offset") ?? "0")
+      const filtered = filterExpenses(url)
+      const page = filtered.slice(offset, offset + limit)
+      const nextOffset =
+        offset + limit < filtered.length ? offset + limit : null
+
+      return jsonResponse({
+        items: page,
+        nextOffset,
       })
     }
     if (method === "POST" && url.pathname === "/api/expenses") {
@@ -161,6 +184,16 @@ function expenseListURLs(fetchMock: ReturnType<typeof stubApi>): URL[] {
     .filter(
       ([url, init]) =>
         String(url).startsWith("/api/expenses?") &&
+        (init?.method ?? "GET") === "GET"
+    )
+    .map(([url]) => new URL(String(url), "http://localhost"))
+}
+
+function expenseSummaryURLs(fetchMock: ReturnType<typeof stubApi>): URL[] {
+  return fetchMock.mock.calls
+    .filter(
+      ([url, init]) =>
+        String(url).startsWith("/api/expenses/summary?") &&
         (init?.method ?? "GET") === "GET"
     )
     .map(([url]) => new URL(String(url), "http://localhost"))
@@ -478,6 +511,7 @@ describe("ProjectDetailPage", () => {
     expect(screen.getByText(/21 expenses · .*21\.00/)).toBeInTheDocument()
     expect(screen.getByText("Showing 1–20 of 21")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Previous" })).toBeDisabled()
+    expect(expenseSummaryURLs(fetchMock)).toHaveLength(1)
 
     await userEventInstance.click(screen.getByRole("button", { name: "Next" }))
 
@@ -486,6 +520,7 @@ describe("ProjectDetailPage", () => {
     expect(screen.getByText("Showing 21–21 of 21")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Next" })).toBeDisabled()
     expect(screen.getByRole("button", { name: "Previous" })).toBeEnabled()
+    expect(expenseSummaryURLs(fetchMock)).toHaveLength(1)
 
     expect(
       expenseListURLs(fetchMock).map((url) => url.searchParams.get("offset"))

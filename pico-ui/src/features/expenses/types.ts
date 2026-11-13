@@ -26,8 +26,18 @@ export type CreateExpenseInput = {
 
 export type ExpensePage = {
   items: Expense[]
+  nextOffset: number | null
+}
+
+export type ExpenseSummaryItem = {
+  projectId: string
+  currency: string
   totalCount: number
   totalDebit: number
   totalCredit: number
   netTotal: number
+}
+
+export type ExpenseSummary = {
+  items: ExpenseSummaryItem[]
 }

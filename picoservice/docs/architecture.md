@@ -241,7 +241,8 @@ No project delete.
 | Method | Path | Success | Notes |
 | --- | --- | --- | --- |
 | POST | `/expenses?orgId=&userId=` | 201 | Create |
-| GET | `/expenses?orgId=&userId=` | 200 | Filters: `projectId`, `tags`, `tag`, `from`, `to`; returns page and totals |
+| GET | `/expenses?orgId=&userId=` | 200 | Filters: `projectId`, `projectIds`, `tags`, `tag`, `from`, `to`; returns one page |
+| GET | `/expenses/summary?orgId=&userId=` | 200 | Same filters; totals grouped by project and currency |
 | GET | `/expenses/{expenseID}?orgId=&userId=` | 200 | |
 | PATCH | `/expenses/{expenseID}?orgId=&userId=` | 200 | Partial update |
 | DELETE | `/expenses/{expenseID}?orgId=&userId=` | 204 | |
@@ -255,22 +256,39 @@ the expense API. Tags are trimmed, deduplicated, sorted, and capped at 20 items.
 
 `tags=food,travel` (or repeated `tags` parameters) requires every tag to match.
 `tag` remains as a single-tag fallback. `from` and `to` are inclusive RFC 3339
-bounds. The response includes totals over every expense matching the filters,
-independent of pagination:
+bounds. `projectId` selects one project; `projectIds` selects up to 100 projects
+as a comma-separated list or repeated parameter. Supplying both is a `400`. The
+list response contains one page and the next offset:
 
 ```json
 {
   "items": [],
-  "totalCount": 42,
-  "totalDebit": 100000,
-  "totalCredit": 123456,
-  "netTotal": 23456
+  "nextOffset": 20
+}
+```
+
+`nextOffset` is `null` on the last page. List requests do not compute totals.
+
+`GET /expenses/summary` accepts the same filters and returns one totals row per
+project and currency:
+
+```json
+{
+  "items": [
+    {
+      "projectId": "64f...",
+      "currency": "INR",
+      "totalCount": 42,
+      "totalDebit": 100000,
+      "totalCredit": 123456,
+      "netTotal": 23456
+    }
+  ]
 }
 ```
 
 `totalDebit` and `totalCredit` are in minor units. `netTotal` is
-`totalCredit - totalDebit`. The totals are meaningful as a single amount when
-`projectId` narrows the result to one project currency.
+`totalCredit - totalDebit`. Amounts are never added across currencies.
 
 ### Errors
 
@@ -597,14 +615,16 @@ the result set: a project matches when any selected tag is present. Expense tags
 describe a transaction and use all-match filtering instead. The two query
 contracts are intentionally different and must stay documented.
 
-### Server-side expense totals
+### Page reads and expense summaries are separate
 
-Expense totals are computed by MongoDB with the same match filters as the list
-but without `limit` or `offset`. Clients never sum the current page, so the
-displayed total does not change when the user paginates. The summary uses a
-`$group` aggregation for count, debit amount, and credit amount; `netTotal` is
-computed as credit minus debit. An empty match returns zero totals. A legacy
-document with no `type` is counted as debit through `$ifNull`.
+Expense list requests return one page and `nextOffset`; they do not run an
+aggregate. Totals are computed by `GET /expenses/summary` with the same match
+filters and no pagination, grouped by project and currency. Clients never sum
+the current page, so the displayed total does not change when the user
+paginates, and a page request never scans the full filtered set. The summary
+uses a `$group` aggregation for count, debit amount, and credit amount;
+`netTotal` is computed as credit minus debit. An empty match returns no groups.
+A legacy document with no `type` is counted as debit through `$ifNull`.
 
 ## Known debt
 
@@ -625,10 +645,11 @@ document with no `type` is counted as debit through `$ifNull`.
   Manager values.
 - `GET /users` is a global directory. It should become admin-only or scoped to
   shared organizations once authentication and roles exist.
-- `GET /expenses` returns debit, credit, and net totals. Organization-wide
-  totals across projects with different currencies are not meaningful; they
-  would need totals grouped by currency. The UI currently requests
-  project-scoped totals.
+- Tag-filtered project and expense lists use multikey tag indexes that do not
+  include the sort field. `explain` should confirm the plan before adding
+  sort-aware compound indexes at larger data volumes.
+- `GET /expenses/summary` groups totals by project and currency. Callers must
+  not add the rows together across currencies.
 - No user or org delete HTTP endpoints, so deletion/cascade rules are
   unresolved. The user DAO delete exists only for signup cleanup.
 - Multi-collection operations are not transactional; org creation cleanup is

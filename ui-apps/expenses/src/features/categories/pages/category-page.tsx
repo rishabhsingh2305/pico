@@ -17,7 +17,7 @@ import { getCategory } from "@/features/categories/api"
 import { categoryColor } from "@/features/categories/colors"
 import { categoryErrorMessage } from "@/features/categories/error-message"
 import type { Category } from "@/features/categories/types"
-import { listExpenses } from "@/features/expenses/api"
+import { listExpenses, summarizeExpenses } from "@/features/expenses/api"
 import { ExpenseForm } from "@/features/expenses/components/expense-form"
 import { FilterSheet } from "@/features/expenses/components/filter-sheet"
 import {
@@ -37,7 +37,7 @@ import {
   percentChange,
   previousMonthRange,
 } from "@/features/expenses/months"
-import type { Expense, ExpenseListResponse } from "@/features/expenses/types"
+import type { Expense, ExpenseSummaryItem } from "@/features/expenses/types"
 import { usePageTitle } from "@/hooks/use-page-title"
 import { ApiError } from "@/lib/api-client"
 import { cn } from "@/lib/utils"
@@ -62,7 +62,8 @@ export function CategoryPage() {
   const [categoryError, setCategoryError] = useState("")
   const [categoryAttempt, setCategoryAttempt] = useState(0)
 
-  const [expenses, setExpenses] = useState<ExpenseListResponse | null>(null)
+  const [expenses, setExpenses] = useState<Expense[] | null>(null)
+  const [summary, setSummary] = useState<ExpenseSummaryItem | null>(null)
   const [expensesStatus, setExpensesStatus] = useState<Status>("loading")
   const [expensesError, setExpensesError] = useState("")
   const [expensesAttempt, setExpensesAttempt] = useState(0)
@@ -130,7 +131,7 @@ export function CategoryPage() {
         if (cancelled) {
           return
         }
-        setExpenses(response)
+        setExpenses(response.items)
         setExpensesStatus("ready")
         setAvailableTags((current) => {
           const next = new Set(current)
@@ -165,6 +166,39 @@ export function CategoryPage() {
     }
 
     let cancelled = false
+
+    summarizeExpenses(orgId, categoryId, {
+      from: filters.from,
+      to: filters.to,
+      tags: filters.tags,
+    })
+      .then((response) => {
+        if (!cancelled) {
+          setSummary(response.items[0] ?? null)
+        }
+      })
+      .catch(async (caught: unknown) => {
+        if (cancelled) {
+          return
+        }
+        if (caught instanceof ApiError && caught.status === 401) {
+          await logout()
+          return
+        }
+        setSummary(null)
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [orgId, categoryId, filters, logout, expensesAttempt, reload])
+
+  useEffect(() => {
+    if (!categoryId) {
+      return
+    }
+
+    let cancelled = false
     const current = monthRange()
     const previous = previousMonthRange()
 
@@ -174,22 +208,25 @@ export function CategoryPage() {
         to: current.to,
         limit: 100,
       }),
-      listExpenses(orgId, categoryId, {
+      summarizeExpenses(orgId, categoryId, {
+        from: current.from,
+        to: current.to,
+      }),
+      summarizeExpenses(orgId, categoryId, {
         from: previous.from,
         to: previous.to,
-        limit: 1,
       }),
     ])
-      .then(([currentMonth, previousMonth]) => {
+      .then(([currentMonth, currentSummary, previousSummary]) => {
         if (cancelled) {
           return
         }
         setInsight({
-          currentTotal: currentMonth.totalDebit,
-          previousTotal: previousMonth.totalDebit,
+          currentTotal: currentSummary.items[0]?.totalDebit ?? 0,
+          previousTotal: previousSummary.items[0]?.totalDebit ?? 0,
           dailyTotals: dailyDebitTotals(currentMonth.items, current.start),
           monthLabel: current.label,
-          truncated: currentMonth.totalCount > currentMonth.items.length,
+          truncated: currentMonth.nextOffset !== null,
         })
         setInsightStatus("ready")
       })
@@ -325,7 +362,7 @@ export function CategoryPage() {
                     Net
                   </span>
                   <MoneyValue
-                    minor={expenses?.netTotal ?? 0}
+                    minor={summary?.netTotal ?? 0}
                     currency={category.currency}
                     className="font-display text-lg leading-none whitespace-nowrap sm:mt-1 sm:block sm:text-3xl"
                   />
@@ -335,7 +372,7 @@ export function CategoryPage() {
                     Spent
                   </span>
                   <MoneyValue
-                    minor={expenses?.totalDebit ?? 0}
+                    minor={summary?.totalDebit ?? 0}
                     currency={category.currency}
                     className="mt-1 block font-display text-sm leading-none whitespace-nowrap sm:text-3xl"
                   />
@@ -345,7 +382,7 @@ export function CategoryPage() {
                     Received
                   </span>
                   <MoneyValue
-                    minor={expenses?.totalCredit ?? 0}
+                    minor={summary?.totalCredit ?? 0}
                     currency={category.currency}
                     className="mt-1 block font-display text-sm leading-none whitespace-nowrap sm:text-3xl"
                   />
@@ -412,7 +449,7 @@ export function CategoryPage() {
             ) : null}
 
             {expensesStatus === "ready" && expenses ? (
-              expenses.items.length === 0 ? (
+              expenses.length === 0 ? (
                 activeCount > 0 ? (
                   <EmptyFiltered onClear={clearFilters} />
                 ) : (
@@ -420,7 +457,7 @@ export function CategoryPage() {
                 )
               ) : (
                 <ExpenseTable
-                  items={expenses.items}
+                  items={expenses}
                   currency={category?.currency ?? "INR"}
                   selectedTags={filters.tags}
                   onTagClick={toggleTagFilter}

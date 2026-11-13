@@ -15,10 +15,12 @@
   the 100-membership list page.
 - Expenses are debits (money out) or credits (money in). Amounts stay positive;
   `type` carries direction. Missing types are read and aggregated as debit.
-- Expense lists support `projectId`, all-match `tags` (legacy single `tag`),
-  inclusive `from`/`to`, and pagination. Responses include `totalCount`,
-  `totalDebit`, `totalCredit`, and `netTotal` over the full filtered set;
-  `netTotal` is `totalCredit - totalDebit`, and pagination affects only `items`.
+- Expense lists support `projectId`, `projectIds` (up to 100), all-match `tags`
+  (legacy single `tag`), inclusive `from`/`to`, and pagination. List responses
+  contain one page and `nextOffset`; they do not compute totals.
+  `GET /expenses/summary` accepts the same filters and returns totals grouped by
+  project and currency over the full filtered set. `netTotal` is
+  `totalCredit - totalDebit`, and amounts are never added across currencies.
 - pico-ui serves a public `/api-docs` guide mirroring this API contract. Keep
   API changes reflected in `../pico-ui/src/features/api-docs/content.ts`.
 - Health API: `GET /ping` returns `200 {"message":"pong"}`; `HEAD /ping`
@@ -88,6 +90,7 @@
 - **State:** no global mutable state, no `init()`, no hidden I/O. Wire dependencies in `internal/app`; create one MongoDB client per process and never per request.
 - **Configuration:** application values belong in `.env` or `$(APP_ENV).env` (ignored), with `sample.env` as the committed template. `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects `prod.env` and `prod.deploy.env`; unset uses `.env` and `deploy.env`. `make run`, `indexes`, `test-integration`, and `invoke` load the selected app env; `make deploy` must not. AWS deployment settings belong in `deploy.env` or `$(APP_ENV).deploy.env` (ignored), with `sample.deploy.env` and per-environment samples committed; `make ship`/`scripts/deploy.sh` load the selected files. Do not put application secrets in a deploy env file.
 - **Database:** every call takes a `context.Context` with a timeout; log driver errors with `request_id` and never return them to clients. DAO contracts live in `internal/dao`; implementations live in `internal/dao/mongodb`. Add indexes in `internal/dao/mongodb/indexes.go`.
+- **Query efficiency:** list handlers return one page and must not run unbounded aggregates. Aggregates live on separate summary endpoints, grouped server-side; clients must not issue one totals request per item. Every list query pattern needs an index matching its filters and sort. Verify new or changed patterns with `explain("executionStats")`; do not use `$facet` to combine a page with an unbounded summary.
 - **Errors:** wrap with `%w`, log once at the boundary, never silently ignore. No `log.Fatal`/`os.Exit` outside `main`.
 - **Logging:** use `log/slog`; never log secrets, tokens, connection strings, passwords, or full request bodies.
 - **Dependencies:** stdlib, chi, `aws-lambda-go`, `mongo-driver/v2`, `golang.org/x/crypto` (bcrypt), and `github.com/golang-jwt/jwt/v5` (email verification and access tokens) are approved. Justify new dependencies and verify they are maintained.
@@ -115,7 +118,10 @@
 8. Update the route contract in `README.md` and `docs/architecture.md`.
 9. Add indexes in `internal/dao/mongodb/indexes.go` if the route introduces a
    new query pattern or uniqueness constraint.
-10. Run `make check`; run `sam validate --lint` if the template changed.
+10. Decide whether the route is a page read or an aggregate. Page reads return
+    one page and `nextOffset`; aggregates use a separate summary endpoint.
+    Verify the query plan with `explain("executionStats")`.
+11. Run `make check`; run `sam validate --lint` if the template changed.
 
 ## Definition of done
 
@@ -123,6 +129,7 @@
 - [ ] `MONGODB_TEST_URI` integration tests pass when MongoDB behavior changed and credentials are available
 - [ ] `make indexes` updated/documented if indexes changed
 - [ ] `make check` passes
+- [ ] `explain("executionStats")` checked for new or changed query patterns
 - [ ] `sam validate --lint` passes if `template.yaml` changed
 - [ ] Docs updated if the API or architecture changed
 - [ ] No `.aws-sam/` artifacts, secrets, or unrelated formatting changes

@@ -25,9 +25,10 @@
 - Project expenses are debits (money out) or credits (money in). Amounts stay
   positive; the type carries direction. Existing records without a type are
   treated as debit. They support comma-separated tags (all must match), an
-  inclusive local date range, a server-computed net total with credit and debit
-  breakdowns, and 20-item pagination. Pagination must never change the totals;
-  creating or deleting reloads the current filter and page.
+  inclusive local date range, and 20-item pagination. List responses return
+  `items` and `nextOffset`; totals come from the separate
+  `GET /expenses/summary` endpoint and must never be derived from a page.
+  Creating or deleting reloads the current filter and totals.
 - The project page shows only a New expense button. The create form appears in
   a modal, defaults to debit, can record a credit, closes on success or Cancel,
   and is not rendered inline.
@@ -112,12 +113,15 @@ Boundaries:
   `verbatimModuleSyntax` and `erasableSyntaxOnly` are enabled.
 - **API calls:** only feature `api.ts` modules may call `requestJSON`. Components
   never call `fetch` directly. Use `ApiError` and map statuses to safe messages.
-- **List totals:** expense `totalCount`, `totalDebit`, `totalCredit`, and
-  `netTotal` come from the API and cover the full filtered set. `netTotal` is
-  `totalCredit - totalDebit`. Never derive them from the current page. Applying
-  filters resets pagination; changing pages leaves the totals unchanged.
-  Dashboard summaries must group minor-unit totals by project currency and never
-  add amounts across currencies.
+- **List totals:** expense list responses return `items` and `nextOffset` only.
+  `totalCount`, `totalDebit`, `totalCredit`, and `netTotal` come from
+  `GET /expenses/summary` over the full filtered set. Never derive them from the
+  current page. Applying filters resets pagination; changing pages must not
+  refetch the summary. Dashboard summaries must group minor-unit totals by
+  project currency and never add amounts across currencies.
+- **Project summary mapping:** when a project list is paginated, pass the current
+  page's IDs as `projectIds` and merge summary rows by `projectId`. Zero-fill
+  projects with no matching expenses; never rely on row order.
 - **Tag filters:** project and organization tags filter server-side with
   any-match semantics; expense tags require all tags to match. Keep this
   difference explicit in the UI and docs.

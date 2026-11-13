@@ -135,19 +135,18 @@ token in the `Authorization` header. The API allows the UI origin through CORS.
   `GET /projects/{id}`, and `PATCH /projects/{id}` for tag edits. Project
   creation includes the currency and tags. The project list sends `tags` to the
   server, where any matching tag includes the project.
-- `src/features/expenses/api.ts` calls `GET/POST /expenses` and
-  `DELETE /expenses/{id}`. Expenses inherit currency from their project and carry
-  a `type` of `debit` (money out) or `credit` (money in). Amounts stay positive;
-  the type supplies the direction.
+- `src/features/expenses/api.ts` calls `GET/POST /expenses`,
+  `GET /expenses/summary`, and `DELETE /expenses/{id}`. Expenses inherit currency
+  from their project and carry a `type` of `debit` (money out) or `credit` (money
+  in). Amounts stay positive; the type supplies the direction.
 - `src/features/dashboard/pages/dashboard-page.tsx` composes the org, project,
   and expense APIs. It is opened from the organization’s project list. It loads
-  one `limit=1` expense summary per project, groups those totals by currency, and
-  loads an organization-wide `limit=6` page for recent activity. `projectId` is
-  omitted from the org-wide request.
-- `GET /expenses` returns
-  `{"items","totalCount","totalDebit","totalCredit","netTotal"}`. `items` is the
-  current page; the totals cover every expense matching the filters and are not
-  affected by `limit` or `offset`. `netTotal` is `totalCredit - totalDebit`.
+  one grouped `GET /expenses/summary` for project totals, groups those totals by
+  currency, and loads an organization-wide `limit=6` page for recent activity.
+- `GET /expenses` returns `{"items","nextOffset"}`. `items` is the current page;
+  `nextOffset` is `null` on the last page. `GET /expenses/summary` returns
+  per-project, per-currency totals with `totalCount`, `totalDebit`,
+  `totalCredit`, and `netTotal`. `netTotal` is `totalCredit - totalDebit`.
   Amounts are in minor units and are formatted with the project currency.
 - The dashboard never adds minor units across currencies. It shows currency tabs
   when an organization has projects in more than one currency, and each recent
@@ -217,8 +216,6 @@ touch the network.
 - Organization lists are capped at 100 and organization tag filtering applies
   within that page. A merged membership/org query would be needed at larger
   counts.
-- The dashboard issues one totals request per project. A backend summary
-  endpoint grouped by currency and project would remove this N+1 pattern.
 - Existing projects without a currency or tags read as USD and an empty tag
   list. Existing expenses without a type read as debit.
 - No deployment or static-host SPA rewrite configuration yet.

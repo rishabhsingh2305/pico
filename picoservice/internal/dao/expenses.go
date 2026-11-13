@@ -9,17 +9,19 @@ import (
 
 // ExpenseFilter contains the expense list filters.
 type ExpenseFilter struct {
-	OrgID     string
-	ProjectID string
-	Tags      []string
-	From      *time.Time
-	To        *time.Time
-	Limit     int
-	Offset    int
+	OrgID      string
+	ProjectIDs []string
+	Tags       []string
+	From       *time.Time
+	To         *time.Time
+	Limit      int
+	Offset     int
 }
 
-// ExpenseSummary contains totals over all expenses matching a filter.
-type ExpenseSummary struct {
+// ExpenseSummaryGroup contains totals for one project and currency.
+type ExpenseSummaryGroup struct {
+	ProjectID    string
+	Currency     string
 	Count        int64
 	DebitAmount  int64
 	CreditAmount int64
@@ -42,7 +44,7 @@ type ExpenseDAO interface {
 	Insert(ctx context.Context, expense entities.Expense) (entities.Expense, error)
 	FindByID(ctx context.Context, orgID, id string) (entities.Expense, error)
 	List(ctx context.Context, filter ExpenseFilter) ([]entities.Expense, error)
-	Summarize(ctx context.Context, filter ExpenseFilter) (ExpenseSummary, error)
+	SummarizeByProject(ctx context.Context, filter ExpenseFilter) ([]ExpenseSummaryGroup, error)
 	Update(ctx context.Context, orgID, id string, update ExpenseUpdate) (entities.Expense, error)
 	Delete(ctx context.Context, orgID, id string) error
 }

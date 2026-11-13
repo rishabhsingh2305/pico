@@ -10,7 +10,7 @@ import { CategoryBlock } from "@/features/categories/components/category-block"
 import { CategoryForm } from "@/features/categories/components/category-form"
 import { categoryErrorMessage } from "@/features/categories/error-message"
 import type { Category } from "@/features/categories/types"
-import { listExpenses } from "@/features/expenses/api"
+import { summarizeExpenses } from "@/features/expenses/api"
 import { useExpenses } from "@/features/expenses/expenses-provider"
 import { monthRange } from "@/features/expenses/months"
 import { ApiError } from "@/lib/api-client"
@@ -72,24 +72,23 @@ export function CategoryList() {
     let cancelled = false
     const range = monthRange()
 
-    Promise.all(
-      categories.map(async (category) => {
-        try {
-          const response = await listExpenses(orgId, category.id, {
-            from: range.from,
-            to: range.to,
-            limit: 1,
-          })
-          return [category.id, response.totalDebit] as const
-        } catch {
-          return [category.id, null] as const
+    summarizeExpenses(orgId, undefined, {
+      from: range.from,
+      to: range.to,
+    })
+      .then((response) => {
+        if (!cancelled) {
+          const totals = Object.fromEntries(
+            response.items.map((item) => [item.projectId, item.totalDebit])
+          )
+          setMonthlyTotals(totals)
         }
       })
-    ).then((entries) => {
-      if (!cancelled) {
-        setMonthlyTotals(Object.fromEntries(entries))
-      }
-    })
+      .catch(() => {
+        if (!cancelled) {
+          setMonthlyTotals({})
+        }
+      })
 
     return () => {
       cancelled = true
