@@ -19,7 +19,7 @@ export function CheckingScreen() {
 export function SetupScreen() {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background p-4">
-      <div className="w-full max-w-lg border-2 border-foreground bg-primary p-6 text-primary-foreground sm:p-8">
+      <div className="w-full max-w-lg rounded-3xl bg-primary p-6 text-primary-foreground shadow-[0_1px_2px_rgba(16,24,40,0.04),0_24px_60px_rgba(11,79,63,0.18)] sm:p-8">
         <Brand tone="inverse" />
 
         <h1 className="mt-10 font-display text-4xl leading-[0.9] tracking-tight sm:text-5xl">
@@ -58,8 +58,8 @@ export function SetupErrorScreen({
 }: SetupErrorScreenProps) {
   return (
     <main className="flex min-h-dvh items-center justify-center bg-background p-4">
-      <div className="w-full max-w-lg border-2 border-foreground bg-card p-6 sm:p-8">
-        <div className="flex size-12 items-center justify-center border-2 border-foreground bg-destructive text-destructive-foreground">
+      <div className="w-full max-w-lg rounded-3xl border border-border bg-card p-6 shadow-[0_1px_2px_rgba(16,24,40,0.03),0_18px_50px_rgba(16,24,40,0.06)] sm:p-8">
+        <div className="flex size-12 items-center justify-center rounded-2xl bg-destructive/10 text-destructive">
           <CircleAlertIcon className="size-6" aria-hidden="true" />
         </div>
 

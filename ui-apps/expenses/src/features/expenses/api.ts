@@ -75,7 +75,7 @@ function expenseQuery(
 
 export function listExpenses(
   orgId: string,
-  projectId: string,
+  projectId?: string,
   options: ListExpensesOptions = {}
 ): Promise<ExpenseListResponse> {
   const query = expenseQuery(orgId, projectId, options)

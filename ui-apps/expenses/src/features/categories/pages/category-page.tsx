@@ -4,6 +4,7 @@ import {
   ArrowLeftIcon,
   CircleAlertIcon,
   PlusIcon,
+  ReceiptTextIcon,
   SlidersHorizontalIcon,
   XIcon,
 } from "lucide-react"
@@ -15,6 +16,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/features/auth/auth-provider"
 import { getCategory } from "@/features/categories/api"
 import { categoryColor } from "@/features/categories/colors"
+import { CategoryGlyph } from "@/features/categories/icons"
 import { categoryErrorMessage } from "@/features/categories/error-message"
 import type { Category } from "@/features/categories/types"
 import { listExpenses, summarizeExpenses } from "@/features/expenses/api"
@@ -28,6 +30,7 @@ import {
 import { useExpenses } from "@/features/expenses/expenses-provider"
 import {
   formatCompactMoney,
+  formatExpenseDate,
   formatExpenseDateShort,
   formatMoney,
 } from "@/features/expenses/format"
@@ -71,6 +74,12 @@ export function CategoryPage() {
   const [isFormOpen, setIsFormOpen] = useState(false)
 
   const activeCount = activeFilterCount(filters)
+  const categoryBlock = category ? categoryColor(category.id) : null
+  const flowTotal = (summary?.totalDebit ?? 0) + (summary?.totalCredit ?? 0)
+  const spentShare =
+    flowTotal > 0 ? ((summary?.totalDebit ?? 0) / flowTotal) * 100 : 0
+  const receivedShare =
+    flowTotal > 0 ? ((summary?.totalCredit ?? 0) / flowTotal) * 100 : 0
 
   usePageTitle(category ? `${category.name} · Expenses` : "Category · Expenses")
 
@@ -353,17 +362,17 @@ export function CategoryPage() {
           <div className="flex items-center justify-between gap-3">
             <Link
               to="/"
-              className="inline-flex items-center gap-1.5 text-sm font-semibold text-muted-foreground hover:text-foreground"
+              className="inline-flex items-center gap-2 text-sm font-semibold text-muted-foreground transition-colors hover:text-foreground"
             >
               <ArrowLeftIcon className="size-4" aria-hidden="true" />
-              Your spending
+              All categories
             </Link>
 
             <Button
               type="button"
               variant="outline"
               size="sm"
-              className="h-9"
+              className="h-9 rounded-xl border-border bg-card px-3 text-foreground hover:bg-muted"
               onClick={() => setFilterSheetOpen(true)}
               disabled={categoryStatus !== "ready"}
               aria-label={
@@ -373,7 +382,7 @@ export function CategoryPage() {
               <SlidersHorizontalIcon className="size-4" aria-hidden="true" />
               Filters
               {activeCount > 0 ? (
-                <span className="ml-1 inline-flex size-5 items-center justify-center bg-primary text-[0.65rem] font-bold text-primary-foreground">
+                <span className="ml-1 inline-flex size-5 items-center justify-center rounded-full bg-primary text-[0.65rem] font-bold text-primary-foreground">
                   {activeCount}
                 </span>
               ) : null}
@@ -382,23 +391,32 @@ export function CategoryPage() {
 
           {categoryStatus === "ready" && category ? (
             <>
-              <section className="mt-3 border-2 border-foreground bg-primary p-4 text-primary-foreground sm:p-8">
-                <div className="flex items-start gap-3 sm:gap-4">
+              <section className="mt-4 flex items-center gap-3.5">
+                {categoryBlock ? (
                   <span
-                    className="mt-1 size-5 shrink-0 border-2 border-primary-foreground sm:size-6"
+                    className="flex size-12 shrink-0 items-center justify-center rounded-xl shadow-[inset_0_1px_0_rgba(255,255,255,0.7),0_1px_2px_rgba(16,24,40,0.08)]"
                     style={{
-                      backgroundColor: categoryColor(category.id).background,
+                      backgroundColor: categoryBlock.background,
+                      color: categoryBlock.foreground,
                     }}
-                    aria-hidden="true"
-                  />
-                  <div>
-                    <h1 className="font-display text-3xl leading-[0.9] tracking-tight sm:text-6xl">
-                      {category.name}
-                    </h1>
-                    <p className="mt-2 text-xs font-medium text-primary-foreground/80 sm:text-sm">
-                      Your expenses in {category.name}.
-                    </p>
-                  </div>
+                  >
+                    <CategoryGlyph
+                      name={category.name}
+                      id={category.id}
+                      className="size-5"
+                    />
+                  </span>
+                ) : null}
+                <div className="min-w-0">
+                  <p className="text-[10px] font-semibold tracking-[0.16em] text-muted-foreground uppercase">
+                    Category
+                  </p>
+                  <h1 className="mt-0.5 font-display text-4xl leading-none tracking-tight text-foreground sm:text-5xl">
+                    {category.name}
+                  </h1>
+                  <p className="mt-1.5 text-xs text-muted-foreground">
+                    Your expenses in {category.name}.
+                  </p>
                 </div>
               </section>
 
@@ -413,36 +431,62 @@ export function CategoryPage() {
                   )}
                 >
                   <div className="min-h-0 overflow-hidden">
-                    <div className="grid grid-cols-2 border-2 border-foreground sm:grid-cols-3">
-                      <div className="col-span-2 flex items-center justify-between border-b-2 border-foreground bg-accent p-3 text-accent-foreground sm:col-span-1 sm:block sm:border-r-2 sm:border-b-0 sm:p-5">
-                        <span className="text-[0.65rem] font-semibold sm:text-xs">
-                          Net
+                    <div className="border-y border-border py-4">
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="min-w-0">
+                          <span className="block text-[10px] font-semibold tracking-[0.14em] text-muted-foreground uppercase">
+                            Net balance
+                          </span>
+                          <MoneyValue
+                            minor={summary?.netTotal ?? 0}
+                            currency={category.currency}
+                            className={cn(
+                              "mt-1 block truncate text-3xl leading-none font-semibold tracking-tight tabular-nums",
+                              (summary?.netTotal ?? 0) < 0
+                                ? "text-spend"
+                                : (summary?.netTotal ?? 0) > 0
+                                  ? "text-credit"
+                                  : "text-foreground"
+                            )}
+                          />
+                        </div>
+                        <span className="shrink-0 rounded-full bg-muted px-2.5 py-1 text-[10px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
+                          {activeCount > 0 ? "Filtered" : "All time"}
                         </span>
-                        <MoneyValue
-                          minor={summary?.netTotal ?? 0}
-                          currency={category.currency}
-                          className="font-display text-lg leading-none whitespace-nowrap sm:mt-1 sm:block sm:text-3xl"
+                      </div>
+                      <div className="mt-4 flex h-1 overflow-hidden rounded-full bg-muted">
+                        <span
+                          className="h-full bg-spend transition-[width] duration-500"
+                          style={{ width: `${spentShare}%` }}
+                        />
+                        <span
+                          className="h-full bg-credit transition-[width] duration-500"
+                          style={{ width: `${receivedShare}%` }}
                         />
                       </div>
-                      <div className="border-r-2 border-foreground bg-destructive p-3 text-destructive-foreground sm:p-5">
-                        <span className="text-[0.65rem] font-semibold sm:text-xs">
-                          Spent
-                        </span>
-                        <MoneyValue
-                          minor={summary?.totalDebit ?? 0}
-                          currency={category.currency}
-                          className="mt-1 block font-display text-sm leading-none whitespace-nowrap sm:text-3xl"
-                        />
-                      </div>
-                      <div className="bg-card p-3 text-card-foreground sm:p-5">
-                        <span className="text-[0.65rem] font-semibold sm:text-xs">
-                          Received
-                        </span>
-                        <MoneyValue
-                          minor={summary?.totalCredit ?? 0}
-                          currency={category.currency}
-                          className="mt-1 block font-display text-sm leading-none whitespace-nowrap sm:text-3xl"
-                        />
+                      <div className="mt-4 grid grid-cols-2 divide-x divide-border border-t border-border pt-3">
+                        <div className="min-w-0 pr-3">
+                          <div className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                            <span className="size-1.5 rounded-full bg-spend" />
+                            Spent
+                          </div>
+                          <MoneyValue
+                            minor={summary?.totalDebit ?? 0}
+                            currency={category.currency}
+                            className="mt-1 block truncate text-lg font-semibold text-foreground tabular-nums"
+                          />
+                        </div>
+                        <div className="min-w-0 pl-3">
+                          <div className="flex items-center gap-1.5 text-[10px] font-semibold tracking-[0.12em] text-muted-foreground uppercase">
+                            <span className="size-1.5 rounded-full bg-credit" />
+                            Received
+                          </div>
+                          <MoneyValue
+                            minor={summary?.totalCredit ?? 0}
+                            currency={category.currency}
+                            className="mt-1 block truncate text-lg font-semibold text-foreground tabular-nums"
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -458,35 +502,44 @@ export function CategoryPage() {
                   )}
                 >
                   <div className="min-h-0 overflow-hidden">
-                    <div className="flex border-2 border-foreground">
-                      <div className="min-w-0 flex-1 border-r-2 border-foreground bg-accent px-2.5 py-2 text-accent-foreground">
-                        <span className="block text-[0.55rem] font-semibold uppercase opacity-80">
+                    <div className="flex items-center gap-3 border-y border-border bg-background/95 py-2">
+                      <div className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1 text-[9px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
                           Net
                         </span>
                         <MoneyValue
                           minor={summary?.netTotal ?? 0}
                           currency={category.currency}
-                          className="mt-0.5 block truncate font-display text-sm leading-none"
+                          className={cn(
+                            "mt-0.5 block truncate text-sm font-semibold tabular-nums",
+                            (summary?.netTotal ?? 0) < 0
+                              ? "text-spend"
+                              : (summary?.netTotal ?? 0) > 0
+                                ? "text-credit"
+                                : "text-foreground"
+                          )}
                         />
                       </div>
-                      <div className="min-w-0 flex-1 border-r-2 border-foreground bg-destructive px-2.5 py-2 text-destructive-foreground">
-                        <span className="block text-[0.55rem] font-semibold uppercase opacity-80">
+                      <div className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1 text-[9px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
+                          <span className="size-1 rounded-full bg-spend" />
                           Spent
                         </span>
                         <MoneyValue
                           minor={summary?.totalDebit ?? 0}
                           currency={category.currency}
-                          className="mt-0.5 block truncate font-display text-sm leading-none"
+                          className="mt-0.5 block truncate text-sm font-semibold text-foreground tabular-nums"
                         />
                       </div>
-                      <div className="min-w-0 flex-1 bg-card px-2.5 py-2 text-card-foreground">
-                        <span className="block text-[0.55rem] font-semibold uppercase opacity-80">
+                      <div className="min-w-0 flex-1">
+                        <span className="flex items-center gap-1 text-[9px] font-semibold tracking-[0.1em] text-muted-foreground uppercase">
+                          <span className="size-1 rounded-full bg-credit" />
                           Received
                         </span>
                         <MoneyValue
                           minor={summary?.totalCredit ?? 0}
                           currency={category.currency}
-                          className="mt-0.5 block truncate font-display text-sm leading-none"
+                          className="mt-0.5 block truncate text-sm font-semibold text-foreground tabular-nums"
                         />
                       </div>
                     </div>
@@ -567,19 +620,17 @@ export function CategoryPage() {
           </div>
         </div>
 
-        <div className="shrink-0 border-t-2 border-foreground bg-background p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              size="lg"
-              className="w-full sm:w-auto"
-              onClick={() => setIsFormOpen(true)}
-              disabled={categoryStatus !== "ready"}
-            >
-              <PlusIcon data-icon="inline-start" aria-hidden="true" />
-              Add expense
-            </Button>
-          </div>
+        <div className="shrink-0 border-t border-border bg-background p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]">
+          <Button
+            type="button"
+            size="lg"
+            className="h-14 w-full rounded-xl text-base"
+            onClick={() => setIsFormOpen(true)}
+            disabled={categoryStatus !== "ready"}
+          >
+            <PlusIcon data-icon="inline-start" aria-hidden="true" />
+            Add expense
+          </Button>
         </div>
 
         {category ? (
@@ -649,7 +700,7 @@ function FilterChip({
   onRemove: () => void
 }) {
   return (
-    <span className="inline-flex items-center gap-1 border border-foreground bg-card px-2 py-1 text-xs font-semibold">
+    <span className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-3 py-1 text-xs font-semibold text-foreground">
       {label}
       <button
         type="button"
@@ -674,64 +725,120 @@ function ExpenseTable({
   selectedTags: string[]
   onTagClick: (tag: string) => void
 }) {
+  const groups = groupExpensesByDate(items)
+
   return (
-    <div className="border-2 border-foreground bg-card">
-      <div className="hidden grid-cols-[4.5rem_1fr_auto] items-center gap-3 border-b-2 border-foreground bg-muted px-4 py-2 text-xs font-semibold sm:grid">
-        <span>Date</span>
-        <span>Description</span>
-        <span className="text-right">Amount</span>
-      </div>
-      {items.map((expense) => (
-        <div
-          key={expense.id}
-          className="flex items-start justify-between gap-4 border-b-2 border-foreground px-4 py-3.5 last:border-b-0 sm:grid sm:grid-cols-[4.5rem_1fr_auto] sm:items-center"
-        >
-          <span className="hidden w-14 shrink-0 text-xs text-muted-foreground sm:block">
-            {formatExpenseDateShort(expense.spentAt)}
-          </span>
-          <div className="flex min-w-0 flex-col gap-1">
-            <span className="truncate text-sm font-medium">
-              {expense.description ||
-                (expense.type === "debit" ? "Expense" : "Money received")}
-            </span>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-muted-foreground sm:hidden">
-                {formatExpenseDateShort(expense.spentAt)}
-              </span>
-              {expense.tags.map((tag) => {
-                const selected = selectedTags.includes(tag)
-                return (
-                  <button
-                    key={tag}
-                    type="button"
-                    onClick={() => onTagClick(tag)}
-                    aria-pressed={selected}
+    <div className="flex flex-col gap-6">
+      {groups.map((group) => {
+        const dailySpend = group.items
+          .filter((expense) => expense.type === "debit")
+          .reduce((total, expense) => total + expense.amount, 0)
+
+        return (
+          <section key={group.key}>
+            <div className="flex items-baseline justify-between gap-4 border-b border-border pb-2">
+              <h3 className="text-xs font-semibold text-foreground">
+                {formatExpenseDate(group.items[0].spentAt)}
+              </h3>
+              {dailySpend > 0 ? (
+                <span className="shrink-0 text-xs font-semibold text-spend tabular-nums">
+                  −{formatMoney(dailySpend, currency)}
+                </span>
+              ) : null}
+            </div>
+
+            <ul className="divide-y divide-border">
+              {group.items.map((expense) => (
+                <li
+                  key={expense.id}
+                  className="flex items-start justify-between gap-4 py-3.5"
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-foreground">
+                      {expense.description ||
+                        (expense.type === "debit"
+                          ? "Expense"
+                          : "Money received")}
+                    </p>
+                    <div className="mt-1.5 flex flex-wrap items-center gap-x-2 gap-y-1.5">
+                      <span className="text-[11px] text-muted-foreground">
+                        {formatExpenseDateShort(expense.spentAt)}
+                      </span>
+                      {expense.tags.map((tag) => {
+                        const selected = selectedTags.includes(tag)
+                        const block = categoryColor(tag)
+                        return (
+                          <button
+                            key={tag}
+                            type="button"
+                            onClick={() => onTagClick(tag)}
+                            aria-pressed={selected}
+                            className={cn(
+                              "rounded-full border px-2 py-0.5 text-[10px] font-medium tracking-wide transition-colors",
+                              selected
+                                ? "border-primary bg-primary text-primary-foreground"
+                                : "hover:opacity-80"
+                            )}
+                            style={
+                              selected
+                                ? undefined
+                                : {
+                                    backgroundColor: block.background,
+                                    borderColor: block.border,
+                                    color: block.foreground,
+                                  }
+                            }
+                          >
+                            {tag}
+                          </button>
+                        )
+                      })}
+                    </div>
+                  </div>
+                  <span
                     className={cn(
-                      "border px-1.5 py-0.5 text-[0.7rem] font-semibold transition-colors",
-                      selected
-                        ? "border-foreground bg-foreground text-background"
-                        : "border-foreground/30 bg-muted/50 text-muted-foreground hover:bg-muted hover:text-foreground"
+                      "shrink-0 text-right text-[15px] font-semibold tabular-nums",
+                      expense.type === "debit" ? "text-spend" : "text-credit"
                     )}
                   >
-                    {tag}
-                  </button>
-                )
-              })}
-            </div>
-          </div>
-          <span
-            className={cn(
-              "shrink-0 text-right text-sm font-bold tabular-nums",
-              expense.type === "debit" ? "text-spend" : "text-credit"
-            )}
-          >
-            {expense.type === "debit" ? "−" : "+"}
-            {formatMoney(expense.amount, currency)}
-          </span>
-        </div>
-      ))}
+                    {expense.type === "debit" ? "−" : "+"}
+                    {formatMoney(expense.amount, currency)}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </section>
+        )
+      })}
     </div>
   )
+}
+
+type ExpenseGroup = {
+  key: string
+  items: Expense[]
+}
+
+function groupExpensesByDate(items: Expense[]): ExpenseGroup[] {
+  const groups = new Map<string, Expense[]>()
+
+  for (const expense of items) {
+    const date = new Date(expense.spentAt)
+    const key = Number.isNaN(date.getTime())
+      ? expense.spentAt
+      : `${date.getFullYear()}-${date.getMonth()}-${date.getDate()}`
+    const group = groups.get(key)
+    if (group) {
+      group.push(expense)
+    } else {
+      groups.set(key, [expense])
+    }
+  }
+
+  return Array.from(groups, ([key, groupItems]) => ({
+    key,
+    items: groupItems,
+  }))
 }
 
 function MoneyValue({
@@ -753,18 +860,17 @@ function MoneyValue({
 
 function EmptyExpenses() {
   return (
-    <div className="flex flex-col items-center justify-center border-2 border-foreground bg-card px-6 py-12 text-center sm:py-16">
+    <div className="flex flex-col items-center justify-center border-y border-border px-6 py-14 text-center">
       <span
-        className="font-display text-7xl leading-none sm:text-8xl"
+        className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground"
         aria-hidden="true"
       >
-        0
+        <ReceiptTextIcon className="size-5" />
       </span>
-      <div className="mt-4 h-2 w-16 bg-primary" aria-hidden="true" />
-      <h2 className="mt-4 font-display text-2xl tracking-tight">
+      <h2 className="mt-4 font-display text-2xl text-foreground">
         No expenses yet
       </h2>
-      <p className="mt-1 text-sm text-muted-foreground">
+      <p className="mt-1 max-w-xs text-sm text-muted-foreground">
         Add your first expense to start tracking.
       </p>
     </div>
@@ -773,24 +879,23 @@ function EmptyExpenses() {
 
 function EmptyFiltered({ onClear }: { onClear: () => void }) {
   return (
-    <div className="flex flex-col items-center justify-center border-2 border-foreground bg-card px-6 py-12 text-center sm:py-16">
+    <div className="flex flex-col items-center justify-center border-y border-border px-6 py-14 text-center">
       <span
-        className="font-display text-7xl leading-none sm:text-8xl"
+        className="flex size-12 items-center justify-center rounded-full bg-muted text-muted-foreground"
         aria-hidden="true"
       >
-        0
+        <ReceiptTextIcon className="size-5" />
       </span>
-      <div className="mt-4 h-2 w-16 bg-primary" aria-hidden="true" />
-      <h2 className="mt-4 font-display text-2xl tracking-tight">
+      <h2 className="mt-4 font-display text-2xl text-foreground">
         No expenses match these filters
       </h2>
-      <p className="mt-1 text-sm text-muted-foreground">
+      <p className="mt-1 max-w-xs text-sm text-muted-foreground">
         Try a different date range or fewer tags.
       </p>
       <Button
         type="button"
         variant="outline"
-        className="mt-4"
+        className="mt-4 rounded-xl"
         onClick={onClear}
       >
         Clear filters
@@ -801,9 +906,11 @@ function EmptyFiltered({ onClear }: { onClear: () => void }) {
 
 function PageSkeleton() {
   return (
-    <div className="flex flex-col gap-4">
-      <Skeleton className="h-20 border-2 border-foreground bg-muted" />
-      <Skeleton className="h-32 border-2 border-foreground bg-muted" />
+    <div className="flex flex-col gap-3">
+      <Skeleton className="h-5 w-24 bg-muted" />
+      <Skeleton className="h-12 w-full bg-muted" />
+      <Skeleton className="h-12 w-full bg-muted" />
+      <Skeleton className="h-12 w-full bg-muted" />
     </div>
   )
 }

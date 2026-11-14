@@ -58,6 +58,14 @@ export function formatCompactMoney(minor: number, currency: string): string {
   }).format(amount)
 }
 
+export function formatReadableMoney(minor: number, currency: string): string {
+  const digits = currencyFractionDigits(currency)
+  const amount = minor / 10 ** digits
+  return Math.abs(amount) >= 10_000_000
+    ? formatCompactMoney(minor, currency)
+    : formatMoney(minor, currency)
+}
+
 export function formatExpenseDate(value: string): string {
   return new Intl.DateTimeFormat(undefined, {
     day: "numeric",

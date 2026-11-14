@@ -35,20 +35,23 @@ export function AuthLayout({
           </p>
 
           <div className="mt-10 grid grid-cols-2 gap-4">
-            <div className="border-2 border-foreground bg-accent p-4 text-accent-foreground">
+            <div className="rounded-2xl bg-accent p-4 text-accent-foreground">
               <span className="text-xs font-semibold">This month</span>
-              <span className="mt-2 block font-display text-3xl leading-none">
+              <span className="mt-2 block font-display text-3xl leading-none font-extrabold">
                 ₹1,749
               </span>
             </div>
-            <div className="border-2 border-foreground bg-destructive p-4 text-destructive-foreground">
+            <div className="rounded-2xl bg-destructive p-4 text-destructive-foreground">
               <span className="text-xs font-semibold">Spent</span>
-              <span className="mt-2 block font-display text-3xl leading-none">
+              <span className="mt-2 block font-display text-3xl leading-none font-extrabold">
                 ₹250
               </span>
             </div>
           </div>
-          <div className="mt-4 h-2 w-24 bg-foreground" aria-hidden="true" />
+          <div
+            className="mt-4 h-1.5 w-24 rounded-full bg-foreground"
+            aria-hidden="true"
+          />
         </div>
 
         <p className="text-xs font-medium text-primary-foreground/60">

@@ -107,7 +107,7 @@ export function OtpForm({
       aria-busy={isSubmitting}
       className="flex flex-col gap-5"
     >
-      <div className="flex items-center gap-3 border-2 border-foreground bg-muted/40 p-3">
+      <div className="flex items-center gap-3 rounded-xl border border-border bg-muted/40 p-3">
         <MailCheckIcon
           className="size-5 shrink-0 text-muted-foreground"
           aria-hidden="true"

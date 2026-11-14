@@ -19,14 +19,14 @@ export function AppHeader() {
   }
 
   return (
-    <header className="shrink-0 border-b-2 border-foreground bg-background">
-      <div className="mx-auto flex h-14 w-full max-w-5xl items-center justify-between px-4 sm:h-16">
+    <header className="shrink-0 border-b border-border bg-background">
+      <div className="mx-auto flex h-16 w-full max-w-5xl items-center justify-between px-4 sm:h-[4.5rem]">
         <Brand />
         <Button
           type="button"
           variant="outline"
           size="sm"
-          className="h-9"
+          className="h-9 rounded-xl border-border/80 bg-transparent px-3 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground"
           onClick={handleSignOut}
           disabled={isSigningOut}
         >

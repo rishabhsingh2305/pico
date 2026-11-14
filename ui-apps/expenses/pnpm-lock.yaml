@@ -14,7 +14,7 @@ importers:
       '@fontsource-variable/public-sans':
         specifier: ^5.3.0
         version: 5.3.0
-      '@fontsource/archivo-black':
+      '@fontsource/instrument-serif':
         specifier: ^5.3.0
         version: 5.3.0
       '@tailwindcss/vite':
@@ -322,8 +322,8 @@ packages:
   '@fontsource-variable/public-sans@5.3.0':
     resolution: {integrity: sha512-AVfkmAt50BMXWpOO21FAntiJFKGX6xTc2dSL8dxtDteONe9IuRXJWGbs0EbG955vAMCq23ENeuopuW87cGWDSQ==}
 
-  '@fontsource/archivo-black@5.3.0':
-    resolution: {integrity: sha512-7EsTIQ+Blf96ktpzTUpI7msi+u9/AJxM/GZxOSkEubVd1jSTrFSTNxMgfpX/8rQsjZ+19a+qvRbtcTEp5J/72g==}
+  '@fontsource/instrument-serif@5.3.0':
+    resolution: {integrity: sha512-mDiaIg0u67sYV59fie92Wz4sM8UiVlbL7fLxnFPCKkX15DMASEnQTREbaP5S5/3DCcsoAOcQ0sV9E4AeY4QqYQ==}
 
   '@humanfs/core@0.19.2':
     resolution: {integrity: sha512-UhXNm+CFMWcbChXywFwkmhqjs3PRCmcSa/hfBgLIb7oQ5HNb1wS0icWsGtSAUNgefHeI+eBrA8I1fxmbHsGdvA==}
@@ -2216,7 +2216,7 @@ snapshots:
 
   '@fontsource-variable/public-sans@5.3.0': {}
 
-  '@fontsource/archivo-black@5.3.0': {}
+  '@fontsource/instrument-serif@5.3.0': {}
 
   '@humanfs/core@0.19.2':
     dependencies:

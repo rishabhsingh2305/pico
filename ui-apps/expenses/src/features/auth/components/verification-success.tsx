@@ -13,7 +13,7 @@ export function VerificationSuccess({
 }: VerificationSuccessProps) {
   return (
     <div className="flex flex-col items-center gap-5 py-2 text-center">
-      <div className="flex size-12 items-center justify-center border-2 border-foreground bg-primary text-primary-foreground">
+      <div className="flex size-12 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
         <CheckIcon className="size-6" aria-hidden="true" />
       </div>
       <p className="text-sm text-muted-foreground">

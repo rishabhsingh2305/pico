@@ -60,15 +60,15 @@ export function TagInput({
   return (
     <div
       className={cn(
-        "flex min-h-11 flex-wrap items-center gap-1.5 border-2 bg-background px-2 py-1.5 transition-colors focus-within:ring-2 focus-within:ring-primary focus-within:ring-offset-2 focus-within:ring-offset-background",
-        error ? "border-destructive" : "border-foreground",
+        "flex min-h-11 flex-wrap items-center gap-1.5 rounded-xl border border-input bg-card px-2 py-1.5 transition-colors focus-within:border-primary focus-within:ring-2 focus-within:ring-primary/20",
+        error ? "border-destructive" : "border-input",
         disabled && "opacity-60"
       )}
     >
       {tags.map((tag) => (
         <span
           key={tag}
-          className="inline-flex items-center gap-1 border border-foreground/40 bg-muted px-1.5 py-0.5 text-xs font-semibold"
+          className="inline-flex items-center gap-1 rounded-full border border-border bg-muted px-2 py-0.5 text-xs font-semibold"
         >
           {tag}
           <button

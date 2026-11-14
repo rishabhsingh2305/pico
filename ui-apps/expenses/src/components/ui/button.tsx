@@ -3,20 +3,20 @@ import { cva, type VariantProps } from "class-variance-authority"
 import { cn } from "cn"
 
 const buttonVariants = cva(
-  "group/button inline-flex shrink-0 items-center justify-center rounded-none border-2 border-transparent bg-clip-padding text-sm font-semibold whitespace-nowrap transition-colors outline-none select-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-xl border border-transparent bg-clip-padding text-sm font-semibold whitespace-nowrap transition-[color,background-color,border-color,transform] outline-none select-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background active:scale-[0.98] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
         default:
-          "border-foreground bg-primary text-primary-foreground hover:bg-foreground hover:text-background",
+          "bg-primary text-primary-foreground hover:bg-primary/90 active:bg-primary/80",
         outline:
-          "border-foreground bg-background text-foreground hover:bg-foreground hover:text-background",
+          "border-border bg-card text-foreground hover:bg-muted hover:text-foreground",
         secondary:
-          "border-foreground bg-accent text-accent-foreground hover:bg-foreground hover:text-background",
-        ghost: "border-transparent text-foreground hover:bg-muted",
+          "bg-accent text-accent-foreground hover:bg-accent/90 active:bg-accent/80",
+        ghost: "text-foreground hover:bg-muted",
         destructive:
-          "border-foreground bg-destructive text-destructive-foreground hover:bg-foreground hover:text-background",
-        link: "border-transparent text-primary underline-offset-4 hover:underline",
+          "bg-destructive text-destructive-foreground hover:bg-destructive/90",
+        link: "text-primary underline-offset-4 hover:underline",
       },
       size: {
         default: "h-11 gap-2 px-4",
