@@ -299,8 +299,6 @@ export function CategoryPage() {
 
     if (scrollAccumulator.current > 32 && top > 40) {
       setCollapsed(true)
-    } else if (scrollAccumulator.current < -32) {
-      setCollapsed(false)
     }
   }
 
