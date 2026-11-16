@@ -6,6 +6,7 @@ import {
   setAuthToken,
   setRefreshToken,
 } from "@/lib/auth-token"
+import { clearShareToken, setShareToken } from "@/lib/share-token"
 import { ApiError, requestJSON } from "@/lib/api-client"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -88,6 +89,36 @@ describe("requestJSON", () => {
     expect(new Headers(init.headers).get("Authorization")).toBe(
       "Bearer token-1"
     )
+  })
+
+  it("uses the share credential instead of the bearer token", async () => {
+    setAuthToken("user-token")
+    setShareToken("share-token")
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await requestJSON("/expenses?orgId=org-1", {})
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(new Headers(init.headers).get("Authorization")).toBe(
+      "Share share-token"
+    )
+    clearShareToken()
+  })
+
+  it("does not use the share credential on auth routes", async () => {
+    setAuthToken("user-token")
+    setShareToken("share-token")
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await requestJSON("/auth/session", {})
+
+    const [, init] = fetchMock.mock.calls[0]
+    expect(new Headers(init.headers).get("Authorization")).toBe(
+      "Bearer user-token"
+    )
+    clearShareToken()
   })
 
   it("exposes the status on ApiError", () => {

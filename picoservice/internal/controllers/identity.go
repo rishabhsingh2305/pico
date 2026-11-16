@@ -14,3 +14,7 @@ func requestIdentity(w http.ResponseWriter, r *http.Request) (middleware.Identit
 	}
 	return id, ok
 }
+
+func isShareIdentity(id middleware.Identity) bool {
+	return id.Kind == middleware.IdentityKindShare && id.Share != nil
+}

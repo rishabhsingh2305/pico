@@ -16,6 +16,9 @@ import { CategoryBlock } from "@/features/categories/components/category-block"
 import { CategoryForm } from "@/features/categories/components/category-form"
 import { categoryErrorMessage } from "@/features/categories/error-message"
 import type { Category } from "@/features/categories/types"
+import { canManageShares, canViewShares } from "@/features/sharing/access"
+import { getShareStatus } from "@/features/sharing/api"
+import { ShareDialog } from "@/features/sharing/components/share-dialog"
 import { summarizeExpenses } from "@/features/expenses/api"
 import {
   formatCompactMoney,
@@ -31,14 +34,26 @@ import { cn } from "@/lib/utils"
 type Status = "loading" | "ready" | "error"
 
 export function CategoryList() {
-  const { orgId } = useExpenses()
-  const { logout } = useAuth()
+  const { orgId, isOwner } = useExpenses()
+  const { session, logout } = useAuth()
+  const roles = session?.orgs?.[orgId] ?? []
+  const canShare = canManageShares(isOwner, roles)
+  const canView = canViewShares(isOwner, roles)
   const cardRef = useRef<HTMLElement>(null)
   useDeviceTilt(cardRef)
   const [categories, setCategories] = useState<Category[]>([])
   const [status, setStatus] = useState<Status>("loading")
   const [error, setError] = useState("")
   const [isFormOpen, setIsFormOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareTarget, setShareTarget] = useState<Category | null>(null)
+  const handleSessionInvalid = useCallback(() => {
+    void logout()
+  }, [logout])
+  const [sharedCategoryIDs, setSharedCategoryIDs] = useState<Set<string>>(
+    new Set()
+  )
+  const [shareReload, setShareReload] = useState(0)
   const [attempt, setAttempt] = useState(0)
   const [monthlySummary, setMonthlySummary] = useState<
     Record<string, ExpenseSummaryItem>
@@ -108,6 +123,31 @@ export function CategoryList() {
   }, [])
 
   useEffect(() => {
+    if (!canView || categories.length === 0) {
+      return
+    }
+
+    let cancelled = false
+    getShareStatus(
+      orgId,
+      "project",
+      categories.map((category) => category.id)
+    )
+      .then((items) => {
+        if (!cancelled) {
+          setSharedCategoryIDs(new Set(items.map((item) => item.resourceId)))
+        }
+      })
+      .catch(() => {
+        // Share status is only a badge hint; keep the list usable.
+      })
+
+    return () => {
+      cancelled = true
+    }
+  }, [canView, categories, orgId, shareReload])
+
+  useEffect(() => {
     if (status !== "ready" || categories.length === 0) {
       return
     }
@@ -158,6 +198,11 @@ export function CategoryList() {
   function handleCreated(category: Category) {
     setCategories((current) => [category, ...current])
     setStatus("ready")
+  }
+
+  function openShare(category: Category) {
+    setShareTarget(category)
+    setShareOpen(true)
   }
 
   function handleCardPointerMove(event: ReactPointerEvent<HTMLElement>) {
@@ -365,6 +410,9 @@ export function CategoryList() {
                     monthlyTotal={total}
                     entryCount={summary?.totalCount ?? 0}
                     share={monthlyTotal > 0 ? (total / monthlyTotal) * 100 : 0}
+                    shared={sharedCategoryIDs.has(category.id)}
+                    canShare={canShare}
+                    onShare={() => openShare(category)}
                   />
                 </li>
               )
@@ -378,6 +426,20 @@ export function CategoryList() {
         onOpenChange={setIsFormOpen}
         onCreated={handleCreated}
       />
+
+      {shareTarget ? (
+        <ShareDialog
+          key={shareTarget.id}
+          open={shareOpen}
+          onOpenChange={setShareOpen}
+          orgId={orgId}
+          resourceType="project"
+          resourceId={shareTarget.id}
+          resourceName={shareTarget.name}
+          onChanged={() => setShareReload((current) => current + 1)}
+          onSessionInvalid={handleSessionInvalid}
+        />
+      ) : null}
     </div>
   )
 }

@@ -92,7 +92,7 @@ export function TagInput({
         onPaste={handlePaste}
         placeholder={tags.length === 0 ? "food, travel" : ""}
         disabled={disabled}
-        className="min-w-24 flex-1 bg-transparent py-0.5 text-sm outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed"
+        className="min-w-24 flex-1 bg-transparent py-0.5 text-base outline-none placeholder:text-muted-foreground/70 disabled:cursor-not-allowed md:text-sm"
         aria-invalid={Boolean(error)}
         aria-describedby={describedBy}
       />

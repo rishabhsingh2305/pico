@@ -34,6 +34,7 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 	membershipStore := mongodb.NewMembershipStore(db)
 	projectStore := mongodb.NewProjectStore(db)
 	expenseStore := mongodb.NewExpenseStore(db)
+	credentialStore := mongodb.NewCredentialStore(db)
 
 	tokens, err := services.NewVerificationTokens(cfg.JWTSecret)
 	if err != nil {
@@ -66,6 +67,7 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 	}
 	projectService := services.NewProjectService(projectStore)
 	expenseService := services.NewExpenseService(expenseStore, projectStore)
+	credentialService := services.NewCredentialService(credentialStore, orgStore, projectStore, expenseStore)
 
 	return routes.New(routes.Deps{
 		Logger:         logger,
@@ -76,6 +78,7 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 		Memberships:    membershipService,
 		Projects:       projectService,
 		Expenses:       expenseService,
+		Credentials:    credentialService,
 		Policy:         policy,
 		SecureCookies:  strings.HasPrefix(cfg.PublicBaseURL, "https://"),
 		AllowedOrigins: cfg.AllowedOrigins(),

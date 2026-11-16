@@ -150,6 +150,9 @@ them when the service grows.
   `features.yml`. A member may have a different role per feature; the request is
   allowed when any feature role grants the route permission. Never add a
   per-request membership database lookup to authorization.
+- Share links use `Authorization: Share <opaque-token>`, are resolved from the
+  `credentials` collection, and carry route scopes plus a resource scope. They
+  are read-only and never accepted on `/auth`, `/users`, or write routes.
 - Feature management is authorized by middleware permissions (`org.admin`,
   `member.admin`, and so on). Services protect the owner account by comparing
   the target to `entities.Org.UserID`; the owner cannot be added, removed, or

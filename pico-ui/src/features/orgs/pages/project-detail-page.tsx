@@ -35,6 +35,9 @@ import type { Expense, ExpensePage } from "@/features/expenses/types"
 import { getOrg } from "@/features/orgs/api"
 import { orgErrorMessage } from "@/features/orgs/error-message"
 import { getProject } from "@/features/projects/api"
+import { getShareStatus } from "@/features/sharing/api"
+import { PublicShareBadge } from "@/features/sharing/components/public-share-badge"
+import { ShareDialog } from "@/features/sharing/components/share-dialog"
 import { usePageTitle } from "@/hooks/use-page-title"
 import { ApiError } from "@/lib/api-client"
 import { cn } from "cn"
@@ -116,6 +119,20 @@ function ProjectDetailView({ session }: { session: Session }) {
   const project = projectQuery.data ?? null
   const expensePage: ExpensePage = expensesQuery.data ?? EMPTY_PAGE
   const summary = summaryQuery.data?.items[0] ?? null
+  const roles = session.orgs?.[orgId] ?? []
+  const isOwner = org?.userId === session.userId
+  const canShare = isOwner || roles.includes("share.admin")
+  const canViewShares =
+    isOwner || roles.includes("share.viewer") || roles.includes("share.admin")
+  const projectShareQuery = useQuery({
+    queryKey: queryKeys.shareStatus(orgId, "project", [projectId]),
+    queryFn: () => getShareStatus(orgId, "project", [projectId]),
+    enabled: canViewShares && projectId !== "",
+  })
+  const projectShared = (projectShareQuery.data ?? []).length > 0
+  const invalidateShareStatus = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["share-status", orgId] })
+  }, [queryClient, orgId])
   const status: LoadStatus =
     orgQuery.isPending || projectQuery.isPending
       ? "loading"
@@ -309,46 +326,59 @@ function ProjectDetailView({ session }: { session: Session }) {
                 ) : null}
               </div>
 
-              <Dialog
-                open={isExpenseDialogOpen}
-                onOpenChange={setIsExpenseDialogOpen}
-                triggerId={expenseDialogTriggerId}
-              >
-                <DialogTrigger
-                  id={expenseDialogTriggerId}
-                  render={
-                    <Button
-                      type="button"
-                      className="h-10 w-fit px-4 text-xs font-semibold tracking-[0.14em] uppercase"
-                    />
-                  }
-                >
-                  <PlusIcon data-icon="inline-start" />
-                  New expense
-                </DialogTrigger>
-                <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-md">
-                  <DialogHeader>
-                    <DialogTitle className="font-display text-2xl tracking-tight">
-                      Add expense
-                    </DialogTitle>
-                    <DialogDescription>
-                      Record a debit or credit for this project in{" "}
-                      {project.currency}.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <CreateExpenseForm
+              <div className="flex items-center gap-2">
+                {projectShared ? <PublicShareBadge /> : null}
+                {canShare ? (
+                  <ShareDialog
                     orgId={orgId}
-                    projectId={projectId}
-                    currency={project.currency}
-                    onCreated={() => {
-                      setIsExpenseDialogOpen(false)
-                      handleExpenseChanged()
-                    }}
-                    onCancel={() => setIsExpenseDialogOpen(false)}
+                    resourceType="project"
+                    resourceId={projectId}
+                    resourceName={project.name}
+                    onChanged={invalidateShareStatus}
                     onSessionInvalid={sessionInvalid}
                   />
-                </DialogContent>
-              </Dialog>
+                ) : null}
+                <Dialog
+                  open={isExpenseDialogOpen}
+                  onOpenChange={setIsExpenseDialogOpen}
+                  triggerId={expenseDialogTriggerId}
+                >
+                  <DialogTrigger
+                    id={expenseDialogTriggerId}
+                    render={
+                      <Button
+                        type="button"
+                        className="h-10 w-fit px-4 text-xs font-semibold tracking-[0.14em] uppercase"
+                      />
+                    }
+                  >
+                    <PlusIcon data-icon="inline-start" />
+                    New expense
+                  </DialogTrigger>
+                  <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-md">
+                    <DialogHeader>
+                      <DialogTitle className="font-display text-2xl tracking-tight">
+                        Add expense
+                      </DialogTitle>
+                      <DialogDescription>
+                        Record a debit or credit for this project in{" "}
+                        {project.currency}.
+                      </DialogDescription>
+                    </DialogHeader>
+                    <CreateExpenseForm
+                      orgId={orgId}
+                      projectId={projectId}
+                      currency={project.currency}
+                      onCreated={() => {
+                        setIsExpenseDialogOpen(false)
+                        handleExpenseChanged()
+                      }}
+                      onCancel={() => setIsExpenseDialogOpen(false)}
+                      onSessionInvalid={sessionInvalid}
+                    />
+                  </DialogContent>
+                </Dialog>
+              </div>
             </div>
 
             <div className="@container">

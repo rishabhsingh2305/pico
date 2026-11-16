@@ -31,10 +31,10 @@ canonical API contract.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/auth/login` | Sign in with `{"email","password"}`; returns `{"accessToken","refreshToken","tokenType","user","expiresAt","refreshExpiresAt"}` and sets `pico_auth` and `pico_refresh` cookie fallbacks |
+| `POST` | `/auth/login` | Sign in with `{"email","password"}`; returns `{"accessToken","refreshToken","tokenType","user","expiresAt","refreshExpiresAt","orgs"}` and sets `pico_auth` and `pico_refresh` cookie fallbacks |
 | `POST` | `/auth/refresh` | Exchange `{"refreshToken":"..."}` or the `pico_refresh` cookie for a new access and refresh token |
 | `POST` | `/auth/logout` | Clear both auth cookies (`204`); the client clears its stored tokens |
-| `GET` | `/auth/session` | Return the current user and token expiry from `Authorization: Bearer` or the cookie, or `401` |
+| `GET` | `/auth/session` | Return the current user, token expiry, and `orgs` role map from `Authorization: Bearer` or the cookie, or `401` |
 
 Access tokens are HS256 JWTs valid for 30 minutes and carry `sub`, `iss`,
 `aud=picoservice-api`, `type=access`, and `orgs`. The `orgs` map is capped at 20
@@ -109,6 +109,65 @@ There is no `DELETE /orgs`.
 Membership roles are feature-scoped: `{"org":"viewer","member":"admin","project":"editor","expense":"viewer"}`. The org's `userId` is the `owner`, which is implicit, has every feature role, is never stored as a membership role, and is written as `"*"` in access tokens. The member response uses `owner: true` for the owner and `roles` for everyone else.
 
 `member.admin` is a high-trust role: it can add and remove members and assign their feature roles, so grant it only to trusted administrators. The owner cannot be added, removed, or have their roles changed.
+
+### Sharing
+
+Share links are opaque credentials. The raw token is returned once and stored
+only as a SHA-256 hash. The recipient can read the shared resource through the
+existing API routes.
+
+| Method | Path | Permission | Description |
+| --- | --- | --- | --- |
+| `POST` | `/orgs/{orgID}/shares?orgId={orgID}` | `shares.create` | Create a link. Returns the raw token once |
+| `GET` | `/orgs/{orgID}/shares?orgId={orgID}` | `shares.list` | List links without tokens |
+| `GET` | `/orgs/{orgID}/shares/status?orgId={orgID}&resourceType=expense&resourceIds=...` | `shares.status` | Bulk “is this resource shared?” lookup |
+| `GET` | `/orgs/{orgID}/credentials?orgId={orgID}&kind=share&...` | `shares.credentials` | Filter links by kind, resource type, IDs, and active state |
+| `DELETE` | `/orgs/{orgID}/shares/{shareID}?orgId={orgID}` | `shares.revoke` | Revoke a link |
+
+Create body:
+
+```json
+{
+  "resourceType": "project",
+  "resourceId": "project-1",
+  "name": "Client review",
+  "expiresAt": "2026-12-31T23:59:59Z"
+}
+```
+
+`resourceType` is `org`, `project`, or `expense`. Scopes are derived server-side.
+`expiresAt` defaults to 30 days and is capped at 365 days. The create response
+returns the raw `token` and a `sharePath` such as
+`/shared?orgId=org-1&projectId=project-1&resourceId=project-1&resourceType=project#share=pico_share_...`.
+Each client turns that path into a link on its own origin.
+
+The recipient sends:
+
+```http
+GET /expenses/expense-42?orgId=org-1
+Authorization: Share <opaque-token>
+```
+
+Share scopes:
+
+| Share type | Read routes |
+| --- | --- |
+| `org` | org, projects, expenses, summary |
+| `project` | project, project expenses, summary |
+| `expense` | one expense, its project, the org |
+
+A project share forces the project filter. An expense share can only read the
+expense ID it was created for. Share responses omit `userId`.
+
+The `share` feature governs management:
+
+```yaml
+share:
+  viewer: [shares.list, shares.status, shares.credentials]
+  admin: [shares.list, shares.status, shares.credentials, shares.create, shares.revoke]
+```
+
+The owner wildcard covers everything.
 
 ### Projects
 
@@ -253,6 +312,11 @@ memberships
   _id, orgId, userId, roles (feature -> role), createdAt
   unique (orgId, userId)
 
+credentials
+  _id, kind (share|api_key), orgId, resourceType, resourceId, projectId,
+  scopes, name, tokenHash, createdBy, createdAt,
+  expiresAt, revokedAt, lastUsedAt
+
 projects
   _id, orgId, userId, name, currency, tags, createdAt, updatedAt
 
@@ -319,7 +383,7 @@ or membership constraints. The command is idempotent.
 | `internal/authz/resources/features.yml` | Feature → role → unit permissions. Roles are `viewer`, `editor`, and `admin`; the token role is `<feature>.<role>` |
 
 `scope` is `public` (no identity), `user` (identity only), or `org` (identity,
-`?orgId=`, a feature role, and the route permission). The owner is not a declared
+`?orgId=`, a feature role or share scope, and the route permission). The owner is not a declared
 role: when an organization's `userId` matches the token subject, issuance writes
 `["*"]`, which grants every defined permission. Policy files are embedded in the
 binary and validated at startup; `test/routes` fails if a route and the policy

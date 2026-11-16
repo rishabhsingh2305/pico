@@ -27,13 +27,17 @@
   returns an empty `200`. `GET /ready` pings MongoDB and returns
   `200 {"status":"ok"}` or `503 {"error":"database unavailable"}`.
 - Org-scoped routes require `?orgId=` plus at least one feature role for that
-  organization in the access token. The actor comes from `Authorization: Bearer`
+  organization in the access token, or a share credential for read-only share
+  access. The actor comes from `Authorization: Bearer`
   (or the `pico_auth` cookie fallback). Path-scoped org and member routes repeat
   `orgId` in the query and must match the path. Authorization is in-memory:
   route permission from `internal/authz/resources/routes.yml`, feature-role
   permissions from `features.yml`. Tokens carry strings such as
   `"expense.editor"`; a user can have different roles per feature. No membership
-  database lookup runs per request.
+  database lookup runs per request. Share links use `Authorization: Share
+  <opaque-token>`, resolve through the `credentials` collection, and carry
+  route scopes plus a resource scope. Share responses are read-only and omit
+  `userId`.
 - Protected routes authenticate with a stateless HS256 access JWT (30 minutes)
   and a stateless refresh token (30 days). `/auth/refresh` re-queries
   memberships and reissues both tokens. Login returns both tokens in the
@@ -85,7 +89,7 @@
 - **Boundaries:** Lambda/AWS event types belong only in `internal/lambdahttp`. MongoDB driver types belong only in `internal/dao/mongodb` in production code; integration tests may use the driver to isolate and drop test databases. Transport middleware belongs only in `internal/middleware`. SMTP and message construction belong only in `internal/email`; services consume the `services.Mailer` interface. Controllers must not import `events`, `lambda`, AWS SDKs, `internal/dao`, or the MongoDB driver.
 - **Dependency direction:** `main`/`cmd` → `internal/app` → `routes`/`services`/`dao/mongodb`/`email`; `routes` → `controllers`, `middleware`, `httpx`, `authz`; `controllers` → `services`, `middleware`, `entities`, `httpx`, `validation`; `services` → `dao`, `entities`, `validation`, stdlib, JWT; `dao` → `entities`; `dao/mongodb` → `dao`, `entities`, MongoDB driver; `email` → stdlib; `middleware` → `httpx`, `authz`, chi; `authz` → `entities`, stdlib, and YAML parsing; `lambdahttp` → `httpx`; `entities`, `httpx`, and `validation` import stdlib only. Controllers depend on small consumer-side service interfaces.
 - **Thin controllers:** controllers parse/validate HTTP input and write responses. Business logic lives in services. DTOs and response mapping stay in `internal/controllers`; do not query MongoDB from controllers.
-- **Tenancy:** org-scoped routes must use `middleware.RequireOrgAccess` after `middleware.RequireAuth`; user-scoped routes that need an actor use only `middleware.RequireAuth`. The actor is the JWT `sub`; the tenant is `?orgId=`; the route permission comes from `routes.yml`; feature roles come from the token `orgs` map and `features.yml`. The owner is implicit: token issuance writes `["*"]` when `orgs.userId` matches the actor, and `"*"` is never stored in `features.yml` or a membership record. Feature-management permissions are enforced by middleware; services only protect the owner account (the owner cannot be added, removed, or have roles changed). Never describe query parameters as authentication.
+- **Tenancy:** org-scoped routes must use `middleware.RequireOrgAccess` after `middleware.Authenticate`; user-scoped routes that need an actor use only `middleware.RequireAuth`. The actor is the JWT `sub`; the tenant is `?orgId=`; the route permission comes from `routes.yml`; feature roles come from the token `orgs` map and `features.yml`. The owner is implicit: token issuance writes `["*"]` when `orgs.userId` matches the actor, and `"*"` is never stored in `features.yml` or a membership record. Feature-management permissions are enforced by middleware; services only protect the owner account (the owner cannot be added, removed, or have roles changed). Never describe query parameters as authentication.
 - **Passwords:** hash with bcrypt; never store plaintext, log passwords, or return hashes. Password changes verify the current password. Email verification tokens are not access tokens and must never authorize API calls.
 - **JSON contract:** all responses are JSON. Use the shared helpers in `internal/httpx` and the error shape `{"error":"..."}`. HEAD responses carry no body. `204` responses have no body.
 - **DRY:** keep constants, response helpers, route registration, validation, and config in one place. The domain subrouters in `internal/routes` are the source for registration, middleware, and each path's `Allow` header; `router.go` mounts them under their prefixes. Apply the rule of three; do not abstract prematurely.
@@ -123,7 +127,7 @@
    `middleware.RequireAuth` or `middleware.RequireOrgAccess` where appropriate.
    The per-route 405 `Allow` header is derived automatically.
 8. Add the route to `internal/authz/resources/routes.yml` and, for org routes,
-   grant its unit permission to the feature roles in `features.yml`. `test/routes` walks
+   grant its unit permission to the feature roles or share scopes. `test/routes` walks
    the router and fails when a route and the policy drift.
 9. Update the route contract in `README.md` and `docs/architecture.md`, and the
    public guide in `../pico-ui/src/features/api-docs/content.ts`.

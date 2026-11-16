@@ -19,6 +19,7 @@ type AuthService interface {
 	Login(ctx context.Context, email, password string) (services.LoginResult, error)
 	Session(ctx context.Context, token string) (entities.User, time.Time, error)
 	Refresh(ctx context.Context, token string) (services.LoginResult, error)
+	OrgRoles(token string) (map[string][]string, error)
 }
 
 // AuthController serves login, logout, and session endpoints.
@@ -97,6 +98,7 @@ func (c *AuthController) writeAuthResponse(w http.ResponseWriter, r *http.Reques
 		ExpiresAt:        result.ExpiresAt,
 		RefreshToken:     result.RefreshToken,
 		RefreshExpiresAt: &result.RefreshExpiresAt,
+		Orgs:             result.Orgs,
 	})
 }
 
@@ -125,11 +127,13 @@ func (c *AuthController) Session(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	orgs, _ := c.service.OrgRoles(token)
 	httpx.WriteJSON(w, r, http.StatusOK, authResponse{
 		AccessToken: token,
 		TokenType:   "Bearer",
 		User:        userResponseFrom(user),
 		ExpiresAt:   expiresAt,
+		Orgs:        orgs,
 	})
 }
 
@@ -197,10 +201,11 @@ type refreshRequest struct {
 }
 
 type authResponse struct {
-	AccessToken      string       `json:"accessToken"`
-	TokenType        string       `json:"tokenType"`
-	User             userResponse `json:"user"`
-	ExpiresAt        time.Time    `json:"expiresAt"`
-	RefreshToken     string       `json:"refreshToken,omitempty"`
-	RefreshExpiresAt *time.Time   `json:"refreshExpiresAt,omitempty"`
+	AccessToken      string              `json:"accessToken"`
+	TokenType        string              `json:"tokenType"`
+	User             userResponse        `json:"user"`
+	ExpiresAt        time.Time           `json:"expiresAt"`
+	RefreshToken     string              `json:"refreshToken,omitempty"`
+	RefreshExpiresAt *time.Time          `json:"refreshExpiresAt,omitempty"`
+	Orgs             map[string][]string `json:"orgs,omitempty"`
 }

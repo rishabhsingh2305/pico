@@ -7,6 +7,7 @@ import { VerifyEmailPage } from "@/features/auth/pages/verify-email-page"
 import { CategoryPage } from "@/features/categories/pages/category-page"
 import { ExpensesProvider } from "@/features/expenses/expenses-provider"
 import { ExpensesPage } from "@/features/expenses/pages/expenses-page"
+import { SharedPage } from "@/features/sharing/pages/shared-page"
 
 export function AppRouter() {
   return (
@@ -14,6 +15,7 @@ export function AppRouter() {
       <Route path="/login" element={<LoginPage />} />
       <Route path="/signup" element={<SignUpPage />} />
       <Route path="/verify-email" element={<VerifyEmailPage />} />
+      <Route path="/shared" element={<SharedPage />} />
       <Route element={<RequireSession />}>
         <Route element={<ExpensesProvider />}>
           <Route path="/" element={<ExpensesPage />} />

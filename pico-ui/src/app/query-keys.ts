@@ -42,4 +42,14 @@ export const queryKeys = {
       "summary",
       ...expenseFilterKey(filters),
     ] as const,
+  shareStatus: (
+    orgId: string,
+    resourceType: "org" | "project" | "expense",
+    ids: string[]
+  ) => ["share-status", orgId, resourceType, [...ids].sort()] as const,
+  shares: (
+    orgId: string,
+    resourceType: "org" | "project" | "expense",
+    resourceId: string
+  ) => ["shares", orgId, resourceType, resourceId] as const,
 }

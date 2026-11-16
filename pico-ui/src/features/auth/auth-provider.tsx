@@ -61,7 +61,7 @@ export function AuthProvider({ children, initialSession }: AuthProviderProps) {
     try {
       const response = await fetchSession()
       setAuthToken(response.accessToken)
-      setSession(sessionFromUser(response.user))
+      setSession(sessionFromUser(response.user, response.orgs))
     } catch {
       clearTokens()
       setSession(null)
@@ -83,7 +83,7 @@ export function AuthProvider({ children, initialSession }: AuthProviderProps) {
       .then((response) => {
         if (!cancelled) {
           setAuthToken(response.accessToken)
-          setSession(sessionFromUser(response.user))
+          setSession(sessionFromUser(response.user, response.orgs))
         }
       })
       .catch(() => {
@@ -109,7 +109,7 @@ export function AuthProvider({ children, initialSession }: AuthProviderProps) {
     if (response.refreshToken) {
       setRefreshToken(response.refreshToken)
     }
-    setSession(sessionFromUser(response.user))
+    setSession(sessionFromUser(response.user, response.orgs))
     setStatus("ready")
   }, [])
 

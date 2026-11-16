@@ -52,6 +52,30 @@ func (c *Client) EnsureIndexes(ctx context.Context) error {
 			},
 		},
 		{
+			collection: credentialsCollection,
+			models: []mongo.IndexModel{
+				{
+					Keys:    bson.D{{Key: "tokenHash", Value: 1}},
+					Options: options.Index().SetName("credentials_token_hash_unique").SetUnique(true),
+				},
+				{
+					Keys: bson.D{
+						{Key: "orgId", Value: 1},
+						{Key: "kind", Value: 1},
+						{Key: "resourceType", Value: 1},
+						{Key: "resourceId", Value: 1},
+						{Key: "revokedAt", Value: 1},
+						{Key: "expiresAt", Value: 1},
+					},
+					Options: options.Index().SetName("credentials_lookup"),
+				},
+				{
+					Keys:    bson.D{{Key: "orgId", Value: 1}, {Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}},
+					Options: options.Index().SetName("credentials_org_created"),
+				},
+			},
+		},
+		{
 			collection: projectsCollection,
 			models: []mongo.IndexModel{
 				{

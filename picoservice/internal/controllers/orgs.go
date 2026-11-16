@@ -97,12 +97,17 @@ func (c *OrgController) List(w http.ResponseWriter, r *http.Request) {
 
 // Get handles GET and HEAD /orgs/{orgID}.
 func (c *OrgController) Get(w http.ResponseWriter, r *http.Request) {
+	id, ok := requestIdentity(w, r)
+	if !ok {
+		return
+	}
+
 	org, err := c.service.Get(r.Context(), chi.URLParam(r, "orgID"))
 	if err != nil {
 		c.writeError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, r, http.StatusOK, orgResponseFrom(org))
+	httpx.WriteJSON(w, r, http.StatusOK, orgResponseFor(org, isShareIdentity(id)))
 }
 
 // Update handles PATCH /orgs/{orgID}.
@@ -150,7 +155,7 @@ type updateOrgRequest struct {
 type orgResponse struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
-	UserID    string    `json:"userId"`
+	UserID    string    `json:"userId,omitempty"`
 	Tags      []string  `json:"tags"`
 	CreatedAt time.Time `json:"createdAt"`
 	UpdatedAt time.Time `json:"updatedAt"`
@@ -158,6 +163,14 @@ type orgResponse struct {
 
 type orgListResponse struct {
 	Items []orgResponse `json:"items"`
+}
+
+func orgResponseFor(org entities.Org, shared bool) orgResponse {
+	response := orgResponseFrom(org)
+	if shared {
+		response.UserID = ""
+	}
+	return response
 }
 
 func orgResponseFrom(org entities.Org) orgResponse {

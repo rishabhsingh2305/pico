@@ -92,6 +92,7 @@ func TestOrgGetNotFound(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/orgs/missing", nil)
+	req = withIdentity(req, "org-1", "user-1")
 	req = withRouteParams(req, map[string]string{"orgID": "missing"})
 
 	controllers.NewOrgController(testLogger(), service).Get(rec, req)

@@ -51,7 +51,7 @@ func authenticate(w http.ResponseWriter, r *http.Request, next http.Handler, tok
 		return
 	}
 
-	ctx := WithContext(r.Context(), Identity{UserID: subject, Orgs: orgs})
+	ctx := WithContext(r.Context(), Identity{UserID: subject, Kind: IdentityKindUser, Orgs: orgs})
 	next.ServeHTTP(w, r.WithContext(ctx))
 }
 

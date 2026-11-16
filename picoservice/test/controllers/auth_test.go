@@ -29,6 +29,10 @@ func TestAuthLogin(t *testing.T) {
 				ExpiresAt:        expiresAt,
 				RefreshToken:     "refresh-1",
 				RefreshExpiresAt: expiresAt.Add(time.Hour),
+				Orgs: map[string][]string{
+					"org-1": {"*"},
+					"org-2": {"expense.viewer"},
+				},
 			}, nil
 		},
 	}
@@ -50,11 +54,12 @@ func TestAuthLogin(t *testing.T) {
 	}
 
 	var body struct {
-		AccessToken  string         `json:"accessToken"`
-		RefreshToken string         `json:"refreshToken"`
-		TokenType    string         `json:"tokenType"`
-		User         map[string]any `json:"user"`
-		ExpiresAt    time.Time      `json:"expiresAt"`
+		AccessToken  string              `json:"accessToken"`
+		RefreshToken string              `json:"refreshToken"`
+		TokenType    string              `json:"tokenType"`
+		User         map[string]any      `json:"user"`
+		ExpiresAt    time.Time           `json:"expiresAt"`
+		Orgs         map[string][]string `json:"orgs"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
@@ -70,6 +75,9 @@ func TestAuthLogin(t *testing.T) {
 	}
 	if got, want := body.User["id"], "user-1"; got != want {
 		t.Fatalf("expected user %q, got %v", want, got)
+	}
+	if got, want := body.Orgs["org-2"][0], "expense.viewer"; got != want {
+		t.Fatalf("expected org role %q, got %q", want, got)
 	}
 }
 
@@ -244,6 +252,13 @@ func TestAuthSession(t *testing.T) {
 		},
 	}
 
+	service.OrgRolesFunc = func(token string) (map[string][]string, error) {
+		if token != "token-1" {
+			t.Fatalf("expected token-1, got %q", token)
+		}
+		return map[string][]string{"org-1": {"*"}}, nil
+	}
+
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/auth/session", nil)
 	req.AddCookie(&http.Cookie{Name: middleware.AuthCookieName, Value: "token-1"})
@@ -252,6 +267,15 @@ func TestAuthSession(t *testing.T) {
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	var body struct {
+		Orgs map[string][]string `json:"orgs"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := body.Orgs["org-1"][0], "*"; got != want {
+		t.Fatalf("expected org role %q, got %q", want, got)
 	}
 }
 

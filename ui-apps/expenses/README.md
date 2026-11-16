@@ -42,6 +42,19 @@ the target with `VITE_API_PROXY_TARGET`.
   all selected tags must match.
 - Home category blocks show this month's spend.
 
+## Sharing
+
+- Users who own the org or carry `share.admin` can create read-only links for a
+  category (backed by a project). Category sharing is available from the
+  category list and from the category detail header.
+- Links use 7, 30, or 365-day expiry presets and can be revoked from the same
+  dialog. Public badges appear on shared categories.
+- A link opens `/shared` with an opaque token in the URL fragment
+  (`#share=...`). The page stores the token in `sessionStorage`, strips it from
+  the URL, and sends `Authorization: Share` on the existing read routes.
+- `/shared` sits outside the session guard and the personal Expenses org
+  provider, so recipients do not need an account.
+
 ## Production
 
 Set `VITE_API_BASE_URL` to the deployed `picoservice` URL. The UI origin must

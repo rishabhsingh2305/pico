@@ -22,7 +22,7 @@ import {
   toMinorUnits,
   todayInputValue,
 } from "@/features/expenses/format"
-import { MAX_TAGS, normalizeTags } from "@/features/expenses/tags"
+import { MAX_TAGS, normalizeTags, unusedTags } from "@/features/expenses/tags"
 import type { ExpenseType } from "@/features/expenses/types"
 import { useExpenses } from "@/features/expenses/expenses-provider"
 import { byteLength } from "@/lib/text"
@@ -34,6 +34,7 @@ type ExpenseFormProps = {
   onOpenChange: (open: boolean) => void
   projectId: string
   currency: string
+  availableTags?: string[]
   onCreated: () => void
 }
 
@@ -48,6 +49,7 @@ export function ExpenseForm({
   onOpenChange,
   projectId,
   currency,
+  availableTags = [],
   onCreated,
 }: ExpenseFormProps) {
   const id = useId()
@@ -67,6 +69,7 @@ export function ExpenseForm({
   const [errors, setErrors] = useState<Errors>({})
   const [formError, setFormError] = useState("")
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const tagSuggestions = unusedTags(availableTags, tags)
 
   function reset() {
     setType("debit")
@@ -88,8 +91,8 @@ export function ExpenseForm({
     onOpenChange(next)
   }
 
-  function addTags(raw: string) {
-    const result = normalizeTags([...tags, ...raw.split(/[\s,]+/)])
+  function addTagValues(values: string[]) {
+    const result = normalizeTags([...tags, ...values])
     if (!result.ok) {
       setTagsError(result.error)
       return
@@ -97,6 +100,14 @@ export function ExpenseForm({
     setTags(result.tags)
     setTagsError("")
     setTagInput("")
+  }
+
+  function addTags(raw: string) {
+    addTagValues(raw.split(/[\s,]+/))
+  }
+
+  function addTag(tag: string) {
+    addTagValues([tag])
   }
 
   function removeTag(tag: string) {
@@ -292,6 +303,24 @@ export function ExpenseForm({
                   : `${id}-tags-hint`
               }
             />
+            {tagSuggestions.length > 0 ? (
+              <div
+                className="flex flex-wrap gap-1.5"
+                aria-label="Existing tags"
+              >
+                {tagSuggestions.map((tag) => (
+                  <button
+                    key={tag}
+                    type="button"
+                    onClick={() => addTag(tag)}
+                    disabled={isSubmitting}
+                    className="rounded-full border border-border bg-card px-2.5 py-1 text-xs font-semibold text-foreground transition-colors hover:bg-muted disabled:pointer-events-none disabled:opacity-50"
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            ) : null}
             <p id={`${id}-tags-hint`} className="text-xs text-muted-foreground">
               Press Enter, space, or comma to add. Up to {MAX_TAGS}.
             </p>

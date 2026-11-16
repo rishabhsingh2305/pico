@@ -102,6 +102,28 @@ endpoints:
       path: /orgs/{orgID}/members/{memberUserID}
       scope: org
 
+  shares:
+    create:
+      method: POST
+      path: /orgs/{orgID}/shares
+      scope: org
+    list:
+      method: GET
+      path: /orgs/{orgID}/shares
+      scope: org
+    status:
+      method: GET
+      path: /orgs/{orgID}/shares/status
+      scope: org
+    revoke:
+      method: DELETE
+      path: /orgs/{orgID}/shares/{shareID}
+      scope: org
+    credentials:
+      method: GET
+      path: /orgs/{orgID}/credentials
+      scope: org
+
   projects:
     list:
       method: GET

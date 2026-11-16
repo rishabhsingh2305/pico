@@ -6,6 +6,7 @@ import {
   setRefreshToken,
 } from "@/lib/auth-token"
 import { API_BASE_URL } from "@/lib/env"
+import { getShareToken } from "@/lib/share-token"
 
 export class ApiError extends Error {
   readonly status: number
@@ -23,7 +24,7 @@ export async function requestJSON<T>(
 ): Promise<T> {
   let response = await send(path, init)
 
-  if (response.status === 401 && canRefresh(path)) {
+  if (response.status === 401 && !getShareToken() && canRefresh(path)) {
     if (await refreshTokens()) {
       response = await send(path, init)
     }
@@ -36,9 +37,12 @@ function send(path: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers)
   headers.set("Accept", "application/json")
 
-  const token = getAuthToken()
-  if (token) {
-    headers.set("Authorization", `Bearer ${token}`)
+  const shareToken = getShareToken()
+  const userToken = getAuthToken()
+  if (shareToken && !path.startsWith("/auth/")) {
+    headers.set("Authorization", `Share ${shareToken}`)
+  } else if (userToken) {
+    headers.set("Authorization", `Bearer ${userToken}`)
   }
 
   return fetch(`${API_BASE_URL}${path}`, {

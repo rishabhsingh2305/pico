@@ -36,6 +36,12 @@ type MembershipService interface {
 	controllers.MembershipService
 }
 
+// CredentialService is the share behavior required by the router.
+type CredentialService interface {
+	controllers.CredentialService
+	middleware.CredentialResolver
+}
+
 // ProjectService is the project behavior required by the router.
 type ProjectService interface {
 	controllers.ProjectService
@@ -56,6 +62,7 @@ type Deps struct {
 	Memberships    MembershipService
 	Projects       ProjectService
 	Expenses       ExpenseService
+	Credentials    CredentialService
 	Policy         *authz.Policy
 	SecureCookies  bool
 	AllowedOrigins []string
@@ -78,10 +85,13 @@ func New(deps Deps) (*chi.Mux, error) {
 	membershipController := controllers.NewMembershipController(logger, deps.Memberships)
 	projectController := controllers.NewProjectController(logger, deps.Projects)
 	expenseController := controllers.NewExpenseController(logger, deps.Expenses)
+	credentialController := controllers.NewCredentialController(logger, deps.Credentials)
 
 	requireAuth := middleware.RequireAuth(deps.Auth)
 	requireOrg := func(next http.Handler) http.Handler {
-		return requireAuth(middleware.RequireOrgAccess(logger, deps.Policy)(next))
+		return middleware.Authenticate(logger, deps.Auth, deps.Credentials)(
+			middleware.RequireOrgAccess(logger, deps.Policy)(next),
+		)
 	}
 
 	r := chi.NewRouter()
@@ -94,7 +104,7 @@ func New(deps Deps) (*chi.Mux, error) {
 	healthRoutes(r, logger, deps.Pinger)
 	r.Mount("/auth", authRoutes(userController, authController))
 	r.Mount("/users", userRoutes(userController, requireAuth))
-	r.Mount("/orgs", orgRoutes(orgController, membershipController, requireAuth, requireOrg))
+	r.Mount("/orgs", orgRoutes(orgController, membershipController, credentialController, requireAuth, requireOrg))
 	r.Mount("/projects", projectRoutes(projectController, requireOrg))
 	r.Mount("/expenses", expenseRoutes(expenseController, requireOrg))
 
@@ -127,6 +137,8 @@ func (d Deps) validate() error {
 		return errors.New("routes: project service is required")
 	case d.Expenses == nil:
 		return errors.New("routes: expense service is required")
+	case d.Credentials == nil:
+		return errors.New("routes: credential service is required")
 	case d.Policy == nil:
 		return errors.New("routes: authz policy is required")
 	default:

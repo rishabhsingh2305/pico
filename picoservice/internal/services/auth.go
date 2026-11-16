@@ -32,6 +32,7 @@ type LoginResult struct {
 	ExpiresAt        time.Time
 	RefreshToken     string
 	RefreshExpiresAt time.Time
+	Orgs             map[string][]string
 }
 
 // AuthService validates credentials and orchestrates token issuance.
@@ -135,6 +136,7 @@ func (s *AuthService) issueForUser(ctx context.Context, user entities.User) (Log
 		ExpiresAt:        pair.accessExpiresAt,
 		RefreshToken:     pair.refreshToken,
 		RefreshExpiresAt: pair.refreshExpiresAt,
+		Orgs:             orgs,
 	}, nil
 }
 
@@ -173,4 +175,10 @@ func (s *AuthService) Session(ctx context.Context, token string) (entities.User,
 // map without database work.
 func (s *AuthService) ParseAccess(token string) (string, map[string][]string, error) {
 	return s.tokens.parseAccess(token)
+}
+
+// OrgRoles returns the organization feature roles carried by an access token.
+func (s *AuthService) OrgRoles(token string) (map[string][]string, error) {
+	_, orgs, err := s.tokens.parseAccess(token)
+	return orgs, err
 }

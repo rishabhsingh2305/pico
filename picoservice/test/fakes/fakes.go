@@ -21,6 +21,7 @@ type Services struct {
 	Memberships *MembershipService
 	Projects    *ProjectService
 	Expenses    *ExpenseService
+	Credentials *CredentialService
 }
 
 // NewServices returns fake services that accept any existing identity by
@@ -33,6 +34,7 @@ func NewServices() Services {
 		Memberships: &MembershipService{},
 		Projects:    &ProjectService{},
 		Expenses:    &ExpenseService{},
+		Credentials: &CredentialService{},
 	}
 }
 
@@ -51,6 +53,7 @@ func (s Services) Deps(logger *slog.Logger, pinger controllers.Pinger) routes.De
 		Memberships:    s.Memberships,
 		Projects:       s.Projects,
 		Expenses:       s.Expenses,
+		Credentials:    s.Credentials,
 		Policy:         policy,
 		SecureCookies:  false,
 		AllowedOrigins: []string{"http://localhost:5173"},
@@ -123,6 +126,7 @@ type AuthService struct {
 	SessionFunc     func(context.Context, string) (entities.User, time.Time, error)
 	RefreshFunc     func(context.Context, string) (services.LoginResult, error)
 	ParseAccessFunc func(string) (string, map[string][]string, error)
+	OrgRolesFunc    func(string) (map[string][]string, error)
 	// Orgs maps a fake token (the user ID) to its organization feature roles.
 	Orgs map[string]map[string][]string
 }
@@ -154,6 +158,13 @@ func (s *AuthService) Refresh(ctx context.Context, token string) (services.Login
 
 // ParseAccess treats the token as a user ID so route tests can authenticate
 // with a readable bearer token.
+func (s *AuthService) OrgRoles(token string) (map[string][]string, error) {
+	if s.OrgRolesFunc != nil {
+		return s.OrgRolesFunc(token)
+	}
+	return map[string][]string{}, nil
+}
+
 func (s *AuthService) ParseAccess(token string) (string, map[string][]string, error) {
 	if s.ParseAccessFunc != nil {
 		return s.ParseAccessFunc(token)

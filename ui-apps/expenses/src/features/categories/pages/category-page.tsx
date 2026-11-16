@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router"
 import {
   ArrowLeftIcon,
   CircleAlertIcon,
+  Link2Icon,
   PlusIcon,
   ReceiptTextIcon,
   SlidersHorizontalIcon,
@@ -15,6 +16,10 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useAuth } from "@/features/auth/auth-provider"
 import { getCategory } from "@/features/categories/api"
+import { canManageShares, canViewShares } from "@/features/sharing/access"
+import { getShareStatus } from "@/features/sharing/api"
+import { PublicShareBadge } from "@/features/sharing/components/public-share-badge"
+import { ShareDialog } from "@/features/sharing/components/share-dialog"
 import { categoryColor } from "@/features/categories/colors"
 import { CategoryGlyph } from "@/features/categories/icons"
 import { categoryErrorMessage } from "@/features/categories/error-message"
@@ -43,8 +48,11 @@ type Status = "loading" | "ready" | "error"
 
 export function CategoryPage() {
   const { categoryId = "" } = useParams()
-  const { orgId } = useExpenses()
-  const { logout } = useAuth()
+  const { orgId, isOwner } = useExpenses()
+  const { session, logout } = useAuth()
+  const roles = session?.orgs?.[orgId] ?? []
+  const canShare = canManageShares(isOwner, roles)
+  const canView = canViewShares(isOwner, roles)
 
   const [category, setCategory] = useState<Category | null>(null)
   const [categoryStatus, setCategoryStatus] = useState<Status>("loading")
@@ -72,6 +80,16 @@ export function CategoryPage() {
   const totalsCollapsedRef = useRef(false)
 
   const [isFormOpen, setIsFormOpen] = useState(false)
+  const [shareOpen, setShareOpen] = useState(false)
+  const [shareTarget, setShareTarget] = useState<{
+    resourceId: string
+    resourceName: string
+  } | null>(null)
+  const handleSessionInvalid = useCallback(() => {
+    void logout()
+  }, [logout])
+  const [categoryShared, setCategoryShared] = useState(false)
+  const [shareReload, setShareReload] = useState(0)
 
   const activeCount = activeFilterCount(filters)
   const categoryBlock = category ? categoryColor(category.id) : null
@@ -353,6 +371,28 @@ export function CategoryPage() {
     })
   }
 
+  useEffect(() => {
+    if (!canView || !categoryId) {
+      return
+    }
+    let cancelled = false
+    getShareStatus(orgId, "project", [categoryId])
+      .then((items) => {
+        if (!cancelled) {
+          setCategoryShared(items.length > 0)
+        }
+      })
+      .catch(() => {})
+    return () => {
+      cancelled = true
+    }
+  }, [canView, categoryId, orgId, shareReload])
+
+  function openShare(resourceId: string, resourceName: string) {
+    setShareTarget({ resourceId, resourceName })
+    setShareOpen(true)
+  }
+
   return (
     <AppShell>
       <div className="mx-auto flex min-h-0 w-full max-w-5xl flex-1 flex-col">
@@ -366,25 +406,40 @@ export function CategoryPage() {
               All categories
             </Link>
 
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="h-9 rounded-xl border-border bg-card px-3 text-foreground hover:bg-muted"
-              onClick={() => setFilterSheetOpen(true)}
-              disabled={categoryStatus !== "ready"}
-              aria-label={
-                activeCount > 0 ? `Filters, ${activeCount} active` : "Filters"
-              }
-            >
-              <SlidersHorizontalIcon className="size-4" aria-hidden="true" />
-              Filters
-              {activeCount > 0 ? (
-                <span className="ml-1 inline-flex size-5 items-center justify-center rounded-full bg-primary text-[0.65rem] font-bold text-primary-foreground">
-                  {activeCount}
-                </span>
+            <div className="flex items-center gap-2">
+              {categoryShared ? <PublicShareBadge /> : null}
+              {canShare && category ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-9 rounded-xl border-border bg-card px-3 text-foreground hover:bg-muted"
+                  onClick={() => openShare(category.id, category.name)}
+                >
+                  <Link2Icon className="size-4" aria-hidden="true" />
+                  Share
+                </Button>
               ) : null}
-            </Button>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9 rounded-xl border-border bg-card px-3 text-foreground hover:bg-muted"
+                onClick={() => setFilterSheetOpen(true)}
+                disabled={categoryStatus !== "ready"}
+                aria-label={
+                  activeCount > 0 ? `Filters, ${activeCount} active` : "Filters"
+                }
+              >
+                <SlidersHorizontalIcon className="size-4" aria-hidden="true" />
+                Filters
+                {activeCount > 0 ? (
+                  <span className="ml-1 inline-flex size-5 items-center justify-center rounded-full bg-primary text-[0.65rem] font-bold text-primary-foreground">
+                    {activeCount}
+                  </span>
+                ) : null}
+              </Button>
+            </div>
           </div>
 
           {categoryStatus === "ready" && category ? (
@@ -637,7 +692,22 @@ export function CategoryPage() {
             onOpenChange={setIsFormOpen}
             projectId={category.id}
             currency={category.currency}
+            availableTags={availableTags}
             onCreated={handleCreated}
+          />
+        ) : null}
+
+        {shareTarget ? (
+          <ShareDialog
+            key={shareTarget.resourceId}
+            open={shareOpen}
+            onOpenChange={setShareOpen}
+            orgId={orgId}
+            resourceType="project"
+            resourceId={shareTarget.resourceId}
+            resourceName={shareTarget.resourceName}
+            onChanged={() => setShareReload((current) => current + 1)}
+            onSessionInvalid={handleSessionInvalid}
           />
         ) : null}
 
@@ -793,15 +863,17 @@ function ExpenseTable({
                       })}
                     </div>
                   </div>
-                  <span
-                    className={cn(
-                      "shrink-0 text-right text-[15px] font-semibold tabular-nums",
-                      expense.type === "debit" ? "text-spend" : "text-credit"
-                    )}
-                  >
-                    {expense.type === "debit" ? "−" : "+"}
-                    {formatMoney(expense.amount, currency)}
-                  </span>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span
+                      className={cn(
+                        "text-right text-[15px] font-semibold tabular-nums",
+                        expense.type === "debit" ? "text-spend" : "text-credit"
+                      )}
+                    >
+                      {expense.type === "debit" ? "−" : "+"}
+                      {formatMoney(expense.amount, currency)}
+                    </span>
+                  </div>
                 </li>
               ))}
             </ul>

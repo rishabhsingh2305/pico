@@ -29,6 +29,7 @@ var featurePrefixes = map[string]string{
 	entities.FeatureMember:  "members",
 	entities.FeatureProject: "projects",
 	entities.FeatureExpense: "expenses",
+	entities.FeatureShare:   "shares",
 }
 
 type routesDocument struct {

@@ -20,6 +20,10 @@ features:
     viewer: [members.list]
     admin: [members.list, members.add, members.update, members.remove]
 
+  share:
+    viewer: [shares.list, shares.status, shares.credentials]
+    admin: [shares.list, shares.status, shares.credentials, shares.create, shares.revoke]
+
   project:
     viewer: [projects.list, projects.get]
     editor: [projects.list, projects.get, projects.create, projects.update]

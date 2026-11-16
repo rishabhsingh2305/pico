@@ -34,6 +34,9 @@ import { CreateProjectForm } from "@/features/projects/components/create-project
 import { ProjectCard } from "@/features/projects/components/project-card"
 import { ProjectFilterForm } from "@/features/projects/components/project-filter-form"
 import { listProjects } from "@/features/projects/api"
+import { PublicShareBadge } from "@/features/sharing/components/public-share-badge"
+import { ShareDialog } from "@/features/sharing/components/share-dialog"
+import { getShareStatus } from "@/features/sharing/api"
 import { usePageTitle } from "@/hooks/use-page-title"
 import { ApiError } from "@/lib/api-client"
 
@@ -65,6 +68,29 @@ function OrgDetailView({ session }: { session: Session }) {
 
   const org = orgQuery.data ?? null
   const projects = projectsQuery.data ?? []
+  const roles = session.orgs?.[orgId] ?? []
+  const isOwner = org?.userId === session.userId
+  const canShare = isOwner || roles.includes("share.admin")
+  const canViewShares =
+    isOwner || roles.includes("share.viewer") || roles.includes("share.admin")
+  const projectIDs = projects.map((project) => project.id)
+  const shareStatusQuery = useQuery({
+    queryKey: queryKeys.shareStatus(orgId, "project", projectIDs),
+    queryFn: () => getShareStatus(orgId, "project", projectIDs),
+    enabled: canViewShares && projectIDs.length > 0,
+  })
+  const sharedProjectIDs = new Set(
+    (shareStatusQuery.data ?? []).map((item) => item.resourceId)
+  )
+  const orgShareStatusQuery = useQuery({
+    queryKey: queryKeys.shareStatus(orgId, "org", [orgId]),
+    queryFn: () => getShareStatus(orgId, "org", [orgId]),
+    enabled: canViewShares,
+  })
+  const orgShared = (orgShareStatusQuery.data ?? []).length > 0
+  const invalidateShareStatus = useCallback(() => {
+    void queryClient.invalidateQueries({ queryKey: ["share-status", orgId] })
+  }, [queryClient, orgId])
   const status: LoadStatus = orgQuery.isPending
     ? "loading"
     : orgQuery.isError
@@ -198,13 +224,25 @@ function OrgDetailView({ session }: { session: Session }) {
               title={org.name}
               description="Choose a project to view and manage its expenses."
               actions={
-                <Badge
-                  variant={
-                    org.userId === session.userId ? "default" : "secondary"
-                  }
-                >
-                  {org.userId === session.userId ? "Owner" : "Member"}
-                </Badge>
+                <div className="flex items-center gap-2">
+                  {orgShared ? <PublicShareBadge /> : null}
+                  <Badge
+                    variant={
+                      org.userId === session.userId ? "default" : "secondary"
+                    }
+                  >
+                    {org.userId === session.userId ? "Owner" : "Member"}
+                  </Badge>
+                  {canShare ? (
+                    <ShareDialog
+                      orgId={orgId}
+                      resourceType="org"
+                      resourceName={org.name}
+                      onChanged={invalidateShareStatus}
+                      onSessionInvalid={sessionInvalid}
+                    />
+                  ) : null}
+                </div>
               }
             />
 
@@ -353,8 +391,11 @@ function OrgDetailView({ session }: { session: Session }) {
                         orgId={orgId}
                         project={project}
                         activeTags={projectTags}
+                        shared={sharedProjectIDs.has(project.id)}
+                        canShare={canShare}
                         onToggleTag={toggleProjectTag}
                         onTagsUpdated={handleProjectTagsUpdated}
+                        onShareChanged={invalidateShareStatus}
                         onSessionInvalid={sessionInvalid}
                       />
                     </li>

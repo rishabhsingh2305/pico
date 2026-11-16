@@ -30,6 +30,7 @@ export type SessionResponse = {
   expiresAt: string
   refreshToken?: string
   refreshExpiresAt?: string
+  orgs?: Record<string, string[]>
 }
 
 export type VerificationResponse = {

@@ -18,7 +18,24 @@ describe("session", () => {
       userId: "user-1",
       name: "Ada Lovelace",
       email: "ada@example.com",
+      orgs: {},
     })
+  })
+
+  it("carries the organization role map into the session", () => {
+    expect(
+      sessionFromUser(
+        {
+          id: "user-1",
+          name: "Ada Lovelace",
+          email: "ada@example.com",
+          emailVerified: true,
+          createdAt: "2026-01-01T00:00:00Z",
+          updatedAt: "2026-01-01T00:00:00Z",
+        },
+        { "org-1": ["*"], "org-2": ["expense.viewer"] }
+      ).orgs
+    ).toEqual({ "org-1": ["*"], "org-2": ["expense.viewer"] })
   })
 
   it("identifies expired sessions", () => {

@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strings"
 
+	"picoservice/internal/entities"
 	"picoservice/internal/httpx"
 )
 
@@ -12,15 +13,29 @@ const (
 	// OrgIDParam is the query parameter carrying the organization ID.
 	OrgIDParam = "orgId"
 
+	// IdentityKindUser is a request authenticated by a user JWT.
+	IdentityKindUser = "user"
+	// IdentityKindShare is a request authenticated by a share credential.
+	IdentityKindShare = "share"
+
 	maxIDLength = 128
 )
 
 // Identity is the authenticated user and, on organization routes, the
 // organization and feature roles selected from the token.
 type Identity struct {
-	UserID string
-	OrgID  string
-	Orgs   map[string][]string
+	UserID  string
+	OrgID   string
+	Kind    string
+	Orgs    map[string][]string
+	ShareID string
+	Scopes  map[string]struct{}
+	Share   *entities.ShareScope
+}
+
+// CredentialResolver resolves a raw share token to a credential.
+type CredentialResolver interface {
+	ResolveToken(ctx context.Context, raw string) (entities.Credential, error)
 }
 
 type contextKey struct{}

@@ -92,7 +92,7 @@ func (c *ProjectController) List(w http.ResponseWriter, r *http.Request) {
 
 	response := projectListResponse{Items: make([]projectResponse, 0, len(items))}
 	for _, project := range items {
-		response.Items = append(response.Items, projectResponseFrom(project))
+		response.Items = append(response.Items, projectResponseFor(project, isShareIdentity(id)))
 	}
 	httpx.WriteJSON(w, r, http.StatusOK, response)
 }
@@ -109,7 +109,11 @@ func (c *ProjectController) Get(w http.ResponseWriter, r *http.Request) {
 		c.writeError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, r, http.StatusOK, projectResponseFrom(project))
+	if isShareIdentity(id) && !id.Share.AllowsProject(project.ID) {
+		httpx.WriteError(w, r, http.StatusNotFound, "project not found")
+		return
+	}
+	httpx.WriteJSON(w, r, http.StatusOK, projectResponseFor(project, isShareIdentity(id)))
 }
 
 // Update handles PATCH /projects/{projectID}.
@@ -164,7 +168,7 @@ type updateProjectRequest struct {
 type projectResponse struct {
 	ID        string    `json:"id"`
 	OrgID     string    `json:"orgId"`
-	UserID    string    `json:"userId"`
+	UserID    string    `json:"userId,omitempty"`
 	Name      string    `json:"name"`
 	Currency  string    `json:"currency"`
 	Tags      []string  `json:"tags"`
@@ -174,6 +178,14 @@ type projectResponse struct {
 
 type projectListResponse struct {
 	Items []projectResponse `json:"items"`
+}
+
+func projectResponseFor(project entities.Project, shared bool) projectResponse {
+	response := projectResponseFrom(project)
+	if shared {
+		response.UserID = ""
+	}
+	return response
 }
 
 func projectResponseFrom(project entities.Project) projectResponse {

@@ -27,7 +27,7 @@ const (
 // ValidFeature reports whether feature is a known feature name.
 func ValidFeature(feature string) bool {
 	switch feature {
-	case FeatureOrg, FeatureMember, FeatureProject, FeatureExpense:
+	case FeatureOrg, FeatureMember, FeatureProject, FeatureExpense, FeatureShare:
 		return true
 	default:
 		return false

@@ -108,6 +108,23 @@ memberships
   createdAt    time
   unique (orgId, userId)
 
+credentials
+  _id          ObjectID
+  kind         share | api_key
+  orgId        string
+  resourceType org | project | expense | null
+  resourceId   string | null
+  projectId    string | null
+  scopes       []string
+  name         string
+  tokenHash    string
+  createdBy    string
+  createdAt    time
+  expiresAt    time | null
+  revokedAt    time | null
+  lastUsedAt   time | null
+  unique (tokenHash)
+
 projects
   _id          ObjectID
   orgId        string
@@ -235,6 +252,38 @@ Membership responses include `owner: true` for the organization owner and a
 is a high-trust role: it can manage membership and assign feature roles. The
 owner account cannot be added, removed, or have its roles changed.
 
+### Sharing
+
+| Method | Path | Success | Notes |
+| --- | --- | --- | --- |
+| POST | `/orgs/{orgID}/shares?orgId={orgID}` | 201 | `shares.create`; returns the raw token once |
+| GET | `/orgs/{orgID}/shares?orgId={orgID}` | 200 | `shares.list`; no tokens |
+| GET | `/orgs/{orgID}/shares/status?orgId={orgID}&resourceType=&resourceIds=` | 200 | `shares.status`; active links per resource |
+| GET | `/orgs/{orgID}/credentials?orgId={orgID}&kind=&resourceType=&resourceIds=&active=` | 200 | `shares.credentials`; filter links and future API keys |
+| DELETE | `/orgs/{orgID}/shares/{shareID}?orgId={orgID}` | 204 | `shares.revoke` |
+
+Share access uses the existing routes:
+
+```http
+Authorization: Share <opaque-token>
+```
+
+The credential is hashed at rest, expiring, and revocable. Scopes are derived
+from the share resource:
+
+| Resource | Scopes |
+| --- | --- |
+| org | org, project list/get, expense list/summary/get |
+| project | org, project get, project expense list/summary/get |
+| expense | org, project get, expense get |
+
+Object scope is enforced in controllers:
+
+- project share forces `ProjectIDs` for list and summary;
+- expense share rejects any expense ID other than its own;
+- project and expense shares reject other projects;
+- share responses omit `userId`.
+
 ### Projects
 
 | Method | Path | Success | Notes |
@@ -325,8 +374,11 @@ Invalid ObjectIDs are treated as not found rather than as a separate error.
 Protected routes authenticate with `Authorization: Bearer <token>`, falling back
 to the `pico_auth` cookie:
 
-- `RequireAuth` validates the access JWT and stores its `sub` and `orgs` feature
-  role lists in the request context. A valid token requires no database lookup.
+- `Authenticate` accepts either an access JWT or `Authorization: Share
+  <opaque-token>`. A JWT stores its `sub` and `orgs` feature role lists; a share
+  stores route scopes and resource scope from the `credentials` collection.
+- `RequireAuth` accepts only a JWT and is used on user-scoped routes. A share
+  credential cannot reach `/users` or `/auth` routes.
 - `RequireOrgAccess` reads the tenant from `?orgId=`. It rejects a path/query
   mismatch with `400`, a missing tenant with `400`, and an organization absent
   from the token with `403`.
@@ -334,7 +386,8 @@ to the `pico_auth` cookie:
   non-org policy fails closed with `500`. The route key is the unit permission.
 - `"*"` grants every defined permission for that organization. Otherwise any
   feature role in the token may grant the route permission through
-  `features.yml`.
+  `features.yml`, or a share scope may grant it directly. Share requests also
+  check the resource scope.
 
 Authentication and authorization are declarative and in-memory:
 
@@ -436,6 +489,9 @@ memberships:  {orgId:1, userId:1} unique
               {orgId:1, createdAt:-1, _id:-1}
 projects:     {orgId:1, createdAt:-1, _id:-1}
               {orgId:1, tags:1}
+credentials:  {tokenHash:1} unique
+              {orgId:1, kind:1, resourceType:1, resourceId:1, revokedAt:1, expiresAt:1}
+              {orgId:1, createdAt:-1, _id:-1}
 expenses:     {orgId:1, spentAt:-1, _id:-1}
               {orgId:1, projectId:1, spentAt:-1, _id:-1}
               {orgId:1, tags:1}
@@ -671,6 +727,10 @@ A legacy document with no `type` is counted as debit through `$ifNull`.
 - **Refresh tokens are stateless and replayable.** Rotation returns a new token
   but does not invalidate the old one. Add token-version or session storage if
   immediate revocation is required.
+- **Share tokens are opaque and stored hashed.** They are revocable, unlike
+  access tokens. There is no last-used update on every request yet.
+- **Share status is direct-only.** A project or org share does not mark its
+  children as shared in `/shares/status`.
 - **Access tokens carry at most 20 organization role lists.** `RolesForUser`
   caps the `orgs` map so the token stays small. A user with more memberships
   loses access to the oldest organizations until the cap is raised.

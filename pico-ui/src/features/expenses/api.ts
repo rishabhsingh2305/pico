@@ -62,6 +62,14 @@ export async function listExpenses(
   return requestJSON<ExpensePage>(`/expenses?${query}`, { method: "GET" })
 }
 
+export function getExpense(orgId: string, expenseId: string): Promise<Expense> {
+  const query = new URLSearchParams({ orgId })
+  return requestJSON<Expense>(
+    `/expenses/${encodeURIComponent(expenseId)}?${query}`,
+    { method: "GET" }
+  )
+}
+
 export function summarizeExpenses(
   params: SummarizeExpensesParams
 ): Promise<ExpenseSummary> {

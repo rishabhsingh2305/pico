@@ -18,6 +18,7 @@ import { ApiError } from "@/lib/api-client"
 
 type ExpensesContextValue = {
   orgId: string
+  isOwner: boolean
 }
 
 const ExpensesContext = createContext<ExpensesContextValue | null>(null)
@@ -25,7 +26,7 @@ const ExpensesContext = createContext<ExpensesContextValue | null>(null)
 type ExpensesState =
   | { status: "checking" }
   | { status: "creating" }
-  | { status: "ready"; orgId: string }
+  | { status: "ready"; orgId: string; isOwner: boolean }
   | { status: "error"; message: string }
 
 export function ExpensesProvider() {
@@ -47,7 +48,11 @@ export function ExpensesProvider() {
     })
       .then((org) => {
         if (!cancelled) {
-          setState({ status: "ready", orgId: org.id })
+          setState({
+            status: "ready",
+            orgId: org.id,
+            isOwner: org.userId === session.userId,
+          })
         }
       })
       .catch(async (error: unknown) => {
@@ -95,7 +100,9 @@ export function ExpensesProvider() {
   }
 
   return (
-    <ExpensesContext.Provider value={{ orgId: state.orgId }}>
+    <ExpensesContext.Provider
+      value={{ orgId: state.orgId, isOwner: state.isOwner }}
+    >
       <Outlet />
     </ExpensesContext.Provider>
   )

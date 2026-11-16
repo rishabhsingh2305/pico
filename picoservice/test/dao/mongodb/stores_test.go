@@ -16,7 +16,7 @@ import (
 	"picoservice/internal/entities"
 )
 
-var integrationCollections = []string{"users", "orgs", "memberships", "projects", "expenses"}
+var integrationCollections = []string{"users", "orgs", "memberships", "projects", "expenses", "credentials"}
 
 func TestStoresIntegration(t *testing.T) {
 	uri := os.Getenv("MONGODB_TEST_URI")

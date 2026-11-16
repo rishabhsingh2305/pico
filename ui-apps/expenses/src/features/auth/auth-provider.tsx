@@ -55,7 +55,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
       .then((response) => {
         if (!cancelled) {
           setAuthToken(response.accessToken)
-          setSession(sessionFromUser(response.user))
+          setSession(sessionFromUser(response.user, response.orgs))
         }
       })
       .catch(() => {
@@ -81,7 +81,7 @@ export function AuthProvider({ children }: AuthProviderProps) {
     if (response.refreshToken) {
       setRefreshToken(response.refreshToken)
     }
-    setSession(sessionFromUser(response.user))
+    setSession(sessionFromUser(response.user, response.orgs))
     setStatus("ready")
   }, [])
 

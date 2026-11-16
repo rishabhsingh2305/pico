@@ -5,7 +5,7 @@
 pico-ui is the browser client for the picoservice Go API. It is a React single
 page application built with Vite. The current features are account signup,
 login, email verification, an organization dashboard, organizations, projects,
-and project debits and credits.
+project debits and credits, and read-only public shares.
 
 ```text
 browser
@@ -16,7 +16,7 @@ browser
   -> picoservice Lambda Function URL
   -> POST /users, POST /auth/login, POST /auth/logout, GET /auth/session,
      POST /auth/verify-email, GET/POST /orgs, GET/POST /projects,
-     GET/POST/DELETE /expenses, GET /expenses/summary
+     GET/POST/DELETE /expenses, GET /expenses/summary, share management routes
   -> JSON response
 ```
 
@@ -106,6 +106,14 @@ src/
 │   │       ├── orgs-page.tsx
 │   │       ├── org-detail-page.tsx
 │   │       └── project-detail-page.tsx
+│   ├── sharing/
+│   │   ├── api.ts                   # Create, list, status, and revoke shares
+│   │   ├── types.ts                 # Share credential and status shapes
+│   │   ├── components/
+│   │   │   ├── share-dialog.tsx
+│   │   │   └── public-share-badge.tsx
+│   │   └── pages/
+│   │       └── shared-page.tsx      # Public read-only view
 │   └── projects/
 │       ├── api.ts                   # GET/POST/PATCH projects
 │       ├── error-message.ts         # Safe project error mapping
@@ -672,6 +680,7 @@ Organization errors:
 - `/orgs/:orgId` — project list for an organization
 - `/orgs/:orgId/dashboard` — organization dashboard
 - `/orgs/:orgId/projects/:projectId` — project expenses
+- `/shared` — public read-only view opened by a share link
 - `/` — redirects to `/orgs` when authenticated, otherwise `/login`
 - `*` — redirects through `/`
 

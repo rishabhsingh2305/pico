@@ -90,6 +90,9 @@ func (c *ExpenseController) List(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, r, http.StatusBadRequest, message)
 		return
 	}
+	if isShareIdentity(id) && id.Share.ResourceType == entities.CredentialResourceProject {
+		projectIDs = []string{id.Share.ProjectID}
+	}
 
 	result, err := c.service.List(r.Context(), services.ListExpensesInput{
 		OrgID:      id.OrgID,
@@ -110,7 +113,7 @@ func (c *ExpenseController) List(w http.ResponseWriter, r *http.Request) {
 		NextOffset: result.NextOffset,
 	}
 	for _, expense := range result.Items {
-		response.Items = append(response.Items, expenseResponseFrom(expense))
+		response.Items = append(response.Items, expenseResponseFor(expense, isShareIdentity(id)))
 	}
 	httpx.WriteJSON(w, r, http.StatusOK, response)
 }
@@ -126,6 +129,9 @@ func (c *ExpenseController) Summarize(w http.ResponseWriter, r *http.Request) {
 	if message != "" {
 		httpx.WriteError(w, r, http.StatusBadRequest, message)
 		return
+	}
+	if isShareIdentity(id) && id.Share.ResourceType == entities.CredentialResourceProject {
+		projectIDs = []string{id.Share.ProjectID}
 	}
 
 	groups, err := c.service.Summarize(r.Context(), services.SummarizeExpensesInput{
@@ -166,7 +172,11 @@ func (c *ExpenseController) Get(w http.ResponseWriter, r *http.Request) {
 		c.writeError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, r, http.StatusOK, expenseResponseFrom(expense))
+	if isShareIdentity(id) && !id.Share.AllowsExpense(expense) {
+		httpx.WriteError(w, r, http.StatusNotFound, "expense not found")
+		return
+	}
+	httpx.WriteJSON(w, r, http.StatusOK, expenseResponseFor(expense, isShareIdentity(id)))
 }
 
 // Update handles PATCH /expenses/{expenseID}.
@@ -292,7 +302,7 @@ type updateExpenseRequest struct {
 type expenseResponse struct {
 	ID          string               `json:"id"`
 	OrgID       string               `json:"orgId"`
-	UserID      string               `json:"userId"`
+	UserID      string               `json:"userId,omitempty"`
 	ProjectID   string               `json:"projectId"`
 	Type        entities.ExpenseType `json:"type"`
 	Amount      int64                `json:"amount"`
@@ -320,6 +330,14 @@ type expenseSummaryItem struct {
 
 type expenseSummaryResponse struct {
 	Items []expenseSummaryItem `json:"items"`
+}
+
+func expenseResponseFor(expense entities.Expense, shared bool) expenseResponse {
+	response := expenseResponseFrom(expense)
+	if shared {
+		response.UserID = ""
+	}
+	return response
 }
 
 func expenseResponseFrom(expense entities.Expense) expenseResponse {

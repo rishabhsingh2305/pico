@@ -171,7 +171,11 @@ export const API_SECTIONS: ApiSection[] = [
   "tokenType": "Bearer",
   "user": ${userExample.replace(/\n/g, "\n  ")},
   "expiresAt": "2026-01-02T13:00:00Z",
-  "refreshExpiresAt": "2026-02-01T12:30:00Z"
+  "refreshExpiresAt": "2026-02-01T12:30:00Z",
+  "orgs": {
+    "org-1": ["*"],
+    "org-2": ["org.viewer", "project.viewer", "expense.viewer"]
+  }
 }`,
         },
         errors: [
@@ -241,7 +245,11 @@ export const API_SECTIONS: ApiSection[] = [
   "accessToken": "eyJ...",
   "tokenType": "Bearer",
   "user": ${userExample.replace(/\n/g, "\n  ")},
-  "expiresAt": "2026-01-02T13:00:00Z"
+  "expiresAt": "2026-01-02T13:00:00Z",
+  "orgs": {
+    "org-1": ["*"],
+    "org-2": ["org.viewer", "project.viewer", "expense.viewer"]
+  }
 }`,
         },
         errors: [
@@ -659,6 +667,200 @@ export const API_SECTIONS: ApiSection[] = [
           "404 — organization or membership not found",
           "409 — attempting to remove the owner",
         ],
+      },
+    ],
+  },
+  {
+    id: "sharing",
+    title: "Sharing",
+    description:
+      "Share links are opaque, read-only credentials scoped to an organization, project, or expense. The raw token is returned once. Recipients send Authorization: Share <token> on the existing read routes.",
+    endpoints: [
+      {
+        id: "shares-create",
+        method: "POST",
+        path: "/orgs/{orgID}/shares?orgId=...",
+        title: "Create a share link",
+        summary:
+          "Creates a read-only link for an organization, project, or expense. Requires shares.create.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam],
+        requestBody: `{
+  "resourceType": "project",
+  "resourceId": "project-1",
+  "name": "Client review",
+  "expiresAt": "2026-12-31T23:59:59Z"
+}`,
+        response: {
+          status: 201,
+          description:
+            "Share created. token and sharePath are returned only once.",
+          body: `{
+  "id": "cred-1",
+  "kind": "share",
+  "orgId": "org-1",
+  "resourceType": "project",
+  "resourceId": "project-1",
+  "projectId": "project-1",
+  "scopes": ["orgs.get", "projects.get", "expenses.list"],
+  "createdAt": "2026-11-16T10:00:00Z",
+  "expiresAt": "2026-12-31T23:59:59Z",
+  "status": "active",
+  "token": "pico_share_...",
+  "sharePath": "/shared?orgId=org-1&projectId=project-1&resourceId=project-1&resourceType=project#share=pico_share_..."
+}`,
+        },
+        errors: [
+          "400 — invalid resourceType, resourceId, expiry, or name",
+          "403 — missing shares.create",
+          "404 — organization, project, or expense not found",
+        ],
+        notes: [
+          "resourceType is org, project, or expense.",
+          "Scopes are derived server-side.",
+          "expiresAt defaults to 30 days and is capped at 365 days.",
+        ],
+      },
+      {
+        id: "shares-list",
+        method: "GET",
+        path: "/orgs/{orgID}/shares?orgId=...&limit=20&offset=0",
+        title: "List share links",
+        summary: "Lists share metadata. Raw tokens are never returned.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam, limitParam, offsetParam],
+        response: {
+          status: 200,
+          description: "Share metadata without tokens.",
+          body: `{\n  "items": []\n}`,
+        },
+        errors: ["403 — missing shares.list"],
+      },
+      {
+        id: "shares-status",
+        method: "GET",
+        path: "/orgs/{orgID}/shares/status?orgId=...&resourceType=expense&resourceIds=...",
+        title: "Check share status",
+        summary: "Returns active share counts for a page of resource IDs.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [
+          orgIdParam,
+          {
+            name: "resourceType",
+            required: true,
+            description: "org, project, or expense.",
+          },
+          {
+            name: "resourceIds",
+            required: true,
+            description: "Comma-separated IDs, at most 100.",
+          },
+        ],
+        response: {
+          status: 200,
+          description:
+            "Active shares per requested resource. Missing IDs are not shared.",
+          body: `{\n  "resourceType": "expense",\n  "items": [\n    { "resourceId": "expense-42", "activeCount": 1, "expiresAt": "2026-12-31T23:59:59Z" }\n  ]\n}`,
+        },
+        errors: [
+          "400 — missing or invalid filters",
+          "403 — missing shares.status",
+        ],
+      },
+      {
+        id: "shares-credentials",
+        method: "GET",
+        path: "/orgs/{orgID}/credentials?orgId=...&kind=share&resourceType=...&resourceIds=...&active=true",
+        title: "Filter credentials",
+        summary:
+          "Filters shares and future API keys by kind, resource type, resource IDs, and active state.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [
+          orgIdParam,
+          {
+            name: "kind",
+            required: false,
+            description: "share (default) or api_key.",
+          },
+          {
+            name: "resourceType",
+            required: false,
+            description: "org, project, or expense; share credentials only.",
+          },
+          {
+            name: "resourceIds",
+            required: false,
+            description: "Comma-separated IDs, at most 100.",
+          },
+          {
+            name: "active",
+            required: false,
+            description: "true returns only active credentials.",
+          },
+        ],
+        response: {
+          status: 200,
+          description: "Matching credential metadata without tokens.",
+          body: `{\n  "items": []\n}`,
+        },
+        errors: [
+          "400 — invalid kind or filters",
+          "403 — missing shares.credentials",
+        ],
+      },
+      {
+        id: "shares-revoke",
+        method: "DELETE",
+        path: "/orgs/{orgID}/shares/{shareID}?orgId=...",
+        title: "Revoke a share link",
+        summary: "Revokes a link immediately. Requires shares.revoke.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+          {
+            name: "shareID",
+            required: true,
+            description: "Credential MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam],
+        response: {
+          status: 204,
+          description: "Revoked. No response body.",
+        },
+        errors: ["403 — missing shares.revoke", "404 — share not found"],
       },
     ],
   },

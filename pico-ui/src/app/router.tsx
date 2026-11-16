@@ -14,6 +14,7 @@ import { StyleTilePage } from "@/features/design-system/pages/style-tile-page"
 import { OrgDetailPage } from "@/features/orgs/pages/org-detail-page"
 import { OrgsPage } from "@/features/orgs/pages/orgs-page"
 import { ProjectDetailPage } from "@/features/orgs/pages/project-detail-page"
+import { SharedPage } from "@/features/sharing/pages/shared-page"
 
 function HomeRedirect() {
   const { session, status } = useAuth()
@@ -32,6 +33,7 @@ export function AppRouter() {
       <Route path="/verify-email" element={<VerifyEmailPage />} />
       <Route path="/api-docs" element={<ApiDocsPage />} />
       <Route path="/design" element={<StyleTilePage />} />
+      <Route path="/shared" element={<SharedPage />} />
       <Route element={<RequireSession />}>
         <Route path="/orgs" element={<OrgsPage />} />
         <Route path="/orgs/:orgId/dashboard" element={<OrgDashboardPage />} />

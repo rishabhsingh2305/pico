@@ -39,3 +39,14 @@ export function normalizeTags(raw: string[]): NormalizeTagsResult {
 
   return { ok: true, tags }
 }
+
+export function unusedTags(
+  availableTags: string[],
+  selectedTags: string[]
+): string[] {
+  const selected = new Set(selectedTags.map((tag) => tag.trim().toLowerCase()))
+  return availableTags.filter((tag) => {
+    const value = tag.trim()
+    return value !== "" && !selected.has(value.toLowerCase())
+  })
+}

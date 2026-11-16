@@ -4,14 +4,19 @@ import { ChevronRightIcon, FolderIcon } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
 import { EditProjectTagsDialog } from "@/features/projects/components/edit-project-tags-dialog"
+import { PublicShareBadge } from "@/features/sharing/components/public-share-badge"
+import { ShareDialog } from "@/features/sharing/components/share-dialog"
 import type { Project } from "@/features/projects/types"
 
 type ProjectCardProps = {
   orgId: string
   project: Project
   activeTags: string[]
+  shared?: boolean
+  canShare?: boolean
   onToggleTag: (tag: string) => void
   onTagsUpdated: () => void
+  onShareChanged?: () => void
   onSessionInvalid: () => void
 }
 
@@ -19,8 +24,11 @@ export function ProjectCard({
   orgId,
   project,
   activeTags,
+  shared = false,
+  canShare = false,
   onToggleTag,
   onTagsUpdated,
+  onShareChanged,
   onSessionInvalid,
 }: ProjectCardProps) {
   return (
@@ -49,6 +57,17 @@ export function ProjectCard({
           </Link>
 
           <div className="flex shrink-0 items-center gap-1">
+            {shared ? <PublicShareBadge /> : null}
+            {canShare ? (
+              <ShareDialog
+                orgId={orgId}
+                resourceType="project"
+                resourceId={project.id}
+                resourceName={project.name}
+                onChanged={onShareChanged}
+                onSessionInvalid={onSessionInvalid}
+              />
+            ) : null}
             <EditProjectTagsDialog
               orgId={orgId}
               project={project}
