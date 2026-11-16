@@ -23,10 +23,6 @@ func (c *Client) EnsureIndexes(ctx context.Context) error {
 					Keys:    bson.D{{Key: "email", Value: 1}},
 					Options: options.Index().SetName("users_email_unique").SetUnique(true),
 				},
-				{
-					Keys:    bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}},
-					Options: options.Index().SetName("users_created_at"),
-				},
 			},
 		},
 		{

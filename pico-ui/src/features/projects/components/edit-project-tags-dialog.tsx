@@ -22,7 +22,6 @@ import { validateProjectTags } from "@/features/projects/validation"
 import { normalizeTags } from "@/lib/tags"
 
 type EditProjectTagsDialogProps = {
-  userId: string
   orgId: string
   project: Project
   onUpdated: () => void
@@ -30,7 +29,6 @@ type EditProjectTagsDialogProps = {
 }
 
 export function EditProjectTagsDialog({
-  userId,
   orgId,
   project,
   onUpdated,
@@ -73,7 +71,7 @@ export function EditProjectTagsDialog({
 
     setIsSubmitting(true)
     try {
-      await updateProjectTags(userId, orgId, project.id, normalizeTags(tags))
+      await updateProjectTags(orgId, project.id, normalizeTags(tags))
       setIsSubmitting(false)
       setOpen(false)
       onUpdated()

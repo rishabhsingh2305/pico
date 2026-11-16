@@ -255,52 +255,6 @@ func TestNewRequiresDependencies(t *testing.T) {
 	}
 }
 
-func TestAllowHeadersForParameterizedRoutes(t *testing.T) {
-	r := newTestRouter(t)
-
-	tests := []struct {
-		name      string
-		method    string
-		path      string
-		wantAllow string
-	}{
-		{name: "users collection", method: http.MethodPut, path: "/users", wantAllow: "GET, HEAD, POST"},
-		{name: "login", method: http.MethodGet, path: "/auth/login", wantAllow: "POST"},
-		{name: "logout", method: http.MethodGet, path: "/auth/logout", wantAllow: "POST"},
-		{name: "session", method: http.MethodPost, path: "/auth/session", wantAllow: "GET, HEAD"},
-		{name: "verify email", method: http.MethodGet, path: "/auth/verify-email", wantAllow: "POST"},
-		{name: "verify email otp", method: http.MethodGet, path: "/auth/verify-email/otp", wantAllow: "POST"},
-		{name: "resend verification", method: http.MethodGet, path: "/auth/verify-email/resend", wantAllow: "POST"},
-		{name: "user item", method: http.MethodPost, path: "/users/user-1", wantAllow: "GET, HEAD, PATCH"},
-		{name: "user password", method: http.MethodDelete, path: "/users/user-1/password", wantAllow: "POST"},
-		{name: "orgs collection", method: http.MethodDelete, path: "/orgs", wantAllow: "GET, HEAD, POST"},
-		{name: "org item", method: http.MethodDelete, path: "/orgs/org-1", wantAllow: "GET, HEAD, PATCH"},
-		{name: "members collection", method: http.MethodDelete, path: "/orgs/org-1/members", wantAllow: "GET, HEAD, POST"},
-		{name: "member item", method: http.MethodGet, path: "/orgs/org-1/members/member-1", wantAllow: "DELETE"},
-		{name: "projects collection", method: http.MethodDelete, path: "/projects", wantAllow: "GET, HEAD, POST"},
-		{name: "project item", method: http.MethodDelete, path: "/projects/project-1", wantAllow: "GET, HEAD, PATCH"},
-		{name: "expenses collection", method: http.MethodDelete, path: "/expenses", wantAllow: "GET, HEAD, POST"},
-		{name: "expense summary", method: http.MethodPost, path: "/expenses/summary", wantAllow: "GET, HEAD"},
-		{name: "expense item", method: http.MethodPost, path: "/expenses/expense-1", wantAllow: "GET, HEAD, PATCH, DELETE"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			req := httptest.NewRequest(tt.method, tt.path, nil)
-
-			r.ServeHTTP(rec, req)
-
-			if rec.Code != http.StatusMethodNotAllowed {
-				t.Fatalf("expected status %d, got %d", http.StatusMethodNotAllowed, rec.Code)
-			}
-			if got := rec.Header().Get(httpx.HeaderAllow); got != tt.wantAllow {
-				t.Fatalf("expected Allow %q, got %q", tt.wantAllow, got)
-			}
-		})
-	}
-}
-
 func TestVerificationRoutes(t *testing.T) {
 	r := newTestRouter(t)
 
@@ -361,101 +315,15 @@ func TestAuthRoutes(t *testing.T) {
 	}
 }
 
-func TestRequireAuthOnRoutes(t *testing.T) {
-	fakeServices := fakes.NewServices()
-	fakeServices.Users.Existing = map[string]bool{"user-1": true}
-	r := newRouter(t, fakeServices, stubPinger{})
-
-	tests := []struct {
-		name       string
-		path       string
-		wantStatus int
-	}{
-		{name: "missing", path: "/users", wantStatus: http.StatusUnauthorized},
-		{name: "unknown", path: "/users?userId=missing", wantStatus: http.StatusNotFound},
-		{name: "known", path: "/users?userId=user-1", wantStatus: http.StatusOK},
+func walkKey(method, route string) string {
+	if route != "/" {
+		route = strings.TrimSuffix(route, "/")
 	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			rec := httptest.NewRecorder()
-			r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
-
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("expected status %d, got %d", tt.wantStatus, rec.Code)
-			}
-		})
-	}
-}
-
-func TestRequireMemberOnProjects(t *testing.T) {
-	tests := []struct {
-		name       string
-		query      string
-		users      map[string]bool
-		orgs       map[string]bool
-		members    map[string]bool
-		wantStatus int
-	}{
-		{
-			name:       "missing identity",
-			wantStatus: http.StatusUnauthorized,
-		},
-		{
-			name:       "unknown user",
-			query:      "?orgId=org-1&userId=user-1",
-			users:      map[string]bool{},
-			orgs:       map[string]bool{"org-1": true},
-			members:    map[string]bool{"org-1/user-1": true},
-			wantStatus: http.StatusNotFound,
-		},
-		{
-			name:       "unknown org",
-			query:      "?orgId=org-1&userId=user-1",
-			users:      map[string]bool{"user-1": true},
-			orgs:       map[string]bool{},
-			members:    map[string]bool{"org-1/user-1": true},
-			wantStatus: http.StatusNotFound,
-		},
-		{
-			name:       "non-member",
-			query:      "?orgId=org-1&userId=user-1",
-			users:      map[string]bool{"user-1": true},
-			orgs:       map[string]bool{"org-1": true},
-			members:    map[string]bool{},
-			wantStatus: http.StatusForbidden,
-		},
-		{
-			name:       "member",
-			query:      "?orgId=org-1&userId=user-1",
-			users:      map[string]bool{"user-1": true},
-			orgs:       map[string]bool{"org-1": true},
-			members:    map[string]bool{"org-1/user-1": true},
-			wantStatus: http.StatusOK,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			fakeServices := fakes.NewServices()
-			fakeServices.Users.Existing = tt.users
-			fakeServices.Orgs.Existing = tt.orgs
-			fakeServices.Memberships.Existing = tt.members
-			r := newRouter(t, fakeServices, stubPinger{})
-
-			rec := httptest.NewRecorder()
-			r.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/projects"+tt.query, nil))
-
-			if rec.Code != tt.wantStatus {
-				t.Fatalf("expected status %d, got %d", tt.wantStatus, rec.Code)
-			}
-		})
-	}
+	return method + " " + route
 }
 
 func TestCreateOrgRoute(t *testing.T) {
 	fakeServices := fakes.NewServices()
-	fakeServices.Users.Existing = map[string]bool{"user-1": true}
 	fakeServices.Orgs.CreateFunc = func(_ context.Context, in services.CreateOrgInput) (entities.Org, error) {
 		if in.ActorID != "user-1" {
 			t.Fatalf("expected actor user-1, got %q", in.ActorID)
@@ -465,7 +333,8 @@ func TestCreateOrgRoute(t *testing.T) {
 	r := newRouter(t, fakeServices, stubPinger{})
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/orgs?userId=user-1", strings.NewReader(`{"name":"Acme"}`))
+	req := httptest.NewRequest(http.MethodPost, "/orgs", strings.NewReader(`{"name":"Acme"}`))
+	req.Header.Set("Authorization", "Bearer user-1")
 	r.ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusCreated {

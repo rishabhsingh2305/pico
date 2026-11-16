@@ -31,12 +31,11 @@ describe("listOrgs", () => {
       .mockResolvedValueOnce(jsonResponse({ items: [org] }))
     vi.stubGlobal("fetch", fetchMock)
 
-    await listOrgs("user-1")
+    await listOrgs()
 
     const [url] = fetchMock.mock.calls[0]
     const parsed = new URL(String(url), "http://localhost")
     expect(parsed.pathname).toBe("/api/orgs")
-    expect(parsed.searchParams.get("userId")).toBe("user-1")
     expect(parsed.searchParams.has("tags")).toBe(false)
   })
 
@@ -46,7 +45,7 @@ describe("listOrgs", () => {
       .mockResolvedValueOnce(jsonResponse({ items: [org] }))
     vi.stubGlobal("fetch", fetchMock)
 
-    await listOrgs("user-1", ["team", "finance"])
+    await listOrgs(["team", "finance"])
 
     const [url] = fetchMock.mock.calls[0]
     const parsed = new URL(String(url), "http://localhost")
@@ -61,13 +60,12 @@ describe("updateOrgTags", () => {
       .mockResolvedValueOnce(jsonResponse(org))
     vi.stubGlobal("fetch", fetchMock)
 
-    await updateOrgTags("user-1", "org-1", ["team", "ops"])
+    await updateOrgTags("org-1", ["team", "ops"])
 
     const [url, init] = fetchMock.mock.calls[0]
     const parsed = new URL(String(url), "http://localhost")
     expect(parsed.pathname).toBe("/api/orgs/org-1")
     expect(parsed.searchParams.get("orgId")).toBe("org-1")
-    expect(parsed.searchParams.get("userId")).toBe("user-1")
     expect(init?.method).toBe("PATCH")
     expect(new Headers(init?.headers).get("Content-Type")).toBe(
       "application/json"

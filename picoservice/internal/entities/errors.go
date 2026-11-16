@@ -38,6 +38,8 @@ var (
 	ErrAlreadyMember = errors.New("user is already a member")
 	// ErrCannotRemoveOwner is returned when the owner's membership is removed.
 	ErrCannotRemoveOwner = errors.New("cannot remove org owner")
+	// ErrCannotChangeOwner is returned when the owner's role is changed.
+	ErrCannotChangeOwner = errors.New("cannot change org owner role")
 	// ErrProjectNotFound is returned when a project does not exist in the
 	// caller's organization.
 	ErrProjectNotFound = errors.New("project not found")

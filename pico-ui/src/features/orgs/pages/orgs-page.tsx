@@ -45,7 +45,7 @@ function OrgsView({ session }: { session: Session }) {
   useEffect(() => {
     let cancelled = false
 
-    listOrgs(session.userId, tags)
+    listOrgs(tags)
       .then((items) => {
         if (!cancelled) {
           setOrgs(items)
@@ -216,7 +216,6 @@ function OrgsView({ session }: { session: Session }) {
 
           <aside className="order-1 lg:sticky lg:top-6 lg:order-2">
             <CreateOrgForm
-              userId={session.userId}
               onCreated={handleCreated}
               onSessionInvalid={handleSessionInvalid}
             />

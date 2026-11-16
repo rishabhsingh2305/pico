@@ -27,7 +27,6 @@ describe("listExpenses", () => {
     vi.stubGlobal("fetch", fetchMock)
 
     await listExpenses({
-      userId: "user-1",
       orgId: "org-1",
       tags: [],
       limit: 6,
@@ -48,7 +47,6 @@ describe("listExpenses", () => {
     vi.stubGlobal("fetch", fetchMock)
 
     await listExpenses({
-      userId: "user-1",
       orgId: "org-1",
       projectId: "project-1",
       tags: [],
@@ -70,7 +68,6 @@ describe("summarizeExpenses", () => {
     vi.stubGlobal("fetch", fetchMock)
 
     await summarizeExpenses({
-      userId: "user-1",
       orgId: "org-1",
       projectId: "project-1",
       tags: ["food", "travel"],
@@ -95,7 +92,6 @@ describe("summarizeExpenses", () => {
     vi.stubGlobal("fetch", fetchMock)
 
     await summarizeExpenses({
-      userId: "user-1",
       orgId: "org-1",
       projectIds: ["project-1", "project-2"],
       tags: [],

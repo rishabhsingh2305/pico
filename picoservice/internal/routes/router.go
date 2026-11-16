@@ -10,6 +10,7 @@ import (
 	"github.com/go-chi/chi/v5"
 	chimiddleware "github.com/go-chi/chi/v5/middleware"
 
+	"picoservice/internal/authz"
 	"picoservice/internal/controllers"
 	"picoservice/internal/middleware"
 )
@@ -17,7 +18,6 @@ import (
 // UserService is the user behavior required by the router.
 type UserService interface {
 	controllers.UserService
-	middleware.UserLookup
 }
 
 // AuthService is the authentication behavior required by the router.
@@ -29,13 +29,11 @@ type AuthService interface {
 // OrgService is the organization behavior required by the router.
 type OrgService interface {
 	controllers.OrgService
-	middleware.OrgLookup
 }
 
 // MembershipService is the membership behavior required by the router.
 type MembershipService interface {
 	controllers.MembershipService
-	middleware.MembershipLookup
 }
 
 // ProjectService is the project behavior required by the router.
@@ -58,6 +56,7 @@ type Deps struct {
 	Memberships    MembershipService
 	Projects       ProjectService
 	Expenses       ExpenseService
+	Policy         *authz.Policy
 	SecureCookies  bool
 	AllowedOrigins []string
 }
@@ -80,9 +79,9 @@ func New(deps Deps) (*chi.Mux, error) {
 	projectController := controllers.NewProjectController(logger, deps.Projects)
 	expenseController := controllers.NewExpenseController(logger, deps.Expenses)
 
-	requireAuth := middleware.RequireAuth(logger, deps.Users, deps.Auth)
-	requireMember := func(next http.Handler) http.Handler {
-		return requireAuth(middleware.RequireMember(logger, deps.Orgs, deps.Memberships)(next))
+	requireAuth := middleware.RequireAuth(deps.Auth)
+	requireOrg := func(next http.Handler) http.Handler {
+		return requireAuth(middleware.RequireOrgAccess(logger, deps.Policy)(next))
 	}
 
 	r := chi.NewRouter()
@@ -95,9 +94,9 @@ func New(deps Deps) (*chi.Mux, error) {
 	healthRoutes(r, logger, deps.Pinger)
 	r.Mount("/auth", authRoutes(userController, authController))
 	r.Mount("/users", userRoutes(userController, requireAuth))
-	r.Mount("/orgs", orgRoutes(orgController, membershipController, requireAuth, requireMember))
-	r.Mount("/projects", projectRoutes(projectController, requireMember))
-	r.Mount("/expenses", expenseRoutes(expenseController, requireMember))
+	r.Mount("/orgs", orgRoutes(orgController, membershipController, requireAuth, requireOrg))
+	r.Mount("/projects", projectRoutes(projectController, requireOrg))
+	r.Mount("/expenses", expenseRoutes(expenseController, requireOrg))
 
 	probe, err := newMethodProbe(r)
 	if err != nil {
@@ -128,6 +127,8 @@ func (d Deps) validate() error {
 		return errors.New("routes: project service is required")
 	case d.Expenses == nil:
 		return errors.New("routes: expense service is required")
+	case d.Policy == nil:
+		return errors.New("routes: authz policy is required")
 	default:
 		return nil
 	}

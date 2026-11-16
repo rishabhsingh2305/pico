@@ -18,6 +18,7 @@ import (
 type AuthService interface {
 	Login(ctx context.Context, email, password string) (services.LoginResult, error)
 	Session(ctx context.Context, token string) (entities.User, time.Time, error)
+	Refresh(ctx context.Context, token string) (services.LoginResult, error)
 }
 
 // AuthController serves login, logout, and session endpoints.
@@ -50,19 +51,60 @@ func (c *AuthController) Login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	c.writeAuthResponse(w, r, result)
+}
+
+// Refresh handles POST /auth/refresh. It accepts the refresh token in the JSON
+// body or the refresh cookie and rotates both tokens.
+func (c *AuthController) Refresh(w http.ResponseWriter, r *http.Request) {
+	token := refreshToken(w, r)
+	if token == "" {
+		httpx.WriteError(w, r, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	result, err := c.service.Refresh(r.Context(), token)
+	if err != nil {
+		if errors.Is(err, entities.ErrInvalidToken) {
+			middleware.ClearAuthCookie(w)
+			middleware.ClearRefreshCookie(w)
+		}
+		c.writeError(w, r, err)
+		return
+	}
+
+	c.writeAuthResponse(w, r, result)
+}
+
+func refreshToken(w http.ResponseWriter, r *http.Request) string {
+	var request refreshRequest
+	if err := httpx.DecodeJSON(w, r, &request); err == nil && request.RefreshToken != "" {
+		return request.RefreshToken
+	}
+	if cookie, err := r.Cookie(middleware.RefreshCookieName); err == nil {
+		return cookie.Value
+	}
+	return ""
+}
+
+func (c *AuthController) writeAuthResponse(w http.ResponseWriter, r *http.Request, result services.LoginResult) {
 	c.setAuthCookie(w, result.Token, result.ExpiresAt)
+	c.setRefreshCookie(w, result.RefreshToken, result.RefreshExpiresAt)
 	httpx.WriteJSON(w, r, http.StatusOK, authResponse{
-		AccessToken: result.Token,
-		TokenType:   "Bearer",
-		User:        userResponseFrom(result.User),
-		ExpiresAt:   result.ExpiresAt,
+		AccessToken:      result.Token,
+		TokenType:        "Bearer",
+		User:             userResponseFrom(result.User),
+		ExpiresAt:        result.ExpiresAt,
+		RefreshToken:     result.RefreshToken,
+		RefreshExpiresAt: &result.RefreshExpiresAt,
 	})
 }
 
-// Logout handles POST /auth/logout. Clearing the cookie is the only server-side
-// action because access tokens are stateless.
+// Logout handles POST /auth/logout. Clearing the cookies is the only
+// server-side action because access tokens are stateless.
 func (c *AuthController) Logout(w http.ResponseWriter, r *http.Request) {
 	middleware.ClearAuthCookie(w)
+	middleware.ClearRefreshCookie(w)
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -105,8 +147,16 @@ func accessToken(r *http.Request) string {
 }
 
 func (c *AuthController) setAuthCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+	c.setCookie(w, middleware.AuthCookieName, token, expiresAt)
+}
+
+func (c *AuthController) setRefreshCookie(w http.ResponseWriter, token string, expiresAt time.Time) {
+	c.setCookie(w, middleware.RefreshCookieName, token, expiresAt)
+}
+
+func (c *AuthController) setCookie(w http.ResponseWriter, name, token string, expiresAt time.Time) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     middleware.AuthCookieName,
+		Name:     name,
 		Value:    token,
 		Path:     "/",
 		HttpOnly: true,
@@ -142,9 +192,15 @@ type loginRequest struct {
 	Password string `json:"password"`
 }
 
+type refreshRequest struct {
+	RefreshToken string `json:"refreshToken"`
+}
+
 type authResponse struct {
-	AccessToken string       `json:"accessToken"`
-	TokenType   string       `json:"tokenType"`
-	User        userResponse `json:"user"`
-	ExpiresAt   time.Time    `json:"expiresAt"`
+	AccessToken      string       `json:"accessToken"`
+	TokenType        string       `json:"tokenType"`
+	User             userResponse `json:"user"`
+	ExpiresAt        time.Time    `json:"expiresAt"`
+	RefreshToken     string       `json:"refreshToken,omitempty"`
+	RefreshExpiresAt *time.Time   `json:"refreshExpiresAt,omitempty"`
 }

@@ -17,7 +17,12 @@ import {
 } from "@/features/auth/api"
 import { sessionFromUser, type Session } from "@/features/auth/session"
 import type { LoginInput } from "@/features/auth/types"
-import { clearAuthToken, getAuthToken, setAuthToken } from "@/lib/auth-token"
+import {
+  clearTokens,
+  getAuthToken,
+  setAuthToken,
+  setRefreshToken,
+} from "@/lib/auth-token"
 
 type AuthStatus = "loading" | "ready"
 
@@ -49,12 +54,13 @@ export function AuthProvider({ children }: AuthProviderProps) {
     fetchSession()
       .then((response) => {
         if (!cancelled) {
+          setAuthToken(response.accessToken)
           setSession(sessionFromUser(response.user))
         }
       })
       .catch(() => {
         if (!cancelled) {
-          clearAuthToken()
+          clearTokens()
           setSession(null)
         }
       })
@@ -72,12 +78,15 @@ export function AuthProvider({ children }: AuthProviderProps) {
   const login = useCallback(async (input: LoginInput) => {
     const response = await loginRequest(input)
     setAuthToken(response.accessToken)
+    if (response.refreshToken) {
+      setRefreshToken(response.refreshToken)
+    }
     setSession(sessionFromUser(response.user))
     setStatus("ready")
   }, [])
 
   const logout = useCallback(async () => {
-    clearAuthToken()
+    clearTokens()
     try {
       await logoutRequest()
     } catch {

@@ -44,7 +44,7 @@ func TestExpenseCreate(t *testing.T) {
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(
 		http.MethodPost,
-		"/expenses?orgId=org-1&userId=user-1",
+		"/expenses?orgId=org-1",
 		strings.NewReader(`{"projectId":"project-1","type":"credit","amount":100,"description":"Lunch","tags":[" food "],"spentAt":"2026-01-02T03:04:05Z"}`),
 	)
 	req = withIdentity(req, "org-1", "user-1")
@@ -76,7 +76,7 @@ func TestExpenseCreateValidation(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/expenses?orgId=org-1&userId=user-1", strings.NewReader(`{"projectId":"project-1","amount":0,"spentAt":"2026-01-02T03:04:05Z"}`))
+	req := httptest.NewRequest(http.MethodPost, "/expenses?orgId=org-1", strings.NewReader(`{"projectId":"project-1","amount":0,"spentAt":"2026-01-02T03:04:05Z"}`))
 	req = withIdentity(req, "org-1", "user-1")
 
 	controllers.NewExpenseController(testLogger(), service).Create(rec, req)
@@ -86,7 +86,7 @@ func TestExpenseCreateValidation(t *testing.T) {
 
 func TestExpenseListBadTime(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/expenses?orgId=org-1&userId=user-1&from=not-a-time", nil)
+	req := httptest.NewRequest(http.MethodGet, "/expenses?orgId=org-1&from=not-a-time", nil)
 	req = withIdentity(req, "org-1", "user-1")
 
 	controllers.NewExpenseController(testLogger(), &fakes.ExpenseService{}).List(rec, req)
@@ -105,7 +105,7 @@ func TestExpenseListSingleTagFallback(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/expenses?orgId=org-1&userId=user-1&tags=&tag=travel", nil)
+	req := httptest.NewRequest(http.MethodGet, "/expenses?orgId=org-1&tags=&tag=travel", nil)
 	req = withIdentity(req, "org-1", "user-1")
 
 	controllers.NewExpenseController(testLogger(), service).List(rec, req)
@@ -135,7 +135,7 @@ func TestExpenseListResponse(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/expenses?orgId=org-1&userId=user-1&projectId=project-1&tags=food,travel&limit=1&offset=2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/expenses?orgId=org-1&projectId=project-1&tags=food,travel&limit=1&offset=2", nil)
 	req = withIdentity(req, "org-1", "user-1")
 
 	controllers.NewExpenseController(testLogger(), service).List(rec, req)
@@ -180,7 +180,7 @@ func TestExpenseSummaryResponse(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/expenses/summary?orgId=org-1&userId=user-1&projectIds=project-1,project-2&tags=food,travel", nil)
+	req := httptest.NewRequest(http.MethodGet, "/expenses/summary?orgId=org-1&projectIds=project-1,project-2&tags=food,travel", nil)
 	req = withIdentity(req, "org-1", "user-1")
 
 	controllers.NewExpenseController(testLogger(), service).Summarize(rec, req)
@@ -224,7 +224,7 @@ func TestExpenseSummaryResponse(t *testing.T) {
 
 func TestExpenseSummaryRejectsMixedProjectFilters(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/expenses/summary?orgId=org-1&userId=user-1&projectId=project-1&projectIds=project-2", nil)
+	req := httptest.NewRequest(http.MethodGet, "/expenses/summary?orgId=org-1&projectId=project-1&projectIds=project-2", nil)
 	req = withIdentity(req, "org-1", "user-1")
 
 	controllers.NewExpenseController(testLogger(), &fakes.ExpenseService{}).Summarize(rec, req)
@@ -234,7 +234,7 @@ func TestExpenseSummaryRejectsMixedProjectFilters(t *testing.T) {
 
 func TestExpenseSummaryBadTime(t *testing.T) {
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/expenses/summary?orgId=org-1&userId=user-1&to=not-a-time", nil)
+	req := httptest.NewRequest(http.MethodGet, "/expenses/summary?orgId=org-1&to=not-a-time", nil)
 	req = withIdentity(req, "org-1", "user-1")
 
 	controllers.NewExpenseController(testLogger(), &fakes.ExpenseService{}).Summarize(rec, req)
@@ -253,7 +253,7 @@ func TestExpenseDelete(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodDelete, "/expenses/expense-1?orgId=org-1&userId=user-1", nil)
+	req := httptest.NewRequest(http.MethodDelete, "/expenses/expense-1?orgId=org-1", nil)
 	req = withIdentity(req, "org-1", "user-1")
 	req = withRouteParams(req, map[string]string{"expenseID": "expense-1"})
 
@@ -272,7 +272,7 @@ func TestExpenseUpdateNotFound(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/expenses/missing?orgId=org-1&userId=user-1", strings.NewReader(`{"amount":200}`))
+	req := httptest.NewRequest(http.MethodPatch, "/expenses/missing?orgId=org-1", strings.NewReader(`{"amount":200}`))
 	req = withIdentity(req, "org-1", "user-1")
 	req = withRouteParams(req, map[string]string{"expenseID": "missing"})
 
@@ -292,7 +292,7 @@ func TestExpenseUpdateForwardsType(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/expenses/expense-1?orgId=org-1&userId=user-1", strings.NewReader(`{"type":"credit"}`))
+	req := httptest.NewRequest(http.MethodPatch, "/expenses/expense-1?orgId=org-1", strings.NewReader(`{"type":"credit"}`))
 	req = withIdentity(req, "org-1", "user-1")
 	req = withRouteParams(req, map[string]string{"expenseID": "expense-1"})
 

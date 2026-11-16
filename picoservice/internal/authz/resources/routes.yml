@@ -1,0 +1,147 @@
+# Route policy. Each leaf key is a unit permission: <group>.<action>.
+#
+# method: HTTP method. Never declare HEAD; HEAD follows the GET policy.
+# path:   chi route pattern without a query string.
+# scope:  public (no identity), user (identity only), org (identity plus an
+#         organization role and the unit permission).
+#
+# Every route in the chi router must appear here, and every entry here must
+# exist in the router. See test/authz and test/routes.
+endpoints:
+  health:
+    ping:
+      method: GET
+      path: /ping
+      scope: public
+    ready:
+      method: GET
+      path: /ready
+      scope: public
+
+  auth:
+    login:
+      method: POST
+      path: /auth/login
+      scope: public
+    refresh:
+      method: POST
+      path: /auth/refresh
+      scope: public
+    logout:
+      method: POST
+      path: /auth/logout
+      scope: public
+    session:
+      method: GET
+      path: /auth/session
+      scope: user
+    verify_email:
+      method: POST
+      path: /auth/verify-email
+      scope: public
+    verify_email_otp:
+      method: POST
+      path: /auth/verify-email/otp
+      scope: public
+    verify_email_resend:
+      method: POST
+      path: /auth/verify-email/resend
+      scope: public
+
+  users:
+    create:
+      method: POST
+      path: /users
+      scope: public
+    me:
+      method: GET
+      path: /users/me
+      scope: user
+    update_me:
+      method: PATCH
+      path: /users/me
+      scope: user
+    password:
+      method: POST
+      path: /users/me/password
+      scope: user
+
+  orgs:
+    list:
+      method: GET
+      path: /orgs
+      scope: user
+    create:
+      method: POST
+      path: /orgs
+      scope: user
+    get:
+      method: GET
+      path: /orgs/{orgID}
+      scope: org
+    update:
+      method: PATCH
+      path: /orgs/{orgID}
+      scope: org
+
+  members:
+    list:
+      method: GET
+      path: /orgs/{orgID}/members
+      scope: org
+    add:
+      method: POST
+      path: /orgs/{orgID}/members
+      scope: org
+    update:
+      method: PATCH
+      path: /orgs/{orgID}/members/{memberUserID}
+      scope: org
+    remove:
+      method: DELETE
+      path: /orgs/{orgID}/members/{memberUserID}
+      scope: org
+
+  projects:
+    list:
+      method: GET
+      path: /projects
+      scope: org
+    create:
+      method: POST
+      path: /projects
+      scope: org
+    get:
+      method: GET
+      path: /projects/{projectID}
+      scope: org
+    update:
+      method: PATCH
+      path: /projects/{projectID}
+      scope: org
+
+  expenses:
+    list:
+      method: GET
+      path: /expenses
+      scope: org
+    create:
+      method: POST
+      path: /expenses
+      scope: org
+    summary:
+      method: GET
+      path: /expenses/summary
+      scope: org
+    get:
+      method: GET
+      path: /expenses/{expenseID}
+      scope: org
+    update:
+      method: PATCH
+      path: /expenses/{expenseID}
+      scope: org
+    delete:
+      method: DELETE
+      path: /expenses/{expenseID}
+      scope: org

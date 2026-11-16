@@ -12,15 +12,11 @@ func userRoutes(h *controllers.UserController, requireUser func(http.Handler) ht
 	r := chi.NewRouter()
 
 	r.Post("/", h.Create)
-	r.With(requireUser).Get("/", h.List)
-	r.With(requireUser).Head("/", h.List)
 
-	r.Route("/{userID}", func(r chi.Router) {
-		r.With(requireUser).Get("/", h.Get)
-		r.With(requireUser).Head("/", h.Get)
-		r.With(requireUser).Patch("/", h.Update)
-		r.With(requireUser).Post("/password", h.ChangePassword)
-	})
+	r.With(requireUser).Get("/me", h.Get)
+	r.With(requireUser).Head("/me", h.Get)
+	r.With(requireUser).Patch("/me", h.Update)
+	r.With(requireUser).Post("/me/password", h.ChangePassword)
 
 	return r
 }

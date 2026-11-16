@@ -39,7 +39,7 @@ func TestOrgCreate(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/orgs?userId=user-1", strings.NewReader(`{"name":"Acme","tags":["team","finance"]}`))
+	req := httptest.NewRequest(http.MethodPost, "/orgs", strings.NewReader(`{"name":"Acme","tags":["team","finance"]}`))
 	req = withIdentity(req, "", "user-1")
 
 	controllers.NewOrgController(testLogger(), service).Create(rec, req)
@@ -53,23 +53,6 @@ func TestOrgCreate(t *testing.T) {
 	if !strings.Contains(rec.Body.String(), `"tags":["team","finance"]`) {
 		t.Fatalf("expected tags in response, got %q", rec.Body.String())
 	}
-}
-
-func TestOrgUpdateForbidden(t *testing.T) {
-	service := &fakes.OrgService{
-		UpdateFunc: func(context.Context, services.UpdateOrgInput) (entities.Org, error) {
-			return entities.Org{}, entities.ErrForbidden
-		},
-	}
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/orgs/org-1", strings.NewReader(`{"name":"New"}`))
-	req = withIdentity(req, "org-1", "user-1")
-	req = withRouteParams(req, map[string]string{"orgID": "org-1"})
-
-	controllers.NewOrgController(testLogger(), service).Update(rec, req)
-
-	assertJSONError(t, rec, http.StatusForbidden, "forbidden")
 }
 
 func TestOrgUpdateTags(t *testing.T) {
@@ -130,7 +113,7 @@ func TestOrgList(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/orgs?userId=user-1&tags=team,finance", nil)
+	req := httptest.NewRequest(http.MethodGet, "/orgs?tags=team,finance", nil)
 	req = withIdentity(req, "", "user-1")
 
 	controllers.NewOrgController(testLogger(), service).List(rec, req)

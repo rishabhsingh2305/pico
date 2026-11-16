@@ -10,6 +10,7 @@ func authRoutes(users *controllers.UserController, auth *controllers.AuthControl
 	r := chi.NewRouter()
 
 	r.Post("/login", auth.Login)
+	r.Post("/refresh", auth.Refresh)
 	r.Post("/logout", auth.Logout)
 	r.Get("/session", auth.Session)
 	r.Head("/session", auth.Session)

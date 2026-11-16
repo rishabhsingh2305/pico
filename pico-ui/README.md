@@ -72,9 +72,10 @@ backend sends a verification email containing a link and a 6-digit code.
 Clicking the link opens `/verify-email#token=...` in the UI, which calls the
 verification API. The UI currently uses the link; code verification is available
 through `POST /auth/verify-email/otp`. After
-verification, sign in at `/login`; the backend returns an access token, which
-the UI stores in `localStorage` and sends as `Authorization: Bearer`. The UI
-restores the session from `/auth/session` on reload. Then
+verification, sign in at `/login`; the backend returns an access token and a
+refresh token, which the UI stores in `localStorage`. Requests send the access
+token as `Authorization: Bearer`; a `401` refreshes the pair once and retries.
+The UI restores the session from `/auth/session` on reload. Then
 continue to `/orgs` to create and list organizations. Organizations accept tags
 at creation, show them on their cards,
 and can be filtered with a tag toolbar; owners can edit tags from the card. Open

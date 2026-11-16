@@ -1,21 +1,17 @@
-import { requestJSON } from "@/lib/api-client"
+import { refreshTokens, requestJSON } from "@/lib/api-client"
 import type { CreateOrgInput, Org } from "@/features/orgs/types"
 
 const ORG_LIST_LIMIT = 100
 
-export async function getOrg(userId: string, orgId: string): Promise<Org> {
-  const query = new URLSearchParams({ orgId, userId })
+export async function getOrg(orgId: string): Promise<Org> {
+  const query = new URLSearchParams({ orgId })
   return requestJSON<Org>(`/orgs/${encodeURIComponent(orgId)}?${query}`, {
     method: "GET",
   })
 }
 
-export async function listOrgs(
-  userId: string,
-  tags: string[] = []
-): Promise<Org[]> {
+export async function listOrgs(tags: string[] = []): Promise<Org[]> {
   const query = new URLSearchParams({
-    userId,
     limit: String(ORG_LIST_LIMIT),
   })
   if (tags.length > 0) {
@@ -27,21 +23,20 @@ export async function listOrgs(
   return response.items
 }
 
-export function createOrg(userId: string, input: CreateOrgInput): Promise<Org> {
-  const query = new URLSearchParams({ userId })
-  return requestJSON<Org>(`/orgs?${query}`, {
+export async function createOrg(input: CreateOrgInput): Promise<Org> {
+  const org = await requestJSON<Org>("/orgs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(input),
   })
+  // The new organization is not in the current access token yet. Refresh so
+  // the owner wildcard is available before the UI navigates to it.
+  await refreshTokens()
+  return org
 }
 
-export function updateOrgTags(
-  userId: string,
-  orgId: string,
-  tags: string[]
-): Promise<Org> {
-  const query = new URLSearchParams({ orgId, userId })
+export function updateOrgTags(orgId: string, tags: string[]): Promise<Org> {
+  const query = new URLSearchParams({ orgId })
   return requestJSON<Org>(`/orgs/${encodeURIComponent(orgId)}?${query}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },

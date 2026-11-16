@@ -178,25 +178,47 @@ func (s *OrgStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// Exists reports whether an organization exists.
-func (s *OrgStore) Exists(ctx context.Context, id string) (bool, error) {
-	objectID, err := bson.ObjectIDFromHex(id)
-	if err != nil {
-		return false, nil
+// OwnerIDs returns the owners of the given organizations, keyed by org ID.
+// Invalid IDs are ignored.
+func (s *OrgStore) OwnerIDs(ctx context.Context, orgIDs []string) (map[string]string, error) {
+	owners := make(map[string]string, len(orgIDs))
+	objectIDs := make([]bson.ObjectID, 0, len(orgIDs))
+	for _, id := range orgIDs {
+		objectID, err := bson.ObjectIDFromHex(id)
+		if err != nil {
+			continue
+		}
+		objectIDs = append(objectIDs, objectID)
+	}
+	if len(objectIDs) == 0 {
+		return owners, nil
 	}
 
-	err = s.collection.FindOne(
+	cursor, err := s.collection.Find(
 		ctx,
-		bson.M{"_id": objectID},
-		options.FindOne().SetProjection(bson.M{"_id": 1}),
-	).Err()
-	if errors.Is(err, mongo.ErrNoDocuments) {
-		return false, nil
-	}
+		bson.M{"_id": bson.M{"$in": objectIDs}},
+		options.Find().SetProjection(bson.M{"userId": 1}),
+	)
 	if err != nil {
-		return false, fmt.Errorf("check org: %w", err)
+		return nil, fmt.Errorf("find org owners: %w", err)
 	}
-	return true, nil
+
+	var documents []struct {
+		ID     bson.ObjectID `bson:"_id"`
+		UserID string        `bson:"userId"`
+	}
+	if err := cursor.All(ctx, &documents); err != nil {
+		_ = cursor.Close(ctx)
+		return nil, fmt.Errorf("decode org owners: %w", err)
+	}
+	if err := cursor.Close(ctx); err != nil {
+		return nil, fmt.Errorf("close org owners cursor: %w", err)
+	}
+
+	for _, document := range documents {
+		owners[document.ID.Hex()] = document.UserID
+	}
+	return owners, nil
 }
 
 // OwnerID returns the owner of an organization. Found is false when the org

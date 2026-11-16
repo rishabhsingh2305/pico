@@ -1,0 +1,31 @@
+# Feature role policy. Each feature declares roles and the unit permissions
+# granted by each role. Role names in access tokens are "<feature>.<role>", for
+# example "expense.editor".
+#
+# Rules validated at startup:
+#   - only the org, member, project, and expense features are allowed
+#   - viewer is required; editor and admin are optional
+#   - viewer permissions must be a subset of editor and admin
+#   - editor permissions must be a subset of admin
+#   - every org-scope route permission must be granted by at least one role
+#
+# The organization owner is implicit: token issuance writes "*" and the owner
+# must not be declared here.
+features:
+  org:
+    viewer: [orgs.get]
+    admin: [orgs.get, orgs.update]
+
+  member:
+    viewer: [members.list]
+    admin: [members.list, members.add, members.update, members.remove]
+
+  project:
+    viewer: [projects.list, projects.get]
+    editor: [projects.list, projects.get, projects.create, projects.update]
+    admin: [projects.list, projects.get, projects.create, projects.update]
+
+  expense:
+    viewer: [expenses.list, expenses.summary, expenses.get]
+    editor: [expenses.list, expenses.summary, expenses.get, expenses.create, expenses.update]
+    admin: [expenses.list, expenses.summary, expenses.get, expenses.create, expenses.update, expenses.delete]

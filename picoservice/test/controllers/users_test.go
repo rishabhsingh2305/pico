@@ -14,7 +14,6 @@ import (
 
 	"picoservice/internal/controllers"
 	"picoservice/internal/entities"
-	"picoservice/internal/httpx"
 	"picoservice/internal/middleware"
 	"picoservice/internal/services"
 	"picoservice/internal/validation"
@@ -44,9 +43,6 @@ func TestUserCreate(t *testing.T) {
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d", http.StatusCreated, rec.Code)
-	}
-	if got, want := rec.Header().Get(httpx.HeaderLocation), "/users/user-1"; got != want {
-		t.Fatalf("expected Location %q, got %q", want, got)
 	}
 	if strings.Contains(rec.Body.String(), "password") || strings.Contains(rec.Body.String(), "hash") {
 		t.Fatalf("response leaked password fields: %q", rec.Body.String())
@@ -96,7 +92,8 @@ func TestUserGetNotFound(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/users/missing", nil)
+	req := httptest.NewRequest(http.MethodGet, "/users/me", nil)
+	req = withIdentity(req, "", "missing")
 
 	controllers.NewUserController(testLogger(), service).Get(rec, req)
 
@@ -111,9 +108,8 @@ func TestUserUpdateForbidden(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/users/user-1", strings.NewReader(`{"name":"Grace"}`))
+	req := httptest.NewRequest(http.MethodPatch, "/users/me", strings.NewReader(`{"name":"Grace"}`))
 	req = withIdentity(req, "", "user-2")
-	req = withRouteParams(req, map[string]string{"userID": "user-1"})
 
 	controllers.NewUserController(testLogger(), service).Update(rec, req)
 
@@ -129,9 +125,8 @@ func TestUserChangePassword(t *testing.T) {
 		}
 
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/users/user-1/password", strings.NewReader(`{"currentPassword":"wrong","newPassword":"new password"}`))
+		req := httptest.NewRequest(http.MethodPost, "/users/me/password", strings.NewReader(`{"currentPassword":"wrong","newPassword":"new password"}`))
 		req = withIdentity(req, "", "user-1")
-		req = withRouteParams(req, map[string]string{"userID": "user-1"})
 
 		controllers.NewUserController(testLogger(), service).ChangePassword(rec, req)
 
@@ -149,9 +144,8 @@ func TestUserChangePassword(t *testing.T) {
 		}
 
 		rec := httptest.NewRecorder()
-		req := httptest.NewRequest(http.MethodPost, "/users/user-1/password", strings.NewReader(`{"currentPassword":"old password","newPassword":"new password"}`))
+		req := httptest.NewRequest(http.MethodPost, "/users/me/password", strings.NewReader(`{"currentPassword":"old password","newPassword":"new password"}`))
 		req = withIdentity(req, "", "user-1")
-		req = withRouteParams(req, map[string]string{"userID": "user-1"})
 
 		controllers.NewUserController(testLogger(), service).ChangePassword(rec, req)
 
@@ -159,27 +153,6 @@ func TestUserChangePassword(t *testing.T) {
 			t.Fatalf("expected status %d, got %d", http.StatusNoContent, rec.Code)
 		}
 	})
-}
-
-func TestUserList(t *testing.T) {
-	service := &fakes.UserService{
-		ListFunc: func(context.Context, services.ListUsersInput) ([]entities.User, error) {
-			return []entities.User{{ID: "user-1", Name: "Ada", Email: "ada@example.com"}}, nil
-		},
-	}
-
-	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/users?userId=user-1", nil)
-	req = withIdentity(req, "", "user-1")
-
-	controllers.NewUserController(testLogger(), service).List(rec, req)
-
-	if rec.Code != http.StatusOK {
-		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
-	}
-	if !strings.Contains(rec.Body.String(), `"id":"user-1"`) {
-		t.Fatalf("expected user in response, got %q", rec.Body.String())
-	}
 }
 
 func withIdentity(r *http.Request, orgID, userID string) *http.Request {

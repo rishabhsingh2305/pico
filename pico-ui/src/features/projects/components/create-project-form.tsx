@@ -25,7 +25,6 @@ import { CURRENCIES } from "@/lib/currencies"
 import { normalizeTags } from "@/lib/tags"
 
 type CreateProjectFormProps = {
-  userId: string
   orgId: string
   onCreated: (project: Project) => void
   onCancel: () => void
@@ -33,7 +32,6 @@ type CreateProjectFormProps = {
 }
 
 export function CreateProjectForm({
-  userId,
   orgId,
   onCreated,
   onCancel,
@@ -72,7 +70,7 @@ export function CreateProjectForm({
 
     setIsSubmitting(true)
     try {
-      const project = await createProject(userId, orgId, {
+      const project = await createProject(orgId, {
         name: name.trim(),
         currency,
         tags: normalizeTags(tags),

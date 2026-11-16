@@ -7,7 +7,6 @@ import type {
 } from "@/features/expenses/types"
 
 export type ListExpensesParams = {
-  userId: string
   orgId: string
   projectId?: string
   projectIds?: string[]
@@ -19,7 +18,6 @@ export type ListExpensesParams = {
 }
 
 export type SummarizeExpensesParams = {
-  userId: string
   orgId: string
   projectId?: string
   projectIds?: string[]
@@ -29,7 +27,6 @@ export type SummarizeExpensesParams = {
 }
 
 function expenseQuery(params: {
-  userId: string
   orgId: string
   projectId?: string
   projectIds?: string[]
@@ -37,10 +34,7 @@ function expenseQuery(params: {
   from?: string
   to?: string
 }): URLSearchParams {
-  const query = new URLSearchParams({
-    orgId: params.orgId,
-    userId: params.userId,
-  })
+  const query = new URLSearchParams({ orgId: params.orgId })
   if (params.projectIds && params.projectIds.length > 0) {
     query.set("projectIds", params.projectIds.join(","))
   } else if (params.projectId) {
@@ -78,11 +72,10 @@ export function summarizeExpenses(
 }
 
 export function createExpense(
-  userId: string,
   orgId: string,
   input: CreateExpenseInput
 ): Promise<Expense> {
-  const query = new URLSearchParams({ orgId, userId })
+  const query = new URLSearchParams({ orgId })
   return requestJSON<Expense>(`/expenses?${query}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -91,11 +84,10 @@ export function createExpense(
 }
 
 export async function deleteExpense(
-  userId: string,
   orgId: string,
   expenseId: string
 ): Promise<void> {
-  const query = new URLSearchParams({ orgId, userId })
+  const query = new URLSearchParams({ orgId })
   await requestJSON<void>(
     `/expenses/${encodeURIComponent(expenseId)}?${query}`,
     { method: "DELETE" }

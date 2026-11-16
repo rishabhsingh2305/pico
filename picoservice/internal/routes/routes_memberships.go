@@ -8,13 +8,14 @@ import (
 	"picoservice/internal/controllers"
 )
 
-func membershipRoutes(h *controllers.MembershipController, requireMember func(http.Handler) http.Handler) chi.Router {
+func membershipRoutes(h *controllers.MembershipController, requireOrg func(http.Handler) http.Handler) chi.Router {
 	r := chi.NewRouter()
 
-	r.With(requireMember).Get("/", h.List)
-	r.With(requireMember).Head("/", h.List)
-	r.With(requireMember).Post("/", h.Add)
-	r.With(requireMember).Delete("/{memberUserID}", h.Remove)
+	r.With(requireOrg).Get("/", h.List)
+	r.With(requireOrg).Head("/", h.List)
+	r.With(requireOrg).Post("/", h.Add)
+	r.With(requireOrg).Patch("/{memberUserID}", h.UpdateRoles)
+	r.With(requireOrg).Delete("/{memberUserID}", h.Remove)
 
 	return r
 }

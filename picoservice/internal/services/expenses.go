@@ -94,64 +94,96 @@ func NewExpenseService(store dao.ExpenseDAO, projects ProjectLookup) *ExpenseSer
 
 // Create validates an expense, checks that its project exists, and stores it.
 func (s *ExpenseService) Create(ctx context.Context, in CreateExpenseInput) (entities.Expense, error) {
-	projectID := strings.TrimSpace(in.ProjectID)
-	if projectID == "" {
-		return entities.Expense{}, &validation.Error{Field: "projectId", Message: "projectId is required"}
-	}
-	if in.Amount <= 0 {
-		return entities.Expense{}, &validation.Error{Field: "amount", Message: "amount must be greater than zero"}
-	}
-
-	expenseType, err := normalizeExpenseType(in.Type, true)
+	values, err := validateCreateExpense(in)
 	if err != nil {
 		return entities.Expense{}, err
-	}
-
-	description := strings.TrimSpace(in.Description)
-	if len(description) > descriptionMaxLength {
-		return entities.Expense{}, &validation.Error{Field: "description", Message: "description must be at most 1000 characters"}
-	}
-
-	tags, err := normalizeTags(in.Tags)
-	if err != nil {
-		return entities.Expense{}, err
-	}
-
-	if in.SpentAt.IsZero() {
-		return entities.Expense{}, &validation.Error{Field: "spentAt", Message: "spentAt is required"}
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
-	project, err := s.projects.FindByID(ctx, in.OrgID, projectID)
-	if errors.Is(err, entities.ErrProjectNotFound) {
-		return entities.Expense{}, &validation.Error{Field: "projectId", Message: "project not found"}
-	}
+	project, err := s.findProject(ctx, in.OrgID, values.projectID)
 	if err != nil {
-		return entities.Expense{}, fmt.Errorf("get project: %w", err)
+		return entities.Expense{}, err
 	}
 
-	now := time.Now().UTC()
-	expense := entities.Expense{
-		OrgID:       in.OrgID,
-		UserID:      in.UserID,
-		ProjectID:   projectID,
-		Type:        expenseType,
-		Amount:      in.Amount,
-		Currency:    project.Currency,
-		Description: description,
-		Tags:        tags,
-		SpentAt:     in.SpentAt.UTC(),
-		CreatedAt:   now,
-		UpdatedAt:   now,
-	}
-
-	created, err := s.store.Insert(ctx, expense)
+	created, err := s.store.Insert(ctx, buildExpense(in, values, project, time.Now().UTC()))
 	if err != nil {
 		return entities.Expense{}, fmt.Errorf("create expense: %w", err)
 	}
 	return created, nil
+}
+
+type createExpenseValues struct {
+	projectID   string
+	expenseType entities.ExpenseType
+	description string
+	tags        []string
+	spentAt     time.Time
+}
+
+func validateCreateExpense(in CreateExpenseInput) (createExpenseValues, error) {
+	projectID := strings.TrimSpace(in.ProjectID)
+	if projectID == "" {
+		return createExpenseValues{}, &validation.Error{Field: "projectId", Message: "projectId is required"}
+	}
+	if in.Amount <= 0 {
+		return createExpenseValues{}, &validation.Error{Field: "amount", Message: "amount must be greater than zero"}
+	}
+
+	expenseType, err := normalizeExpenseType(in.Type, true)
+	if err != nil {
+		return createExpenseValues{}, err
+	}
+
+	description := strings.TrimSpace(in.Description)
+	if len(description) > descriptionMaxLength {
+		return createExpenseValues{}, &validation.Error{Field: "description", Message: "description must be at most 1000 characters"}
+	}
+
+	tags, err := normalizeTags(in.Tags)
+	if err != nil {
+		return createExpenseValues{}, err
+	}
+
+	if in.SpentAt.IsZero() {
+		return createExpenseValues{}, &validation.Error{Field: "spentAt", Message: "spentAt is required"}
+	}
+
+	return createExpenseValues{
+		projectID:   projectID,
+		expenseType: expenseType,
+		description: description,
+		tags:        tags,
+		spentAt:     in.SpentAt.UTC(),
+	}, nil
+}
+
+func buildExpense(in CreateExpenseInput, values createExpenseValues, project entities.Project, now time.Time) entities.Expense {
+	return entities.Expense{
+		OrgID:       in.OrgID,
+		UserID:      in.UserID,
+		ProjectID:   values.projectID,
+		Type:        values.expenseType,
+		Amount:      in.Amount,
+		Currency:    project.Currency,
+		Description: values.description,
+		Tags:        values.tags,
+		SpentAt:     values.spentAt,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+}
+
+func (s *ExpenseService) findProject(ctx context.Context, orgID, projectID string) (entities.Project, error) {
+	project, err := s.projects.FindByID(ctx, orgID, projectID)
+	if errors.Is(err, entities.ErrProjectNotFound) {
+		return entities.Project{}, &validation.Error{Field: "projectId", Message: "project not found"}
+	}
+	if err != nil {
+		return entities.Project{}, fmt.Errorf("get project: %w", err)
+	}
+	return project, nil
 }
 
 // Get returns an expense scoped to orgID.
@@ -253,31 +285,37 @@ func (s *ExpenseService) Update(ctx context.Context, in UpdateExpenseInput) (ent
 	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
+	fields, err := s.expenseUpdate(ctx, in)
+	if err != nil {
+		return entities.Expense{}, err
+	}
+
+	updated, err := s.store.Update(ctx, in.OrgID, in.ID, fields)
+	if err != nil {
+		return entities.Expense{}, fmt.Errorf("update expense: %w", err)
+	}
+	return updated, nil
+}
+
+func (s *ExpenseService) expenseUpdate(ctx context.Context, in UpdateExpenseInput) (dao.ExpenseUpdate, error) {
 	fields := dao.ExpenseUpdate{UpdatedAt: time.Now().UTC()}
 	changed := false
 
 	if in.ProjectID != nil {
 		projectID := strings.TrimSpace(*in.ProjectID)
 		if projectID == "" {
-			return entities.Expense{}, &validation.Error{Field: "projectId", Message: "projectId is required"}
+			return dao.ExpenseUpdate{}, &validation.Error{Field: "projectId", Message: "projectId is required"}
 		}
-
-		project, err := s.projects.FindByID(ctx, in.OrgID, projectID)
-		if errors.Is(err, entities.ErrProjectNotFound) {
-			return entities.Expense{}, &validation.Error{Field: "projectId", Message: "project not found"}
+		if _, err := s.findProject(ctx, in.OrgID, projectID); err != nil {
+			return dao.ExpenseUpdate{}, err
 		}
-		if err != nil {
-			return entities.Expense{}, fmt.Errorf("get project: %w", err)
-		}
-		_ = project
-
 		fields.ProjectID = &projectID
 		changed = true
 	}
 
 	if in.Amount != nil {
 		if *in.Amount <= 0 {
-			return entities.Expense{}, &validation.Error{Field: "amount", Message: "amount must be greater than zero"}
+			return dao.ExpenseUpdate{}, &validation.Error{Field: "amount", Message: "amount must be greater than zero"}
 		}
 		fields.Amount = in.Amount
 		changed = true
@@ -286,7 +324,7 @@ func (s *ExpenseService) Update(ctx context.Context, in UpdateExpenseInput) (ent
 	if in.Type != nil {
 		expenseType, err := normalizeExpenseType(*in.Type, false)
 		if err != nil {
-			return entities.Expense{}, err
+			return dao.ExpenseUpdate{}, err
 		}
 		fields.Type = &expenseType
 		changed = true
@@ -295,7 +333,7 @@ func (s *ExpenseService) Update(ctx context.Context, in UpdateExpenseInput) (ent
 	if in.Description != nil {
 		description := strings.TrimSpace(*in.Description)
 		if len(description) > descriptionMaxLength {
-			return entities.Expense{}, &validation.Error{Field: "description", Message: "description must be at most 1000 characters"}
+			return dao.ExpenseUpdate{}, &validation.Error{Field: "description", Message: "description must be at most 1000 characters"}
 		}
 		fields.Description = &description
 		changed = true
@@ -304,7 +342,7 @@ func (s *ExpenseService) Update(ctx context.Context, in UpdateExpenseInput) (ent
 	if in.Tags != nil {
 		tags, err := normalizeTags(*in.Tags)
 		if err != nil {
-			return entities.Expense{}, err
+			return dao.ExpenseUpdate{}, err
 		}
 		fields.Tags = &tags
 		changed = true
@@ -312,7 +350,7 @@ func (s *ExpenseService) Update(ctx context.Context, in UpdateExpenseInput) (ent
 
 	if in.SpentAt != nil {
 		if in.SpentAt.IsZero() {
-			return entities.Expense{}, &validation.Error{Field: "spentAt", Message: "spentAt is required"}
+			return dao.ExpenseUpdate{}, &validation.Error{Field: "spentAt", Message: "spentAt is required"}
 		}
 		spentAt := in.SpentAt.UTC()
 		fields.SpentAt = &spentAt
@@ -320,14 +358,9 @@ func (s *ExpenseService) Update(ctx context.Context, in UpdateExpenseInput) (ent
 	}
 
 	if !changed {
-		return entities.Expense{}, &validation.Error{Field: "body", Message: "no fields to update"}
+		return dao.ExpenseUpdate{}, &validation.Error{Field: "body", Message: "no fields to update"}
 	}
-
-	updated, err := s.store.Update(ctx, in.OrgID, in.ID, fields)
-	if err != nil {
-		return entities.Expense{}, fmt.Errorf("update expense: %w", err)
-	}
-	return updated, nil
+	return fields, nil
 }
 
 // Delete removes an expense from an organization.

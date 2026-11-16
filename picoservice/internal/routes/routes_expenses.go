@@ -8,21 +8,21 @@ import (
 	"picoservice/internal/controllers"
 )
 
-func expenseRoutes(h *controllers.ExpenseController, requireMember func(http.Handler) http.Handler) chi.Router {
+func expenseRoutes(h *controllers.ExpenseController, requireOrg func(http.Handler) http.Handler) chi.Router {
 	r := chi.NewRouter()
 
-	r.With(requireMember).Get("/", h.List)
-	r.With(requireMember).Head("/", h.List)
-	r.With(requireMember).Post("/", h.Create)
+	r.With(requireOrg).Get("/", h.List)
+	r.With(requireOrg).Head("/", h.List)
+	r.With(requireOrg).Post("/", h.Create)
 
-	r.With(requireMember).Get("/summary", h.Summarize)
-	r.With(requireMember).Head("/summary", h.Summarize)
+	r.With(requireOrg).Get("/summary", h.Summarize)
+	r.With(requireOrg).Head("/summary", h.Summarize)
 
 	r.Route("/{expenseID}", func(r chi.Router) {
-		r.With(requireMember).Get("/", h.Get)
-		r.With(requireMember).Head("/", h.Get)
-		r.With(requireMember).Patch("/", h.Update)
-		r.With(requireMember).Delete("/", h.Delete)
+		r.With(requireOrg).Get("/", h.Get)
+		r.With(requireOrg).Head("/", h.Get)
+		r.With(requireOrg).Patch("/", h.Update)
+		r.With(requireOrg).Delete("/", h.Delete)
 	})
 
 	return r

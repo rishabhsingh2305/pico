@@ -7,7 +7,6 @@ import { EditProjectTagsDialog } from "@/features/projects/components/edit-proje
 import type { Project } from "@/features/projects/types"
 
 type ProjectCardProps = {
-  userId: string
   orgId: string
   project: Project
   activeTags: string[]
@@ -17,7 +16,6 @@ type ProjectCardProps = {
 }
 
 export function ProjectCard({
-  userId,
   orgId,
   project,
   activeTags,
@@ -52,7 +50,6 @@ export function ProjectCard({
 
           <div className="flex shrink-0 items-center gap-1">
             <EditProjectTagsDialog
-              userId={userId}
               orgId={orgId}
               project={project}
               onUpdated={onTagsUpdated}

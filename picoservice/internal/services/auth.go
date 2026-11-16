@@ -6,16 +6,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
-
 	"picoservice/internal/entities"
-)
-
-const (
-	accessTokenIssuer   = "picoservice"
-	accessTokenAudience = "picoservice-api"
-	accessTokenPurpose  = "access"
-	accessTokenTTL      = 7 * 24 * time.Hour
 )
 
 // dummyPasswordHash is compared when the email is unknown so login timing does
@@ -29,35 +20,39 @@ type AuthUserStore interface {
 	PasswordHash(ctx context.Context, id string) (string, error)
 }
 
-// AccessClaims contains the access token claims.
-type AccessClaims struct {
-	Type string `json:"type"`
-	jwt.RegisteredClaims
+// OrgRoleSource resolves the organization feature roles written into a token.
+type OrgRoleSource interface {
+	RolesForUser(ctx context.Context, userID string) (map[string][]string, error)
 }
 
-// LoginResult contains the identity and token issued by a successful login.
+// LoginResult contains the identity and tokens issued by login or refresh.
 type LoginResult struct {
-	User      entities.User
-	Token     string
-	ExpiresAt time.Time
+	User             entities.User
+	Token            string
+	ExpiresAt        time.Time
+	RefreshToken     string
+	RefreshExpiresAt time.Time
 }
 
-// AuthService validates credentials and issues stateless access tokens.
+// AuthService validates credentials and orchestrates token issuance.
 type AuthService struct {
 	users  AuthUserStore
 	hasher Hasher
-	secret []byte
+	roles  OrgRoleSource
+	tokens *tokenManager
 }
 
-// NewAuthService returns an auth service that signs tokens with secret.
-func NewAuthService(users AuthUserStore, hasher Hasher, secret string) (*AuthService, error) {
-	if len(secret) < 32 {
-		return nil, errors.New("jwt secret must be at least 32 bytes")
+// NewAuthService returns an auth service that issues tokens with secret and
+// resolves organization roles through roles.
+func NewAuthService(users AuthUserStore, hasher Hasher, secret string, roles OrgRoleSource) (*AuthService, error) {
+	tokens, err := newTokenManager(secret)
+	if err != nil {
+		return nil, err
 	}
 	if hasher == nil {
 		hasher = NewBcryptHasher()
 	}
-	return &AuthService{users: users, hasher: hasher, secret: []byte(secret)}, nil
+	return &AuthService{users: users, hasher: hasher, roles: roles, tokens: tokens}, nil
 }
 
 // Login verifies an email and password and issues an access token. Unknown
@@ -95,16 +90,68 @@ func (s *AuthService) Login(ctx context.Context, email, password string) (LoginR
 		return LoginResult{}, entities.ErrEmailNotVerified
 	}
 
-	token, expiresAt, err := s.issue(user, time.Now().UTC())
+	return s.issueForUser(ctx, user)
+}
+
+// Refresh exchanges a valid refresh token for a new access token and a rotated
+// refresh token. It re-queries the user's memberships so role changes take
+// effect without waiting for the access token to expire.
+func (s *AuthService) Refresh(ctx context.Context, raw string) (LoginResult, error) {
+	claims, err := s.tokens.parse(raw, refreshTokenPurpose)
+	if err != nil {
+		return LoginResult{}, entities.ErrInvalidToken
+	}
+
+	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
+
+	user, err := s.users.FindByID(ctx, claims.Subject)
+	if errors.Is(err, entities.ErrUserNotFound) {
+		return LoginResult{}, entities.ErrInvalidToken
+	}
+	if err != nil {
+		return LoginResult{}, fmt.Errorf("get user: %w", err)
+	}
+	if !user.EmailVerified {
+		return LoginResult{}, entities.ErrInvalidToken
+	}
+
+	return s.issueForUser(ctx, user)
+}
+
+func (s *AuthService) issueForUser(ctx context.Context, user entities.User) (LoginResult, error) {
+	orgs, err := s.orgRoles(ctx, user.ID)
 	if err != nil {
 		return LoginResult{}, err
 	}
-	return LoginResult{User: user, Token: token, ExpiresAt: expiresAt}, nil
+
+	pair, err := s.tokens.issuePair(user.ID, orgs, time.Now().UTC())
+	if err != nil {
+		return LoginResult{}, err
+	}
+	return LoginResult{
+		User:             user,
+		Token:            pair.accessToken,
+		ExpiresAt:        pair.accessExpiresAt,
+		RefreshToken:     pair.refreshToken,
+		RefreshExpiresAt: pair.refreshExpiresAt,
+	}, nil
+}
+
+func (s *AuthService) orgRoles(ctx context.Context, userID string) (map[string][]string, error) {
+	if s.roles == nil {
+		return map[string][]string{}, nil
+	}
+	roles, err := s.roles.RolesForUser(ctx, userID)
+	if err != nil {
+		return nil, fmt.Errorf("resolve org roles: %w", err)
+	}
+	return roles, nil
 }
 
 // Session validates token and returns the current user and token expiry.
 func (s *AuthService) Session(ctx context.Context, token string) (entities.User, time.Time, error) {
-	claims, err := s.Parse(token)
+	claims, err := s.tokens.parse(token, accessTokenPurpose)
 	if err != nil {
 		return entities.User{}, time.Time{}, err
 	}
@@ -122,57 +169,8 @@ func (s *AuthService) Session(ctx context.Context, token string) (entities.User,
 	return user, claims.ExpiresAt.Time, nil
 }
 
-// ParseSubject validates token and returns its subject. It performs no
-// database work and is used by identity middleware.
-func (s *AuthService) ParseSubject(token string) (string, error) {
-	claims, err := s.Parse(token)
-	if err != nil {
-		return "", err
-	}
-	return claims.Subject, nil
-}
-
-// Parse validates raw and returns its access claims.
-func (s *AuthService) Parse(raw string) (AccessClaims, error) {
-	claims := AccessClaims{}
-	token, err := jwt.ParseWithClaims(
-		raw,
-		&claims,
-		func(*jwt.Token) (any, error) {
-			return s.secret, nil
-		},
-		jwt.WithValidMethods([]string{jwt.SigningMethodHS256.Alg()}),
-		jwt.WithIssuer(accessTokenIssuer),
-		jwt.WithAudience(accessTokenAudience),
-		jwt.WithExpirationRequired(),
-		jwt.WithIssuedAt(),
-	)
-	if err != nil || !token.Valid {
-		return AccessClaims{}, entities.ErrInvalidToken
-	}
-	if claims.Type != accessTokenPurpose || claims.Subject == "" {
-		return AccessClaims{}, entities.ErrInvalidToken
-	}
-	return claims, nil
-}
-
-func (s *AuthService) issue(user entities.User, now time.Time) (string, time.Time, error) {
-	expiresAt := now.Add(accessTokenTTL)
-	claims := AccessClaims{
-		Type: accessTokenPurpose,
-		RegisteredClaims: jwt.RegisteredClaims{
-			Subject:   user.ID,
-			Issuer:    accessTokenIssuer,
-			Audience:  jwt.ClaimStrings{accessTokenAudience},
-			IssuedAt:  jwt.NewNumericDate(now),
-			ExpiresAt: jwt.NewNumericDate(expiresAt),
-		},
-	}
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
-	signed, err := token.SignedString(s.secret)
-	if err != nil {
-		return "", time.Time{}, fmt.Errorf("sign access token: %w", err)
-	}
-	return signed, expiresAt, nil
+// ParseAccess validates token and returns its subject and organization role
+// map without database work.
+func (s *AuthService) ParseAccess(token string) (string, map[string][]string, error) {
+	return s.tokens.parseAccess(token)
 }

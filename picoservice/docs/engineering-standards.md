@@ -51,9 +51,12 @@ them when the service grows.
 - `internal/email` owns SMTP delivery and message construction. Services consume
   the `services.Mailer` interface; controllers never send email.
 - `internal/middleware` owns HTTP middleware: request ID propagation,
-  structured request logging, panic recovery, and query identity/membership
-  checks. It defines its own lookup interfaces and may import `internal/httpx`
-  and chi middleware only.
+  structured request logging, panic recovery, JWT authentication, and
+  declarative organization authorization. It defines a small access-token
+  interface and may import `internal/authz`, `internal/httpx`, and chi only.
+- `internal/authz` owns the embedded route and role policy. It must not import
+  HTTP, routes, controllers, services, or DAO packages; it exposes pure policy
+  loading, validation, and permission checks.
 - `lambdahttp` adapts transport only; it must not know about routes or
   controllers.
 - `internal/app` is the shared composition root for the Lambda and local
@@ -131,16 +134,28 @@ them when the service grows.
 
 ## Identity, tenancy, and passwords
 
-- Protected routes authenticate with the `pico_auth` JWT cookie. The temporary
-  `userId` query fallback is not secure; never describe it as authentication.
+- Protected routes authenticate with `Authorization: Bearer` or the `pico_auth`
+  cookie. The actor is the token `sub`; `?userId=` is never accepted as
+  identity.
 - Email verification proves ownership of an email address only. Verification
   JWTs must never be accepted as access tokens or used to authorize requests.
-- Every org-scoped route must use `middleware.RequireMember`. User-scoped routes
-  that need an actor must use `middleware.RequireAuth`.
+- Every org-scoped route must use `middleware.RequireOrgAccess` after
+  `middleware.RequireAuth`. User-scoped routes that need an actor use
+  `middleware.RequireAuth` only.
 - The route tree, not individual controllers, decides which middleware wraps a
-  route.
-- Membership enforcement is not authorization by itself. Owner-only rules belong
-  in services and compare the actor to `entities.Org.UserID`.
+  route, and `internal/authz/resources/routes.yml` declares the same routes.
+  `test/routes` fails when the router and policy drift.
+- The tenant is `?orgId=`; on `/orgs/{orgID}` routes it must equal the path.
+  Feature roles come from the access-token `orgs` map and permissions from
+  `features.yml`. A member may have a different role per feature; the request is
+  allowed when any feature role grants the route permission. Never add a
+  per-request membership database lookup to authorization.
+- Feature management is authorized by middleware permissions (`org.admin`,
+  `member.admin`, and so on). Services protect the owner account by comparing
+  the target to `entities.Org.UserID`; the owner cannot be added, removed, or
+  have roles changed. The owner is implicit and is written as `["*"]` at token
+  issuance; `"*"` inside the role list must never be accepted from a membership
+  request or stored.
 - Passwords are hashed with bcrypt. Never store plaintext, log passwords, or
   return hashes. Password changes must verify the current password.
 - Bound passwords to 8–72 bytes because of bcrypt. Normalize emails to lowercase

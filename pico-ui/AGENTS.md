@@ -42,10 +42,11 @@
   rotates the code and returns `Retry-After: 60`.
 - Organization settings, memberships, project rename/delete, and expense edit are
   not implemented yet.
-- Login posts to `/auth/login`; the backend returns an access token.
-  `AuthProvider` stores it in `localStorage`, sends it as
-  `Authorization: Bearer`, restores the session from `/auth/session` on load,
-  and exposes login, logout, and the current user.
+- Login posts to `/auth/login`; the backend returns a 30-minute access token and
+  a 30-day refresh token. `AuthProvider` stores both in `localStorage`,
+  `requestJSON` sends the access token as `Authorization: Bearer` and refreshes
+  once on `401`, and the session is restored from `/auth/session` on load.
+  Profile routes are `/users/me`; no request sends a `userId` query parameter.
 
 ## Read first
 
@@ -133,7 +134,8 @@ Boundaries:
   Query keys live in `src/app/query-keys.ts`, and the provider wraps the app in
   `src/app/query-provider.tsx`. Do not add another global store. The
   authenticated session lives in `AuthProvider`, restores from `/auth/session`,
-  and stores the access token in `localStorage`. Never store passwords there.
+  and stores the access and refresh tokens in `localStorage`. Never store
+  passwords there.
 - **Forms:** controlled fields with a small pure validation function. Mirror
   backend constraints (name 120 bytes, email 254 bytes, password 8–72 bytes).
   Projects own a currency; expense amounts are positive decimal values converted

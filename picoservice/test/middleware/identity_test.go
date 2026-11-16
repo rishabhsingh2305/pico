@@ -1,13 +1,15 @@
 package middlewaretest
 
 import (
-	"context"
-	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 
+	"github.com/go-chi/chi/v5"
+
+	"picoservice/internal/authz"
+	"picoservice/internal/entities"
 	"picoservice/internal/middleware"
 )
 
@@ -18,7 +20,6 @@ func TestRequireAuth(t *testing.T) {
 		cookie        string
 		authorization string
 		tokens        fakeAccessTokens
-		lookup        fakeUserLookup
 		wantStatus    int
 		wantUser      string
 	}{
@@ -27,23 +28,14 @@ func TestRequireAuth(t *testing.T) {
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name:       "unknown user",
-			query:      "?userId=missing",
-			lookup:     fakeUserLookup{existing: map[string]bool{}},
-			wantStatus: http.StatusNotFound,
-		},
-		{
-			name:       "known user",
+			name:       "query userId is ignored",
 			query:      "?userId=user-1",
-			lookup:     fakeUserLookup{existing: map[string]bool{"user-1": true}},
-			wantStatus: http.StatusOK,
-			wantUser:   "user-1",
+			wantStatus: http.StatusUnauthorized,
 		},
 		{
 			name:          "valid bearer",
 			authorization: "Bearer token-1",
 			tokens:        fakeAccessTokens{subject: "user-1"},
-			lookup:        fakeUserLookup{existing: map[string]bool{}},
 			wantStatus:    http.StatusOK,
 			wantUser:      "user-1",
 		},
@@ -52,14 +44,12 @@ func TestRequireAuth(t *testing.T) {
 			query:         "?userId=user-1",
 			authorization: "Bearer bad-token",
 			tokens:        fakeAccessTokens{err: errors.New("invalid token")},
-			lookup:        fakeUserLookup{existing: map[string]bool{"user-1": true}},
 			wantStatus:    http.StatusUnauthorized,
 		},
 		{
 			name:       "valid cookie",
 			cookie:     "token-1",
 			tokens:     fakeAccessTokens{subject: "user-1"},
-			lookup:     fakeUserLookup{existing: map[string]bool{}},
 			wantStatus: http.StatusOK,
 			wantUser:   "user-1",
 		},
@@ -68,7 +58,6 @@ func TestRequireAuth(t *testing.T) {
 			query:      "?userId=user-1",
 			cookie:     "bad-token",
 			tokens:     fakeAccessTokens{err: errors.New("invalid token")},
-			lookup:     fakeUserLookup{existing: map[string]bool{"user-1": true}},
 			wantStatus: http.StatusUnauthorized,
 		},
 	}
@@ -77,13 +66,13 @@ func TestRequireAuth(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			called := false
 			var got middleware.Identity
-			handler := middleware.RequireAuth(testLogger(), tt.lookup, tt.tokens)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			handler := middleware.RequireAuth(tt.tokens)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 				called = true
 				got, _ = middleware.FromContext(r.Context())
 				w.WriteHeader(http.StatusOK)
 			}))
 
-			req := httptest.NewRequest(http.MethodGet, "/users"+tt.query, nil)
+			req := httptest.NewRequest(http.MethodGet, "/users/me"+tt.query, nil)
 			if tt.cookie != "" {
 				req.AddCookie(&http.Cookie{Name: middleware.AuthCookieName, Value: tt.cookie})
 			}
@@ -112,153 +101,168 @@ func TestRequireAuth(t *testing.T) {
 	}
 }
 
-func TestRequireMember(t *testing.T) {
+func TestRequireOrgAccess(t *testing.T) {
+	policy, err := authz.Load()
+	if err != nil {
+		t.Fatalf("load policy: %v", err)
+	}
+
+	build := func(tokens fakeAccessTokens) http.Handler {
+		r := chi.NewRouter()
+		protect := func(next http.Handler) http.Handler {
+			return middleware.RequireAuth(tokens)(middleware.RequireOrgAccess(testLogger(), policy)(next))
+		}
+		ok := func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) }
+
+		r.With(protect).Get("/expenses", ok)
+		r.With(protect).Head("/expenses", ok)
+		r.With(protect).Post("/expenses", ok)
+		r.With(protect).Get("/projects", ok)
+		r.With(protect).Get("/orgs/{orgID}", ok)
+		r.With(protect).Get("/unmapped", ok)
+		return r
+	}
+
 	tests := []struct {
 		name       string
-		identity   bool
-		query      string
-		orgs       fakeOrgLookup
-		members    fakeMembershipLookup
+		method     string
+		path       string
+		tokens     fakeAccessTokens
 		wantStatus int
-		wantID     middleware.Identity
+		wantOrg    string
 	}{
 		{
 			name:       "missing identity",
+			method:     http.MethodGet,
+			path:       "/expenses?orgId=org-1",
 			wantStatus: http.StatusUnauthorized,
 		},
 		{
-			name:       "missing org",
-			identity:   true,
+			name:       "missing orgId",
+			method:     http.MethodGet,
+			path:       "/expenses",
+			tokens:     fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {entities.RoleWildcard}}},
 			wantStatus: http.StatusBadRequest,
 		},
 		{
-			name:       "unknown org",
-			identity:   true,
-			query:      "?orgId=org-1",
-			orgs:       fakeOrgLookup{existing: map[string]bool{}},
-			wantStatus: http.StatusNotFound,
-		},
-		{
-			name:       "non-member",
-			identity:   true,
-			query:      "?orgId=org-1",
-			orgs:       fakeOrgLookup{existing: map[string]bool{"org-1": true}},
-			members:    fakeMembershipLookup{existing: map[string]bool{}},
+			name:       "no role for org",
+			method:     http.MethodGet,
+			path:       "/expenses?orgId=org-2",
+			tokens:     fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {entities.RoleWildcard}}},
 			wantStatus: http.StatusForbidden,
 		},
 		{
-			name:       "member",
-			identity:   true,
-			query:      "?orgId=org-1",
-			orgs:       fakeOrgLookup{existing: map[string]bool{"org-1": true}},
-			members:    fakeMembershipLookup{existing: map[string]bool{"org-1/user-1": true}},
+			name:       "viewer reads",
+			method:     http.MethodGet,
+			path:       "/expenses?orgId=org-1",
+			tokens:     fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {"expense.viewer"}}},
 			wantStatus: http.StatusOK,
-			wantID:     middleware.Identity{OrgID: "org-1", UserID: "user-1"},
+			wantOrg:    "org-1",
+		},
+		{
+			name:       "viewer head follows get",
+			method:     http.MethodHead,
+			path:       "/expenses?orgId=org-1",
+			tokens:     fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {"expense.viewer"}}},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "viewer cannot write",
+			method:     http.MethodPost,
+			path:       "/expenses?orgId=org-1",
+			tokens:     fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {"expense.viewer"}}},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "editor writes",
+			method:     http.MethodPost,
+			path:       "/expenses?orgId=org-1",
+			tokens:     fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {"expense.editor"}}},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "owner wildcard writes",
+			method:     http.MethodPost,
+			path:       "/expenses?orgId=org-1",
+			tokens:     fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {entities.RoleWildcard}}},
+			wantStatus: http.StatusOK,
+		},
+		{
+			name:       "unknown role",
+			method:     http.MethodGet,
+			path:       "/expenses?orgId=org-1",
+			tokens:     fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {"org.unknown"}}},
+			wantStatus: http.StatusForbidden,
+		},
+		{
+			name:       "path and query mismatch",
+			method:     http.MethodGet,
+			path:       "/orgs/org-1?orgId=org-2",
+			tokens:     fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {entities.RoleWildcard}}},
+			wantStatus: http.StatusBadRequest,
+		},
+		{
+			name:       "unmapped route fails closed",
+			method:     http.MethodGet,
+			path:       "/unmapped?orgId=org-1",
+			tokens:     fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {entities.RoleWildcard}}},
+			wantStatus: http.StatusInternalServerError,
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			called := false
-			var got middleware.Identity
-			handler := middleware.RequireMember(testLogger(), tt.orgs, tt.members)(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				called = true
-				got, _ = middleware.FromContext(r.Context())
-				w.WriteHeader(http.StatusOK)
-			}))
-
-			req := httptest.NewRequest(http.MethodGet, "/projects"+tt.query, nil)
-			if tt.identity {
-				req = req.WithContext(middleware.WithContext(req.Context(), middleware.Identity{UserID: "user-1"}))
-			}
 			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, req)
+			req := httptest.NewRequest(tt.method, tt.path, nil)
+			if tt.tokens.subject != "" {
+				req.Header.Set("Authorization", "Bearer token-1")
+			}
+			build(tt.tokens).ServeHTTP(rec, req)
 
 			if rec.Code != tt.wantStatus {
 				t.Fatalf("expected status %d, got %d", tt.wantStatus, rec.Code)
-			}
-			if tt.wantStatus != http.StatusOK {
-				if called {
-					t.Fatal("next handler should not be called")
-				}
-				return
-			}
-			if !called {
-				t.Fatal("next handler was not called")
-			}
-			if got != tt.wantID {
-				t.Fatalf("expected identity %+v, got %+v", tt.wantID, got)
 			}
 		})
 	}
 }
 
-func TestLookupErrorIsGeneric(t *testing.T) {
-	handler := middleware.RequireAuth(testLogger(), fakeUserLookup{err: errors.New("database down")}, fakeAccessTokens{})(
-		http.HandlerFunc(func(http.ResponseWriter, *http.Request) {
-			t.Fatal("next handler should not be called")
-		}),
-	)
+func TestRequireOrgAccessSetsIdentity(t *testing.T) {
+	policy, err := authz.Load()
+	if err != nil {
+		t.Fatalf("load policy: %v", err)
+	}
+
+	var got middleware.Identity
+	r := chi.NewRouter()
+	r.With(
+		middleware.RequireAuth(fakeAccessTokens{subject: "user-1", orgs: map[string][]string{"org-1": {"expense.editor"}}}),
+		middleware.RequireOrgAccess(testLogger(), policy),
+	).Get("/expenses", func(_ http.ResponseWriter, r *http.Request) {
+		got, _ = middleware.FromContext(r.Context())
+	})
 
 	rec := httptest.NewRecorder()
-	handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/users?userId=user-1", nil))
+	req := httptest.NewRequest(http.MethodGet, "/expenses?orgId=org-1", nil)
+	req.Header.Set("Authorization", "Bearer token-1")
+	r.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Fatalf("expected status %d, got %d", http.StatusInternalServerError, rec.Code)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
-	var body map[string]string
-	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	if got, want := body["error"], "internal server error"; got != want {
-		t.Fatalf("expected error %q, got %q", want, got)
+	if got.OrgID != "org-1" || got.UserID != "user-1" {
+		t.Fatalf("unexpected identity: %+v", got)
 	}
 }
 
 type fakeAccessTokens struct {
 	subject string
+	orgs    map[string][]string
 	err     error
 }
 
-func (t fakeAccessTokens) ParseSubject(string) (string, error) {
+func (t fakeAccessTokens) ParseAccess(string) (string, map[string][]string, error) {
 	if t.err != nil {
-		return "", t.err
+		return "", nil, t.err
 	}
-	return t.subject, nil
-}
-
-type fakeUserLookup struct {
-	existing map[string]bool
-	err      error
-}
-
-func (l fakeUserLookup) Exists(_ context.Context, userID string) (bool, error) {
-	if l.err != nil {
-		return false, l.err
-	}
-	return l.existing[userID], nil
-}
-
-type fakeOrgLookup struct {
-	existing map[string]bool
-	err      error
-}
-
-func (l fakeOrgLookup) Exists(_ context.Context, orgID string) (bool, error) {
-	if l.err != nil {
-		return false, l.err
-	}
-	return l.existing[orgID], nil
-}
-
-type fakeMembershipLookup struct {
-	existing map[string]bool
-	err      error
-}
-
-func (l fakeMembershipLookup) Exists(_ context.Context, orgID, userID string) (bool, error) {
-	if l.err != nil {
-		return false, l.err
-	}
-	return l.existing[orgID+"/"+userID], nil
+	return t.subject, t.orgs, nil
 }

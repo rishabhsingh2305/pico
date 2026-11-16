@@ -4,11 +4,10 @@ import type { CreateProjectInput, Project } from "@/features/projects/types"
 const PROJECT_LIST_LIMIT = 100
 
 export async function getProject(
-  userId: string,
   orgId: string,
   projectId: string
 ): Promise<Project> {
-  const query = new URLSearchParams({ orgId, userId })
+  const query = new URLSearchParams({ orgId })
   return requestJSON<Project>(
     `/projects/${encodeURIComponent(projectId)}?${query}`,
     { method: "GET" }
@@ -16,13 +15,11 @@ export async function getProject(
 }
 
 export async function listProjects(
-  userId: string,
   orgId: string,
   tags: string[] = []
 ): Promise<Project[]> {
   const query = new URLSearchParams({
     orgId,
-    userId,
     limit: String(PROJECT_LIST_LIMIT),
   })
   if (tags.length > 0) {
@@ -36,11 +33,10 @@ export async function listProjects(
 }
 
 export function createProject(
-  userId: string,
   orgId: string,
   input: CreateProjectInput
 ): Promise<Project> {
-  const query = new URLSearchParams({ orgId, userId })
+  const query = new URLSearchParams({ orgId })
   return requestJSON<Project>(`/projects?${query}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -49,12 +45,11 @@ export function createProject(
 }
 
 export function updateProjectTags(
-  userId: string,
   orgId: string,
   projectId: string,
   tags: string[]
 ): Promise<Project> {
-  const query = new URLSearchParams({ orgId, userId })
+  const query = new URLSearchParams({ orgId })
   return requestJSON<Project>(
     `/projects/${encodeURIComponent(projectId)}?${query}`,
     {

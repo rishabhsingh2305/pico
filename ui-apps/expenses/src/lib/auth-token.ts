@@ -1,4 +1,5 @@
 const TOKEN_KEY = "expenses.authToken"
+const REFRESH_TOKEN_KEY = "expenses.refreshToken"
 
 export function getAuthToken(): string | null {
   try {
@@ -22,4 +23,33 @@ export function clearAuthToken(): void {
   } catch {
     // Nothing to clear when storage is unavailable.
   }
+}
+
+export function getRefreshToken(): string | null {
+  try {
+    return localStorage.getItem(REFRESH_TOKEN_KEY)
+  } catch {
+    return null
+  }
+}
+
+export function setRefreshToken(token: string): void {
+  try {
+    localStorage.setItem(REFRESH_TOKEN_KEY, token)
+  } catch {
+    // Storage can be unavailable in private or restricted contexts.
+  }
+}
+
+export function clearRefreshToken(): void {
+  try {
+    localStorage.removeItem(REFRESH_TOKEN_KEY)
+  } catch {
+    // Nothing to clear when storage is unavailable.
+  }
+}
+
+export function clearTokens(): void {
+  clearAuthToken()
+  clearRefreshToken()
 }

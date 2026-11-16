@@ -6,6 +6,7 @@ import (
 	"log/slog"
 	"time"
 
+	"picoservice/internal/authz"
 	"picoservice/internal/controllers"
 	"picoservice/internal/entities"
 	"picoservice/internal/routes"
@@ -37,6 +38,10 @@ func NewServices() Services {
 
 // Deps returns router dependencies backed by the fake services.
 func (s Services) Deps(logger *slog.Logger, pinger controllers.Pinger) routes.Deps {
+	policy, err := authz.Load()
+	if err != nil {
+		panic(err)
+	}
 	return routes.Deps{
 		Logger:         logger,
 		Pinger:         pinger,
@@ -46,6 +51,7 @@ func (s Services) Deps(logger *slog.Logger, pinger controllers.Pinger) routes.De
 		Memberships:    s.Memberships,
 		Projects:       s.Projects,
 		Expenses:       s.Expenses,
+		Policy:         policy,
 		SecureCookies:  false,
 		AllowedOrigins: []string{"http://localhost:5173"},
 	}
@@ -54,15 +60,12 @@ func (s Services) Deps(logger *slog.Logger, pinger controllers.Pinger) routes.De
 // UserService is a configurable fake user service.
 type UserService struct {
 	CreateFunc             func(context.Context, services.CreateUserInput) (entities.User, error)
-	ListFunc               func(context.Context, services.ListUsersInput) ([]entities.User, error)
 	GetFunc                func(context.Context, string) (entities.User, error)
 	UpdateFunc             func(context.Context, services.UpdateUserInput) (entities.User, error)
 	ChangePasswordFunc     func(context.Context, services.ChangePasswordInput) error
 	VerifyEmailFunc        func(context.Context, string) (entities.User, error)
 	VerifyEmailOTPFunc     func(context.Context, string, string) (entities.User, error)
 	ResendVerificationFunc func(context.Context, string) error
-	ExistsFunc             func(context.Context, string) (bool, error)
-	Existing               map[string]bool
 }
 
 func (s *UserService) Create(ctx context.Context, in services.CreateUserInput) (entities.User, error) {
@@ -70,13 +73,6 @@ func (s *UserService) Create(ctx context.Context, in services.CreateUserInput) (
 		return s.CreateFunc(ctx, in)
 	}
 	return entities.User{}, nil
-}
-
-func (s *UserService) List(ctx context.Context, in services.ListUsersInput) ([]entities.User, error) {
-	if s.ListFunc != nil {
-		return s.ListFunc(ctx, in)
-	}
-	return []entities.User{}, nil
 }
 
 func (s *UserService) Get(ctx context.Context, id string) (entities.User, error) {
@@ -121,21 +117,14 @@ func (s *UserService) ResendVerification(ctx context.Context, email string) erro
 	return nil
 }
 
-func (s *UserService) Exists(ctx context.Context, id string) (bool, error) {
-	if s.ExistsFunc != nil {
-		return s.ExistsFunc(ctx, id)
-	}
-	if s.Existing != nil {
-		return s.Existing[id], nil
-	}
-	return true, nil
-}
-
 // AuthService is a configurable fake authentication service.
 type AuthService struct {
-	LoginFunc        func(context.Context, string, string) (services.LoginResult, error)
-	SessionFunc      func(context.Context, string) (entities.User, time.Time, error)
-	ParseSubjectFunc func(string) (string, error)
+	LoginFunc       func(context.Context, string, string) (services.LoginResult, error)
+	SessionFunc     func(context.Context, string) (entities.User, time.Time, error)
+	RefreshFunc     func(context.Context, string) (services.LoginResult, error)
+	ParseAccessFunc func(string) (string, map[string][]string, error)
+	// Orgs maps a fake token (the user ID) to its organization feature roles.
+	Orgs map[string]map[string][]string
 }
 
 func (s *AuthService) Login(ctx context.Context, email, password string) (services.LoginResult, error) {
@@ -156,11 +145,23 @@ func (s *AuthService) Session(ctx context.Context, token string) (entities.User,
 	return entities.User{ID: "user-1", EmailVerified: true}, time.Now().UTC().Add(time.Hour), nil
 }
 
-func (s *AuthService) ParseSubject(token string) (string, error) {
-	if s.ParseSubjectFunc != nil {
-		return s.ParseSubjectFunc(token)
+func (s *AuthService) Refresh(ctx context.Context, token string) (services.LoginResult, error) {
+	if s.RefreshFunc != nil {
+		return s.RefreshFunc(ctx, token)
 	}
-	return "", entities.ErrInvalidToken
+	return services.LoginResult{}, entities.ErrInvalidToken
+}
+
+// ParseAccess treats the token as a user ID so route tests can authenticate
+// with a readable bearer token.
+func (s *AuthService) ParseAccess(token string) (string, map[string][]string, error) {
+	if s.ParseAccessFunc != nil {
+		return s.ParseAccessFunc(token)
+	}
+	if token == "" {
+		return "", nil, entities.ErrInvalidToken
+	}
+	return token, s.Orgs[token], nil
 }
 
 // OrgService is a configurable fake organization service.
@@ -169,8 +170,6 @@ type OrgService struct {
 	ListFunc   func(context.Context, services.ListOrgsInput) ([]entities.Org, error)
 	GetFunc    func(context.Context, string) (entities.Org, error)
 	UpdateFunc func(context.Context, services.UpdateOrgInput) (entities.Org, error)
-	ExistsFunc func(context.Context, string) (bool, error)
-	Existing   map[string]bool
 }
 
 func (s *OrgService) Create(ctx context.Context, in services.CreateOrgInput) (entities.Org, error) {
@@ -201,23 +200,12 @@ func (s *OrgService) Update(ctx context.Context, in services.UpdateOrgInput) (en
 	return entities.Org{}, nil
 }
 
-func (s *OrgService) Exists(ctx context.Context, id string) (bool, error) {
-	if s.ExistsFunc != nil {
-		return s.ExistsFunc(ctx, id)
-	}
-	if s.Existing != nil {
-		return s.Existing[id], nil
-	}
-	return true, nil
-}
-
 // MembershipService is a configurable fake membership service.
 type MembershipService struct {
-	AddFunc    func(context.Context, services.CreateMembershipInput) (entities.Membership, error)
-	ListFunc   func(context.Context, services.ListMembershipsInput) ([]entities.Membership, error)
-	RemoveFunc func(context.Context, string, string, string) error
-	ExistsFunc func(context.Context, string, string) (bool, error)
-	Existing   map[string]bool
+	AddFunc         func(context.Context, services.CreateMembershipInput) (entities.Membership, error)
+	ListFunc        func(context.Context, services.ListMembershipsInput) ([]entities.Membership, error)
+	UpdateRolesFunc func(context.Context, string, string, map[string]string) error
+	RemoveFunc      func(context.Context, string, string) error
 }
 
 func (s *MembershipService) Add(ctx context.Context, in services.CreateMembershipInput) (entities.Membership, error) {
@@ -234,21 +222,18 @@ func (s *MembershipService) List(ctx context.Context, in services.ListMembership
 	return []entities.Membership{}, nil
 }
 
-func (s *MembershipService) Remove(ctx context.Context, actorID, orgID, userID string) error {
-	if s.RemoveFunc != nil {
-		return s.RemoveFunc(ctx, actorID, orgID, userID)
+func (s *MembershipService) UpdateRoles(ctx context.Context, orgID, userID string, roles map[string]string) error {
+	if s.UpdateRolesFunc != nil {
+		return s.UpdateRolesFunc(ctx, orgID, userID, roles)
 	}
 	return nil
 }
 
-func (s *MembershipService) Exists(ctx context.Context, orgID, userID string) (bool, error) {
-	if s.ExistsFunc != nil {
-		return s.ExistsFunc(ctx, orgID, userID)
+func (s *MembershipService) Remove(ctx context.Context, orgID, userID string) error {
+	if s.RemoveFunc != nil {
+		return s.RemoveFunc(ctx, orgID, userID)
 	}
-	if s.Existing != nil {
-		return s.Existing[orgID+"/"+userID], nil
-	}
-	return true, nil
+	return nil
 }
 
 // ProjectService is a configurable fake project service.

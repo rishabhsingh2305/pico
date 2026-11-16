@@ -9,8 +9,6 @@ import (
 	"strings"
 	"time"
 
-	"github.com/go-chi/chi/v5"
-
 	"picoservice/internal/entities"
 	"picoservice/internal/httpx"
 	"picoservice/internal/services"
@@ -20,7 +18,6 @@ import (
 // UserService is the user behavior used by the HTTP controllers.
 type UserService interface {
 	Create(ctx context.Context, in services.CreateUserInput) (entities.User, error)
-	List(ctx context.Context, in services.ListUsersInput) ([]entities.User, error)
 	Get(ctx context.Context, id string) (entities.User, error)
 	Update(ctx context.Context, in services.UpdateUserInput) (entities.User, error)
 	ChangePassword(ctx context.Context, in services.ChangePasswordInput) error
@@ -61,37 +58,17 @@ func (c *UserController) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set(httpx.HeaderLocation, "/users/"+user.ID)
 	httpx.WriteJSON(w, r, http.StatusCreated, userResponseFrom(user))
 }
 
-// List handles GET and HEAD /users.
-func (c *UserController) List(w http.ResponseWriter, r *http.Request) {
-	limit, offset, message := parsePagination(r)
-	if message != "" {
-		httpx.WriteError(w, r, http.StatusBadRequest, message)
-		return
-	}
-
-	items, err := c.service.List(r.Context(), services.ListUsersInput{
-		Limit:  limit,
-		Offset: offset,
-	})
-	if err != nil {
-		c.writeError(w, r, err)
-		return
-	}
-
-	response := userListResponse{Items: make([]userResponse, 0, len(items))}
-	for _, user := range items {
-		response.Items = append(response.Items, userResponseFrom(user))
-	}
-	httpx.WriteJSON(w, r, http.StatusOK, response)
-}
-
-// Get handles GET and HEAD /users/{userID}.
+// Get handles GET and HEAD /users/me. The actor comes from the token.
 func (c *UserController) Get(w http.ResponseWriter, r *http.Request) {
-	user, err := c.service.Get(r.Context(), chi.URLParam(r, "userID"))
+	id, ok := requestIdentity(w, r)
+	if !ok {
+		return
+	}
+
+	user, err := c.service.Get(r.Context(), id.UserID)
 	if err != nil {
 		c.writeError(w, r, err)
 		return
@@ -99,7 +76,7 @@ func (c *UserController) Get(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, r, http.StatusOK, userResponseFrom(user))
 }
 
-// Update handles PATCH /users/{userID}.
+// Update handles PATCH /users/me. The actor comes from the token.
 func (c *UserController) Update(w http.ResponseWriter, r *http.Request) {
 	id, ok := requestIdentity(w, r)
 	if !ok {
@@ -114,7 +91,7 @@ func (c *UserController) Update(w http.ResponseWriter, r *http.Request) {
 
 	user, err := c.service.Update(r.Context(), services.UpdateUserInput{
 		ActorID: id.UserID,
-		UserID:  chi.URLParam(r, "userID"),
+		UserID:  id.UserID,
 		Name:    request.Name,
 		Email:   request.Email,
 	})
@@ -125,7 +102,8 @@ func (c *UserController) Update(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, r, http.StatusOK, userResponseFrom(user))
 }
 
-// ChangePassword handles POST /users/{userID}/password.
+// ChangePassword handles POST /users/me/password. The actor comes from the
+// token.
 func (c *UserController) ChangePassword(w http.ResponseWriter, r *http.Request) {
 	id, ok := requestIdentity(w, r)
 	if !ok {
@@ -140,7 +118,7 @@ func (c *UserController) ChangePassword(w http.ResponseWriter, r *http.Request) 
 
 	if err := c.service.ChangePassword(r.Context(), services.ChangePasswordInput{
 		ActorID:         id.UserID,
-		UserID:          chi.URLParam(r, "userID"),
+		UserID:          id.UserID,
 		CurrentPassword: request.CurrentPassword,
 		NewPassword:     request.NewPassword,
 	}); err != nil {
@@ -302,10 +280,6 @@ type userResponse struct {
 	EmailVerified bool      `json:"emailVerified"`
 	CreatedAt     time.Time `json:"createdAt"`
 	UpdatedAt     time.Time `json:"updatedAt"`
-}
-
-type userListResponse struct {
-	Items []userResponse `json:"items"`
 }
 
 func userResponseFrom(user entities.User) userResponse {

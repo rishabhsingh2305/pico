@@ -275,18 +275,6 @@ func TestChangePassword(t *testing.T) {
 	})
 }
 
-func TestListUsesPagination(t *testing.T) {
-	store := newFakeStore()
-	service := services.NewUserService(store, &fakeHasher{}, &fakeVerification{})
-
-	if _, err := service.List(context.Background(), services.ListUsersInput{}); err != nil {
-		t.Fatalf("list users: %v", err)
-	}
-	if got, want := store.lastLimit, validation.DefaultLimit; got != want {
-		t.Fatalf("expected default limit %d, got %d", want, got)
-	}
-}
-
 func TestBcryptHasher(t *testing.T) {
 	hasher := services.NewBcryptHasher()
 
@@ -310,8 +298,6 @@ type fakeStore struct {
 	hashes            map[string]string
 	nextID            int
 	insertErr         error
-	lastLimit         int
-	lastOffset        int
 	updateErr         error
 	updatePasswordErr error
 }
@@ -364,12 +350,6 @@ func (s *fakeStore) PasswordHash(_ context.Context, id string) (string, error) {
 		return "", entities.ErrUserNotFound
 	}
 	return hash, nil
-}
-
-func (s *fakeStore) List(_ context.Context, limit, offset int) ([]entities.User, error) {
-	s.lastLimit = limit
-	s.lastOffset = offset
-	return []entities.User{}, nil
 }
 
 func (s *fakeStore) Update(_ context.Context, id, name, email string, emailVerified bool, updatedAt time.Time) (entities.User, error) {

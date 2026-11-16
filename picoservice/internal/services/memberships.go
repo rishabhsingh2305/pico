@@ -11,8 +11,7 @@ import (
 	"picoservice/internal/validation"
 )
 
-// OrgOwnerLookup reports an organization's owner. Found is false when the org
-// does not exist.
+// OrgOwnerLookup reports organization owners.
 type OrgOwnerLookup interface {
 	OwnerID(ctx context.Context, orgID string) (ownerID string, found bool, err error)
 }
@@ -22,38 +21,48 @@ type UserLookup interface {
 	Exists(ctx context.Context, userID string) (bool, error)
 }
 
-// CreateMembershipInput contains the fields needed to add a member.
+// FeatureRoles validates feature-scoped roles against the loaded policy.
+type FeatureRoles interface {
+	ValidRole(feature, role string) bool
+}
+
+// CreateMembershipInput contains the fields needed to add a member. Roles is
+// optional and defaults to the legacy editor role map.
 type CreateMembershipInput struct {
-	ActorID string
-	OrgID   string
-	UserID  string
+	OrgID  string
+	UserID string
+	Roles  map[string]string
 }
 
 // ListMembershipsInput contains pagination fields for listing an
 // organization's members.
 type ListMembershipsInput struct {
-	ActorID string
-	OrgID   string
-	Limit   int
-	Offset  int
+	OrgID  string
+	Limit  int
+	Offset int
 }
 
 // MembershipService applies membership validation and business rules.
 type MembershipService struct {
-	store dao.MembershipDAO
-	orgs  OrgOwnerLookup
-	users UserLookup
+	store    dao.MembershipDAO
+	orgs     OrgOwnerLookup
+	users    UserLookup
+	features FeatureRoles
 }
 
-// NewMembershipService returns a membership service backed by store, orgs, and
-// users.
-func NewMembershipService(store dao.MembershipDAO, orgs OrgOwnerLookup, users UserLookup) *MembershipService {
-	return &MembershipService{store: store, orgs: orgs, users: users}
+// NewMembershipService returns a membership service backed by store, orgs,
+// users, and the feature-role policy.
+func NewMembershipService(store dao.MembershipDAO, orgs OrgOwnerLookup, users UserLookup, features FeatureRoles) *MembershipService {
+	return &MembershipService{store: store, orgs: orgs, users: users, features: features}
 }
 
-// Add adds a member to an organization. Only the owner may add members.
+// Add adds a member to an organization. The router requires members.add.
 func (s *MembershipService) Add(ctx context.Context, in CreateMembershipInput) (entities.Membership, error) {
 	orgID, userID, err := validateIDs(in.OrgID, in.UserID)
+	if err != nil {
+		return entities.Membership{}, err
+	}
+	roles, err := s.normalizeRoles(in.Roles)
 	if err != nil {
 		return entities.Membership{}, err
 	}
@@ -61,48 +70,52 @@ func (s *MembershipService) Add(ctx context.Context, in CreateMembershipInput) (
 	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
-	ownerID, found, err := s.orgs.OwnerID(ctx, orgID)
-	if err != nil {
-		return entities.Membership{}, fmt.Errorf("get org owner: %w", err)
-	}
-	if !found {
-		return entities.Membership{}, entities.ErrOrgNotFound
-	}
-	if ownerID != in.ActorID {
-		return entities.Membership{}, entities.ErrForbidden
-	}
-	if userID == ownerID {
-		return entities.Membership{}, entities.ErrAlreadyMember
-	}
-
-	exists, err := s.users.Exists(ctx, userID)
-	if err != nil {
-		return entities.Membership{}, fmt.Errorf("check user: %w", err)
-	}
-	if !exists {
-		return entities.Membership{}, entities.ErrUserNotFound
-	}
-
-	alreadyMember, err := s.store.Exists(ctx, orgID, userID)
-	if err != nil {
-		return entities.Membership{}, fmt.Errorf("check membership: %w", err)
-	}
-	if alreadyMember {
-		return entities.Membership{}, entities.ErrAlreadyMember
+	if err := s.checkMembershipTarget(ctx, orgID, userID); err != nil {
+		return entities.Membership{}, err
 	}
 
 	membership := entities.Membership{
 		OrgID:     orgID,
 		UserID:    userID,
-		Role:      entities.RoleMember,
+		Roles:     roles,
 		CreatedAt: time.Now().UTC(),
 	}
 	created, err := s.store.Insert(ctx, membership)
 	if err != nil {
 		return entities.Membership{}, fmt.Errorf("add member: %w", err)
 	}
-	created.Role = entities.RoleMember
+	created.Roles = roles
 	return created, nil
+}
+
+func (s *MembershipService) checkMembershipTarget(ctx context.Context, orgID, userID string) error {
+	ownerID, found, err := s.orgs.OwnerID(ctx, orgID)
+	if err != nil {
+		return fmt.Errorf("get org owner: %w", err)
+	}
+	if !found {
+		return entities.ErrOrgNotFound
+	}
+	if userID == ownerID {
+		return entities.ErrAlreadyMember
+	}
+
+	exists, err := s.users.Exists(ctx, userID)
+	if err != nil {
+		return fmt.Errorf("check user: %w", err)
+	}
+	if !exists {
+		return entities.ErrUserNotFound
+	}
+
+	alreadyMember, err := s.store.Exists(ctx, orgID, userID)
+	if err != nil {
+		return fmt.Errorf("check membership: %w", err)
+	}
+	if alreadyMember {
+		return entities.ErrAlreadyMember
+	}
+	return nil
 }
 
 // AddOwner creates the owner's membership during organization creation. It is
@@ -123,7 +136,7 @@ func (s *MembershipService) AddOwner(ctx context.Context, orgID, userID string) 
 }
 
 // List returns the members of an organization. The router enforces that the
-// actor is a member before this is called.
+// actor has the members.list permission before this is called.
 func (s *MembershipService) List(ctx context.Context, in ListMembershipsInput) ([]entities.Membership, error) {
 	orgID := strings.TrimSpace(in.OrgID)
 	if orgID == "" {
@@ -150,19 +163,22 @@ func (s *MembershipService) List(ctx context.Context, in ListMembershipsInput) (
 	if err != nil {
 		return nil, fmt.Errorf("list memberships: %w", err)
 	}
-	for i := range items {
-		if items[i].UserID == ownerID {
-			items[i].Role = entities.RoleOwner
-		} else {
-			items[i].Role = entities.RoleMember
-		}
-	}
-	return items, nil
+	return s.decorateMemberships(items, ownerID), nil
 }
 
-// Remove removes a member from an organization. Only the owner may remove
-// members, and the owner cannot remove themselves.
-func (s *MembershipService) Remove(ctx context.Context, actorID, orgID, userID string) error {
+func (s *MembershipService) decorateMemberships(items []entities.Membership, ownerID string) []entities.Membership {
+	for i := range items {
+		items[i].Owner = items[i].UserID == ownerID
+		if !items[i].Owner && len(items[i].Roles) == 0 {
+			items[i].Roles = s.defaultRoles()
+		}
+	}
+	return items
+}
+
+// Remove removes a member from an organization. The router requires
+// members.remove, and the owner cannot be removed.
+func (s *MembershipService) Remove(ctx context.Context, orgID, userID string) error {
 	orgID, userID, err := validateIDs(orgID, userID)
 	if err != nil {
 		return err
@@ -178,9 +194,6 @@ func (s *MembershipService) Remove(ctx context.Context, actorID, orgID, userID s
 	if !found {
 		return entities.ErrOrgNotFound
 	}
-	if ownerID != actorID {
-		return entities.ErrForbidden
-	}
 	if userID == ownerID {
 		return entities.ErrCannotRemoveOwner
 	}
@@ -191,17 +204,39 @@ func (s *MembershipService) Remove(ctx context.Context, actorID, orgID, userID s
 	return nil
 }
 
-// Exists reports whether a user belongs to an organization. It is used by
-// identity middleware.
-func (s *MembershipService) Exists(ctx context.Context, orgID, userID string) (bool, error) {
+// UpdateRoles replaces a member's feature roles. The router requires
+// members.update, and the owner's own roles cannot be changed.
+func (s *MembershipService) UpdateRoles(ctx context.Context, orgID, userID string, roles map[string]string) error {
+	orgID, userID, err := validateIDs(orgID, userID)
+	if err != nil {
+		return err
+	}
+	if roles == nil {
+		return &validation.Error{Field: "roles", Message: "roles is required"}
+	}
+	roles, err = s.normalizeRoles(roles)
+	if err != nil {
+		return err
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
-	exists, err := s.store.Exists(ctx, orgID, userID)
+	ownerID, found, err := s.orgs.OwnerID(ctx, orgID)
 	if err != nil {
-		return false, fmt.Errorf("check membership: %w", err)
+		return fmt.Errorf("get org owner: %w", err)
 	}
-	return exists, nil
+	if !found {
+		return entities.ErrOrgNotFound
+	}
+	if userID == ownerID {
+		return entities.ErrCannotChangeOwner
+	}
+
+	if err := s.store.UpdateRoles(ctx, orgID, userID, roles); err != nil {
+		return fmt.Errorf("update member roles: %w", err)
+	}
+	return nil
 }
 
 func validateIDs(orgID, userID string) (string, string, error) {

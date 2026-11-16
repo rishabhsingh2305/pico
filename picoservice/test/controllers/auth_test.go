@@ -24,9 +24,11 @@ func TestAuthLogin(t *testing.T) {
 				t.Fatalf("unexpected credentials: %q %q", email, password)
 			}
 			return services.LoginResult{
-				User:      entities.User{ID: "user-1", Email: email, EmailVerified: true},
-				Token:     "token-1",
-				ExpiresAt: expiresAt,
+				User:             entities.User{ID: "user-1", Email: email, EmailVerified: true},
+				Token:            "token-1",
+				ExpiresAt:        expiresAt,
+				RefreshToken:     "refresh-1",
+				RefreshExpiresAt: expiresAt.Add(time.Hour),
 			}, nil
 		},
 	}
@@ -39,22 +41,29 @@ func TestAuthLogin(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
 	}
-	cookie := rec.Header().Get("Set-Cookie")
-	if !strings.Contains(cookie, middleware.AuthCookieName) || !strings.Contains(cookie, "HttpOnly") {
-		t.Fatalf("expected an HttpOnly auth cookie, got %q", cookie)
+	cookies := rec.Result().Cookies()
+	if !hasCookie(cookies, middleware.AuthCookieName, true) {
+		t.Fatalf("expected an HttpOnly auth cookie, got %v", cookies)
+	}
+	if !hasCookie(cookies, middleware.RefreshCookieName, true) {
+		t.Fatalf("expected a refresh cookie, got %v", cookies)
 	}
 
 	var body struct {
-		AccessToken string         `json:"accessToken"`
-		TokenType   string         `json:"tokenType"`
-		User        map[string]any `json:"user"`
-		ExpiresAt   time.Time      `json:"expiresAt"`
+		AccessToken  string         `json:"accessToken"`
+		RefreshToken string         `json:"refreshToken"`
+		TokenType    string         `json:"tokenType"`
+		User         map[string]any `json:"user"`
+		ExpiresAt    time.Time      `json:"expiresAt"`
 	}
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
 	if got, want := body.AccessToken, "token-1"; got != want {
 		t.Fatalf("expected access token %q, got %q", want, got)
+	}
+	if got, want := body.RefreshToken, "refresh-1"; got != want {
+		t.Fatalf("expected refresh token %q, got %q", want, got)
 	}
 	if got, want := body.TokenType, "Bearer"; got != want {
 		t.Fatalf("expected token type %q, got %q", want, got)
@@ -122,6 +131,93 @@ func TestAuthLoginInvalidBody(t *testing.T) {
 	controllers.NewAuthController(testLogger(), &fakes.AuthService{}, false).Login(rec, req)
 
 	assertJSONError(t, rec, http.StatusBadRequest, "invalid request body")
+}
+
+func TestAuthRefresh(t *testing.T) {
+	expiresAt := time.Now().UTC().Add(30 * time.Minute)
+	service := &fakes.AuthService{
+		RefreshFunc: func(_ context.Context, token string) (services.LoginResult, error) {
+			if token != "refresh-1" {
+				t.Fatalf("expected refresh-1, got %q", token)
+			}
+			return services.LoginResult{
+				User:             entities.User{ID: "user-1", Email: "ada@example.com", EmailVerified: true},
+				Token:            "token-2",
+				ExpiresAt:        expiresAt,
+				RefreshToken:     "refresh-2",
+				RefreshExpiresAt: expiresAt.Add(24 * time.Hour),
+			}, nil
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", strings.NewReader(`{"refreshToken":"refresh-1"}`))
+
+	controllers.NewAuthController(testLogger(), service, false).Refresh(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+	var body struct {
+		AccessToken  string `json:"accessToken"`
+		RefreshToken string `json:"refreshToken"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if got, want := body.AccessToken, "token-2"; got != want {
+		t.Fatalf("expected access token %q, got %q", want, got)
+	}
+	if got, want := body.RefreshToken, "refresh-2"; got != want {
+		t.Fatalf("expected refresh token %q, got %q", want, got)
+	}
+	if !hasCookie(rec.Result().Cookies(), middleware.RefreshCookieName, true) {
+		t.Fatalf("expected a refresh cookie, got %v", rec.Result().Cookies())
+	}
+}
+
+func TestAuthRefreshUsesCookie(t *testing.T) {
+	service := &fakes.AuthService{
+		RefreshFunc: func(_ context.Context, token string) (services.LoginResult, error) {
+			if token != "refresh-cookie" {
+				t.Fatalf("expected refresh-cookie, got %q", token)
+			}
+			return services.LoginResult{
+				User:      entities.User{ID: "user-1", Email: "ada@example.com", EmailVerified: true},
+				Token:     "token-2",
+				ExpiresAt: time.Now().UTC().Add(time.Hour),
+			}, nil
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", strings.NewReader(`{}`))
+	req.AddCookie(&http.Cookie{Name: middleware.RefreshCookieName, Value: "refresh-cookie"})
+
+	controllers.NewAuthController(testLogger(), service, false).Refresh(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
+	}
+}
+
+func TestAuthRefreshRejectsInvalidToken(t *testing.T) {
+	service := &fakes.AuthService{
+		RefreshFunc: func(context.Context, string) (services.LoginResult, error) {
+			return services.LoginResult{}, entities.ErrInvalidToken
+		},
+	}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/auth/refresh", strings.NewReader(`{"refreshToken":"bad"}`))
+
+	controllers.NewAuthController(testLogger(), service, false).Refresh(rec, req)
+
+	assertJSONError(t, rec, http.StatusUnauthorized, "authentication required")
+	cleared := rec.Result().Cookies()
+	if !hasCookie(cleared, middleware.AuthCookieName, false) || !hasCookie(cleared, middleware.RefreshCookieName, false) {
+		t.Fatalf("expected cookies to be cleared, got %v", cleared)
+	}
 }
 
 func TestAuthLogout(t *testing.T) {
@@ -203,4 +299,17 @@ func TestAuthSessionInvalidToken(t *testing.T) {
 	controllers.NewAuthController(testLogger(), service, false).Session(rec, req)
 
 	assertJSONError(t, rec, http.StatusUnauthorized, "authentication required")
+}
+
+func hasCookie(cookies []*http.Cookie, name string, httpOnly bool) bool {
+	for _, cookie := range cookies {
+		if cookie.Name != name {
+			continue
+		}
+		if httpOnly {
+			return cookie.HttpOnly && cookie.Value != ""
+		}
+		return cookie.Value == ""
+	}
+	return false
 }

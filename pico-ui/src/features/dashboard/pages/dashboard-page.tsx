@@ -65,15 +65,13 @@ function OrgDashboardView({ session }: { session: Session }) {
     async function load() {
       try {
         const [loadedOrg, projects, summary, recentPage] = await Promise.all([
-          getOrg(session.userId, orgId),
-          listProjects(session.userId, orgId),
+          getOrg(orgId),
+          listProjects(orgId),
           summarizeExpenses({
-            userId: session.userId,
             orgId,
             tags: [],
           }),
           listExpenses({
-            userId: session.userId,
             orgId,
             tags: [],
             limit: RECENT_LIMIT,

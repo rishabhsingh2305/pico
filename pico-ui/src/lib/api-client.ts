@@ -1,4 +1,10 @@
-import { getAuthToken } from "@/lib/auth-token"
+import {
+  clearTokens,
+  getAuthToken,
+  getRefreshToken,
+  setAuthToken,
+  setRefreshToken,
+} from "@/lib/auth-token"
 import { API_BASE_URL } from "@/lib/env"
 
 export class ApiError extends Error {
@@ -15,6 +21,18 @@ export async function requestJSON<T>(
   path: string,
   init: RequestInit
 ): Promise<T> {
+  let response = await send(path, init)
+
+  if (response.status === 401 && canRefresh(path)) {
+    if (await refreshTokens()) {
+      response = await send(path, init)
+    }
+  }
+
+  return parseResponse<T>(response)
+}
+
+function send(path: string, init: RequestInit): Promise<Response> {
   const headers = new Headers(init.headers)
   headers.set("Accept", "application/json")
 
@@ -23,11 +41,64 @@ export async function requestJSON<T>(
     headers.set("Authorization", `Bearer ${token}`)
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
+  return fetch(`${API_BASE_URL}${path}`, {
     credentials: "omit",
     ...init,
     headers,
   })
+}
+
+function canRefresh(path: string): boolean {
+  return (
+    !path.startsWith("/auth/login") &&
+    !path.startsWith("/auth/refresh") &&
+    !path.startsWith("/auth/logout")
+  )
+}
+
+let refreshInFlight: Promise<boolean> | null = null
+
+export function refreshTokens(): Promise<boolean> {
+  if (refreshInFlight) {
+    return refreshInFlight
+  }
+
+  const refreshToken = getRefreshToken()
+  if (!refreshToken) {
+    return Promise.resolve(false)
+  }
+
+  refreshInFlight = fetch(`${API_BASE_URL}/auth/refresh`, {
+    method: "POST",
+    credentials: "omit",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ refreshToken }),
+  })
+    .then(async (response) => {
+      if (!response.ok) {
+        clearTokens()
+        return false
+      }
+      const body = parseJSON(await response.text())
+      if (!isRecord(body) || typeof body.accessToken !== "string") {
+        clearTokens()
+        return false
+      }
+      setAuthToken(body.accessToken)
+      if (typeof body.refreshToken === "string" && body.refreshToken !== "") {
+        setRefreshToken(body.refreshToken)
+      }
+      return true
+    })
+    .catch(() => false)
+    .finally(() => {
+      refreshInFlight = null
+    })
+
+  return refreshInFlight
+}
+
+async function parseResponse<T>(response: Response): Promise<T> {
   const body = parseJSON(await response.text())
 
   if (!response.ok) {

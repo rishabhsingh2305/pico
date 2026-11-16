@@ -184,7 +184,6 @@ describe("OrgDetailPage", () => {
 
     const projectURL = projectListURLs(fetchMock)[0]
     expect(projectURL.searchParams.get("orgId")).toBe("org-1")
-    expect(projectURL.searchParams.get("userId")).toBe("user-1")
   })
 
   it("opens project creation in a modal when none exist", async () => {
@@ -260,8 +259,7 @@ describe("OrgDetailPage", () => {
 
     const createProjectCall = fetchMock.mock.calls.find(
       ([url, init]) =>
-        url === "/api/projects?orgId=org-1&userId=user-1" &&
-        init?.method === "POST"
+        url === "/api/projects?orgId=org-1" && init?.method === "POST"
     )
     expect(createProjectCall).toBeDefined()
     expect(JSON.parse(String(createProjectCall?.[1]?.body))).toEqual({

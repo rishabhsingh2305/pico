@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest"
 
-import { setAuthToken } from "@/lib/auth-token"
+import {
+  getAuthToken,
+  getRefreshToken,
+  setAuthToken,
+  setRefreshToken,
+} from "@/lib/auth-token"
 import { ApiError, requestJSON } from "@/lib/api-client"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -90,5 +95,70 @@ describe("requestJSON", () => {
 
     expect(error.status).toBe(409)
     expect(error.message).toBe("duplicate")
+  })
+
+  it("refreshes an expired token once and retries the request", async () => {
+    setAuthToken("expired-token")
+    setRefreshToken("refresh-1")
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ error: "authentication required" }, 401)
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ accessToken: "access-2", refreshToken: "refresh-2" })
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true }))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(requestJSON("/test", {})).resolves.toEqual({ ok: true })
+
+    expect(fetchMock).toHaveBeenCalledTimes(3)
+    const [refreshURL, refreshInit] = fetchMock.mock.calls[1]
+    expect(refreshURL).toBe("/api/auth/refresh")
+    expect(JSON.parse(String(refreshInit.body))).toEqual({
+      refreshToken: "refresh-1",
+    })
+
+    const [, retryInit] = fetchMock.mock.calls[2]
+    expect(new Headers(retryInit.headers).get("Authorization")).toBe(
+      "Bearer access-2"
+    )
+    expect(getAuthToken()).toBe("access-2")
+    expect(getRefreshToken()).toBe("refresh-2")
+  })
+
+  it("does not refresh for authentication endpoints", async () => {
+    setRefreshToken("refresh-1")
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: "invalid credentials" }, 401))
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(
+      requestJSON("/auth/login", { method: "POST" })
+    ).rejects.toBeInstanceOf(ApiError)
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
+  it("clears tokens when the refresh token is rejected", async () => {
+    setAuthToken("expired-token")
+    setRefreshToken("refresh-1")
+
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse({ error: "authentication required" }, 401)
+      )
+      .mockResolvedValueOnce(
+        jsonResponse({ error: "authentication required" }, 401)
+      )
+    vi.stubGlobal("fetch", fetchMock)
+
+    await expect(requestJSON("/test", {})).rejects.toBeInstanceOf(ApiError)
+    expect(getAuthToken()).toBeNull()
+    expect(getRefreshToken()).toBeNull()
   })
 })

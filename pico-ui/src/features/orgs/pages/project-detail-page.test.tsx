@@ -251,7 +251,6 @@ describe("ProjectDetailPage", () => {
     expect(projectCall).toBeDefined()
     const projectURL = new URL(String(projectCall?.[0]), "http://localhost")
     expect(projectURL.searchParams.get("orgId")).toBe("org-1")
-    expect(projectURL.searchParams.get("userId")).toBe("user-1")
 
     const expenseURL = expenseListURLs(fetchMock)[0]
     expect(expenseURL.searchParams.get("projectId")).toBe("project-1")

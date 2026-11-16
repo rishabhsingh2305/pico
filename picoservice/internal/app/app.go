@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	"picoservice/internal/authz"
 	"picoservice/internal/dao/mongodb"
 	"picoservice/internal/email"
 	"picoservice/internal/routes"
@@ -49,14 +50,20 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 	}
 	verification := services.NewEmailVerificationService(userStore, tokens, mailer, cfg.PublicBaseURL)
 
+	policy, err := authz.Load()
+	if err != nil {
+		return nil, fmt.Errorf("app: load authz policy: %w", err)
+	}
+
 	hasher := services.NewBcryptHasher()
 	userService := services.NewUserService(userStore, hasher, verification)
-	authService, err := services.NewAuthService(userStore, hasher, cfg.JWTSecret)
+	orgService := services.NewOrgService(orgStore, membershipStore)
+	membershipService := services.NewMembershipService(membershipStore, orgStore, userStore, policy)
+	roleResolver := services.NewOrgRoleResolver(membershipStore, orgStore)
+	authService, err := services.NewAuthService(userStore, hasher, cfg.JWTSecret, roleResolver)
 	if err != nil {
 		return nil, fmt.Errorf("app: create auth service: %w", err)
 	}
-	orgService := services.NewOrgService(orgStore, membershipStore)
-	membershipService := services.NewMembershipService(membershipStore, orgStore, userStore)
 	projectService := services.NewProjectService(projectStore)
 	expenseService := services.NewExpenseService(expenseStore, projectStore)
 
@@ -69,6 +76,7 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 		Memberships:    membershipService,
 		Projects:       projectService,
 		Expenses:       expenseService,
+		Policy:         policy,
 		SecureCookies:  strings.HasPrefix(cfg.PublicBaseURL, "https://"),
 		AllowedOrigins: cfg.AllowedOrigins(),
 	})

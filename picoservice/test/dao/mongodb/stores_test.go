@@ -227,6 +227,51 @@ func TestStoresIntegration(t *testing.T) {
 		t.Fatalf("expected org %q, got %q", org.ID, orgIDs[0])
 	}
 
+	roles := map[string]string{
+		entities.FeatureProject: entities.FeatureRoleViewer,
+		entities.FeatureExpense: entities.FeatureRoleEditor,
+	}
+	if err := membershipStore.UpdateRoles(ctx, org.ID, user.ID, roles); err != nil {
+		t.Fatalf("update roles: %v", err)
+	}
+	memberships, err := membershipStore.ListByUser(ctx, user.ID, 10)
+	if err != nil {
+		t.Fatalf("list user memberships: %v", err)
+	}
+	if got, want := len(memberships), 1; got != want {
+		t.Fatalf("expected %d membership, got %d", want, got)
+	}
+	if got, want := memberships[0].Roles[entities.FeatureExpense], entities.FeatureRoleEditor; got != want {
+		t.Fatalf("expected expense role %q, got %q", want, got)
+	}
+	if got, want := memberships[0].Roles[entities.FeatureProject], entities.FeatureRoleViewer; got != want {
+		t.Fatalf("expected project role %q, got %q", want, got)
+	}
+
+	legacyUserID := "legacy-user"
+	if _, err := raw.Database(database).Collection("memberships").InsertOne(ctx, bson.M{
+		"_id":       bson.NewObjectID(),
+		"orgId":     org.ID,
+		"userId":    legacyUserID,
+		"role":      "org.viewer",
+		"createdAt": now,
+	}); err != nil {
+		t.Fatalf("insert legacy membership: %v", err)
+	}
+	legacy, err := membershipStore.ListByUser(ctx, legacyUserID, 10)
+	if err != nil {
+		t.Fatalf("list legacy membership: %v", err)
+	}
+	if got, want := len(legacy), 1; got != want {
+		t.Fatalf("expected %d legacy membership, got %d", want, got)
+	}
+	if got, want := legacy[0].Roles[entities.FeatureExpense], entities.FeatureRoleViewer; got != want {
+		t.Fatalf("expected legacy expense role %q, got %q", want, got)
+	}
+	if _, ok := legacy[0].Roles[entities.FeatureMember]; ok {
+		t.Fatal("legacy org.viewer must not gain member access")
+	}
+
 	projectStore := mongodb.NewProjectStore(client)
 	project, err := projectStore.Insert(ctx, entities.Project{
 		OrgID:     org.ID,

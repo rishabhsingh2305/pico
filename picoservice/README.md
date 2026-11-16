@@ -31,29 +31,32 @@ canonical API contract.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/auth/login` | Sign in with `{"email","password"}`; returns `{"accessToken","tokenType","user","expiresAt"}` and also sets a `pico_auth` cookie fallback |
-| `POST` | `/auth/logout` | Clear the auth cookie (`204`); the client clears its stored token |
+| `POST` | `/auth/login` | Sign in with `{"email","password"}`; returns `{"accessToken","refreshToken","tokenType","user","expiresAt","refreshExpiresAt"}` and sets `pico_auth` and `pico_refresh` cookie fallbacks |
+| `POST` | `/auth/refresh` | Exchange `{"refreshToken":"..."}` or the `pico_refresh` cookie for a new access and refresh token |
+| `POST` | `/auth/logout` | Clear both auth cookies (`204`); the client clears its stored tokens |
 | `GET` | `/auth/session` | Return the current user and token expiry from `Authorization: Bearer` or the cookie, or `401` |
 
-Access tokens are HS256 JWTs valid for 7 days and carry `sub`, `iss`,
-`aud=picoservice-api`, and `type=access`. Login requires a verified email:
-wrong credentials return `401 invalid email or password`, and unverified
-accounts return `403 email not verified`. Tokens are stateless; logout does not
-revoke an already-issued token.
+Access tokens are HS256 JWTs valid for 30 minutes and carry `sub`, `iss`,
+`aud=picoservice-api`, `type=access`, and `orgs`. The `orgs` map is capped at 20
+organizations to keep the header small. Refresh tokens are valid for
+30 days with `type=refresh`. Refreshing re-queries the user's memberships, so a
+role change takes effect within one access-token lifetime. Login requires a
+verified email: wrong credentials return `401 invalid email or password`, and
+unverified accounts return `403 email not verified`. Tokens are stateless;
+logout and refresh rotation do not revoke already-issued tokens.
 
 ### Users
 
 | Method | Path | Description |
 | --- | --- | --- |
 | `POST` | `/users` | Register with `{"name","email","password"}`; sends a verification email |
-| `GET` | `/users?userId=actor` | List users |
-| `GET` | `/users/{userID}?userId=actor` | Get a user |
-| `PATCH` | `/users/{userID}?userId=actor` | Change `name` and/or `email`; self only. Changing the email resets verification |
-| `POST` | `/users/{userID}/password?userId=actor` | Change password with `currentPassword` and `newPassword`; self only |
+| `GET` | `/users/me` | Get the authenticated user |
+| `PATCH` | `/users/me` | Change `name` and/or `email`. Changing the email resets verification |
+| `POST` | `/users/me/password` | Change password with `currentPassword` and `newPassword` |
 
 Protected routes use `Authorization: Bearer` (or the `pico_auth` cookie
-fallback). Requests without either may still use the temporary `userId` query
-parameter.
+fallback). The actor is always the token `sub`; `?userId=` is not accepted as
+identity. There is no global user directory.
 
 Passwords are bcrypt-hashed. Password hashes are never returned. There is no
 `DELETE /users` yet. User responses include `emailVerified`.
@@ -78,18 +81,19 @@ registered.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/orgs?userId=actor` | Create `{"name","tags"}`; the actor becomes owner and a membership is created |
-| `GET` | `/orgs?userId=actor&tags=food,travel` | List orgs the actor belongs to; filters: `tags` (any match) |
-| `GET` | `/orgs/{orgID}?orgId=actor&userId=actor` | Get an org; members only |
-| `PATCH` | `/orgs/{orgID}?orgId=actor&userId=actor` | Partial update of `name` and/or `tags`; owner only |
+| `POST` | `/orgs` | Create `{"name","tags"}`; the actor becomes owner and a membership is created |
+| `GET` | `/orgs?tags=food,travel` | List orgs the actor belongs to; filters: `tags` (any match) |
+| `GET` | `/orgs/{orgID}?orgId={orgID}` | Get an org; any role |
+| `PATCH` | `/orgs/{orgID}?orgId={orgID}` | Partial update of `name` and/or `tags`; requires `org.admin` or the owner wildcard |
 
 Organization tags are trimmed, deduplicated, sorted, and capped at 20 items with
 a 32-byte limit per tag. `tags=food,travel` returns organizations matching
 **any** of the requested tags. `tags: []` on PATCH clears all tags. Existing
 organizations without a tags field read as an empty list.
 
-Path-scoped org routes repeat `orgId` in the query because `RequireMember` reads
-identity from query parameters.
+Path-scoped org routes repeat `orgId` in the query and it must match the path.
+`RequireOrgAccess` reads the tenant from `?orgId=`, the feature roles from the
+token's `orgs` map, and the required unit permission from `routes.yml`.
 
 There is no `DELETE /orgs`.
 
@@ -97,21 +101,23 @@ There is no `DELETE /orgs`.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/orgs/{orgID}/members?orgId=actor&userId=actor` | Add `{"userId":"..."}`; owner only |
-| `GET` | `/orgs/{orgID}/members?orgId=actor&userId=actor` | List members; members only |
-| `DELETE` | `/orgs/{orgID}/members/{memberUserID}?orgId=actor&userId=actor` | Remove a member; owner only and never the owner |
+| `POST` | `/orgs/{orgID}/members?orgId={orgID}` | Add `{"userId":"...","roles":{"expense":"editor"}}`; requires `member.admin` or the owner wildcard. `roles` defaults to the legacy editor map |
+| `GET` | `/orgs/{orgID}/members?orgId={orgID}` | List members; owner and `member.viewer`/`member.admin` |
+| `PATCH` | `/orgs/{orgID}/members/{memberUserID}?orgId={orgID}` | Replace `{"roles":{"project":"viewer","expense":"editor"}}`; requires `member.admin`; the owner cannot change |
+| `DELETE` | `/orgs/{orgID}/members/{memberUserID}?orgId={orgID}` | Remove a member; requires `member.admin`; the owner cannot be removed |
 
-Membership roles are derived: the org's `userId` is the `owner`; everyone else
-with a row is a `member`.
+Membership roles are feature-scoped: `{"org":"viewer","member":"admin","project":"editor","expense":"viewer"}`. The org's `userId` is the `owner`, which is implicit, has every feature role, is never stored as a membership role, and is written as `"*"` in access tokens. The member response uses `owner: true` for the owner and `roles` for everyone else.
+
+`member.admin` is a high-trust role: it can add and remove members and assign their feature roles, so grant it only to trusted administrators. The owner cannot be added, removed, or have their roles changed.
 
 ### Projects
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/projects?orgId=&userId=` | Create `{"name","currency","tags"}` |
-| `GET` | `/projects?orgId=&userId=` | List projects; filters: `tags` (any match) |
-| `GET` | `/projects/{projectID}?orgId=&userId=` | Get a project |
-| `PATCH` | `/projects/{projectID}?orgId=&userId=` | Partial update of `name` and/or `tags` |
+| `POST` | `/projects?orgId={orgID}` | Create `{"name","currency","tags"}` |
+| `GET` | `/projects?orgId={orgID}` | List projects; filters: `tags` (any match) |
+| `GET` | `/projects/{projectID}?orgId={orgID}` | Get a project |
+| `PATCH` | `/projects/{projectID}?orgId={orgID}` | Partial update of `name` and/or `tags` |
 
 Project `currency` is a three-letter ISO code. Expenses inherit it and cannot
 change it. Tags are trimmed, deduplicated, sorted, and capped at 20 items with a
@@ -125,12 +131,12 @@ There is no project delete endpoint.
 
 | Method | Path | Description |
 | --- | --- | --- |
-| `POST` | `/expenses?orgId=&userId=` | Create an expense |
-| `GET` | `/expenses?orgId=&userId=` | List expenses; filters: `projectId`, `projectIds`, `tags`, `tag`, `from`, `to` |
-| `GET` | `/expenses/summary?orgId=&userId=` | Totals grouped by project and currency; same filters |
-| `GET` | `/expenses/{expenseID}?orgId=&userId=` | Get an expense |
-| `PATCH` | `/expenses/{expenseID}?orgId=&userId=` | Update fields |
-| `DELETE` | `/expenses/{expenseID}?orgId=&userId=` | Delete an expense |
+| `POST` | `/expenses?orgId={orgID}` | Create an expense |
+| `GET` | `/expenses?orgId={orgID}` | List expenses; filters: `projectId`, `projectIds`, `tags`, `tag`, `from`, `to` |
+| `GET` | `/expenses/summary?orgId={orgID}` | Totals grouped by project and currency; same filters |
+| `GET` | `/expenses/{expenseID}?orgId={orgID}` | Get an expense |
+| `PATCH` | `/expenses/{expenseID}?orgId={orgID}` | Update fields |
+| `DELETE` | `/expenses/{expenseID}?orgId={orgID}` | Delete an expense |
 
 Expense body fields:
 
@@ -211,10 +217,27 @@ totals grouped by project and currency:
 **Authentication uses a bearer JWT.** Protected routes read the
 `Authorization: Bearer` header and trust its `sub` claim after verifying the
 signature and expiry; no user lookup is performed for a valid token. The
-`pico_auth` cookie is accepted as a fallback. Requests without either may still
-use the temporary `userId` query parameter, which remains spoofable. Membership
-checks verify that the actor belongs to the org. `GET /users` is still a global
-directory for authenticated users.
+`pico_auth` cookie is accepted as a fallback. There is no `?userId=` fallback.
+
+**Authorization is declarative.** `internal/authz/resources/routes.yml` maps
+each route key to a unit permission (`expenses.list`, `expenses.create`), and
+`features.yml` grants those permissions through feature-scoped roles such as
+`expense.editor`, `project.viewer`, and `member.admin`. The access token carries
+the resolved feature roles; the owner is `["*"]`. `RequireOrgAccess` matches
+`?orgId=` and accepts the request when any feature role in the token grants the
+route permission. No membership lookup runs per request, so role changes take
+effect when the access token is refreshed (at most 30 minutes).
+
+Feature role semantics:
+
+| Feature | viewer | editor | admin |
+| --- | --- | --- | --- |
+| `org` | read | — | read + update settings |
+| `member` | list | — | list + add + update + remove |
+| `project` | list + get | + create + update | + create + update |
+| `expense` | list + summary + get | + create + update | + delete |
+
+A user may have different roles per feature in the same organization.
 
 ## Data model and indexes
 
@@ -227,7 +250,7 @@ orgs
   _id, name, userId (owner), createdAt, updatedAt
 
 memberships
-  _id, orgId, userId, createdAt
+  _id, orgId, userId, roles (feature -> role), createdAt
   unique (orgId, userId)
 
 projects
@@ -286,6 +309,34 @@ or membership constraints. The command is idempotent.
 ├── template.yaml                  # Lambda and Function URL resources
 ├── Makefile
 └── samconfig.toml
+```
+
+### Authorization policy
+
+| File | Purpose |
+| --- | --- |
+| `internal/authz/resources/routes.yml` | Route key → method, path, scope. The key path is the unit permission, for example `expenses.list` |
+| `internal/authz/resources/features.yml` | Feature → role → unit permissions. Roles are `viewer`, `editor`, and `admin`; the token role is `<feature>.<role>` |
+
+`scope` is `public` (no identity), `user` (identity only), or `org` (identity,
+`?orgId=`, a feature role, and the route permission). The owner is not a declared
+role: when an organization's `userId` matches the token subject, issuance writes
+`["*"]`, which grants every defined permission. Policy files are embedded in the
+binary and validated at startup; `test/routes` fails if a route and the policy
+drift.
+
+Access token claim shape:
+
+```json
+{
+  "sub": "user-123",
+  "orgs": {
+    "org-personal": ["*"],
+    "org-family": ["org.viewer", "project.viewer", "expense.viewer"],
+    "org-office": ["org.viewer", "member.viewer", "project.editor", "expense.editor"]
+  },
+  "type": "access"
+}
 ```
 
 ## Requirements
@@ -379,34 +430,47 @@ curl -sS -X POST http://localhost:8080/auth/verify-email/resend \
   -H 'Content-Type: application/json' \
   -d '{"email":"ada@example.com"}'
 
+# Log in and keep the access token.
+TOKEN=$(curl -sS -X POST http://localhost:8080/auth/login \
+  -H 'Content-Type: application/json' \
+  -d '{"email":"ada@example.com","password":"correct horse"}' |
+  python3 -c 'import json,sys; print(json.load(sys.stdin)["accessToken"])')
+
 # Create an org owned by that user.
-curl -sS -X POST 'http://localhost:8080/orgs?userId=USER_ID' \
+curl -sS -X POST http://localhost:8080/orgs \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"name":"Acme"}'
 
 # Create a project in the org.
-curl -sS -X POST 'http://localhost:8080/projects?orgId=ORG_ID&userId=USER_ID' \
+curl -sS -X POST 'http://localhost:8080/projects?orgId=ORG_ID' \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"name":"Launch","currency":"USD","tags":["travel","food"]}'
 
 # List projects matching any of the tags.
-curl -sS 'http://localhost:8080/projects?orgId=ORG_ID&userId=USER_ID&tags=travel,food'
+curl -sS 'http://localhost:8080/projects?orgId=ORG_ID&tags=travel,food' \
+  -H "Authorization: Bearer $TOKEN"
 
 # Record a debit (money out). Currency comes from the project.
-curl -sS -X POST 'http://localhost:8080/expenses?orgId=ORG_ID&userId=USER_ID' \
+curl -sS -X POST 'http://localhost:8080/expenses?orgId=ORG_ID' \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"projectId":"PROJECT_ID","type":"debit","amount":1299,"description":"Lunch","tags":["food"],"spentAt":"2026-01-02T12:30:00Z"}'
 
 # Record a credit (money in).
-curl -sS -X POST 'http://localhost:8080/expenses?orgId=ORG_ID&userId=USER_ID' \
+curl -sS -X POST 'http://localhost:8080/expenses?orgId=ORG_ID' \
+  -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' \
   -d '{"projectId":"PROJECT_ID","type":"credit","amount":5000,"description":"Client payment","spentAt":"2026-01-03T09:00:00Z"}'
 
 # List one project page.
-curl -sS 'http://localhost:8080/expenses?orgId=ORG_ID&userId=USER_ID&projectId=PROJECT_ID&tags=food,travel&from=2026-01-01T00%3A00%3A00Z&to=2026-01-31T23%3A59%3A59Z&limit=20&offset=0'
+curl -sS 'http://localhost:8080/expenses?orgId=ORG_ID&projectId=PROJECT_ID&tags=food,travel&from=2026-01-01T00%3A00%3A00Z&to=2026-01-31T23%3A59%3A59Z&limit=20&offset=0' \
+  -H "Authorization: Bearer $TOKEN"
 
 # Summarize the same filters by project and currency.
-curl -sS 'http://localhost:8080/expenses/summary?orgId=ORG_ID&userId=USER_ID&projectId=PROJECT_ID&tags=food,travel&from=2026-01-01T00%3A00%3A00Z&to=2026-01-31T23%3A59%3A59Z'
+curl -sS 'http://localhost:8080/expenses/summary?orgId=ORG_ID&projectId=PROJECT_ID&tags=food,travel&from=2026-01-01T00%3A00%3A00Z&to=2026-01-31T23%3A59%3A59Z' \
+  -H "Authorization: Bearer $TOKEN"
 ```
 
 Set `PORT` to use a different port:

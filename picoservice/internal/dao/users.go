@@ -22,7 +22,6 @@ type UserDAO interface {
 	FindByID(ctx context.Context, id string) (entities.User, error)
 	FindByEmail(ctx context.Context, email string) (entities.User, error)
 	PasswordHash(ctx context.Context, id string) (string, error)
-	List(ctx context.Context, limit, offset int) ([]entities.User, error)
 	Update(ctx context.Context, id, name, email string, emailVerified bool, updatedAt time.Time) (entities.User, error)
 	UpdatePassword(ctx context.Context, id, passwordHash string, updatedAt time.Time) error
 	MarkEmailVerified(ctx context.Context, id, email string, verifiedAt time.Time) (entities.User, error)

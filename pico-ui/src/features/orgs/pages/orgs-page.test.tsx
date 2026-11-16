@@ -96,7 +96,7 @@ describe("OrgsPage", () => {
     )
 
     const [url] = vi.mocked(fetch).mock.calls[0]
-    expect(url).toBe("/api/orgs?userId=user-1&limit=100")
+    expect(url).toBe("/api/orgs?limit=100")
   })
 
   it("shows an empty state", async () => {
@@ -134,7 +134,7 @@ describe("OrgsPage", () => {
     expect(screen.getByLabelText("Tags")).toHaveValue("")
 
     const [url, init] = fetchMock.mock.calls[1]
-    expect(url).toBe("/api/orgs?userId=user-1")
+    expect(url).toBe("/api/orgs")
     expect(init?.method).toBe("POST")
     expect(new Headers(init?.headers).get("Content-Type")).toBe(
       "application/json"

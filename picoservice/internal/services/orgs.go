@@ -27,10 +27,9 @@ type CreateOrgInput struct {
 
 // UpdateOrgInput contains optional organization fields to update.
 type UpdateOrgInput struct {
-	ActorID string
-	OrgID   string
-	Name    *string
-	Tags    *[]string
+	OrgID string
+	Name  *string
+	Tags  *[]string
 }
 
 // ListOrgsInput contains pagination and tag filters for listing an actor's
@@ -147,8 +146,8 @@ func (s *OrgService) List(ctx context.Context, in ListOrgsInput) ([]entities.Org
 	return ordered, nil
 }
 
-// Update applies optional name and tag changes to an organization. Only its
-// owner may update it.
+// Update applies optional name and tag changes to an organization. The router
+// requires the orgs.update permission.
 func (s *OrgService) Update(ctx context.Context, in UpdateOrgInput) (entities.Org, error) {
 	if in.Name == nil && in.Tags == nil {
 		return entities.Org{}, &validation.Error{Field: "body", Message: "at least one field is required"}
@@ -173,30 +172,9 @@ func (s *OrgService) Update(ctx context.Context, in UpdateOrgInput) (entities.Or
 	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
-	current, err := s.store.FindByID(ctx, in.OrgID)
-	if err != nil {
-		return entities.Org{}, fmt.Errorf("get org: %w", err)
-	}
-	if current.UserID != in.ActorID {
-		return entities.Org{}, entities.ErrForbidden
-	}
-
 	updated, err := s.store.Update(ctx, in.OrgID, update)
 	if err != nil {
 		return entities.Org{}, fmt.Errorf("update org: %w", err)
 	}
 	return updated, nil
-}
-
-// Exists reports whether an organization exists. It is used by identity
-// middleware.
-func (s *OrgService) Exists(ctx context.Context, id string) (bool, error) {
-	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
-	defer cancel()
-
-	exists, err := s.store.Exists(ctx, id)
-	if err != nil {
-		return false, fmt.Errorf("check org: %w", err)
-	}
-	return exists, nil
 }

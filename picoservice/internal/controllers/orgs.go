@@ -107,11 +107,6 @@ func (c *OrgController) Get(w http.ResponseWriter, r *http.Request) {
 
 // Update handles PATCH /orgs/{orgID}.
 func (c *OrgController) Update(w http.ResponseWriter, r *http.Request) {
-	id, ok := requestIdentity(w, r)
-	if !ok {
-		return
-	}
-
 	var request updateOrgRequest
 	if err := httpx.DecodeJSON(w, r, &request); err != nil {
 		httpx.WriteError(w, r, http.StatusBadRequest, "invalid request body")
@@ -119,10 +114,9 @@ func (c *OrgController) Update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	org, err := c.service.Update(r.Context(), services.UpdateOrgInput{
-		ActorID: id.UserID,
-		OrgID:   chi.URLParam(r, "orgID"),
-		Name:    request.Name,
-		Tags:    request.Tags,
+		OrgID: chi.URLParam(r, "orgID"),
+		Name:  request.Name,
+		Tags:  request.Tags,
 	})
 	if err != nil {
 		c.writeError(w, r, err)
@@ -138,8 +132,6 @@ func (c *OrgController) writeError(w http.ResponseWriter, r *http.Request, err e
 		httpx.WriteError(w, r, http.StatusBadRequest, validationErr.Message)
 	case errors.Is(err, entities.ErrOrgNotFound):
 		httpx.WriteError(w, r, http.StatusNotFound, "org not found")
-	case errors.Is(err, entities.ErrForbidden):
-		httpx.WriteError(w, r, http.StatusForbidden, "forbidden")
 	default:
 		logInternalError(c.logger, w, r, "org request failed", err)
 	}

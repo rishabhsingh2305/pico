@@ -40,7 +40,7 @@ func TestProjectCreate(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/projects?orgId=org-1&userId=user-1", strings.NewReader(`{"name":"Launch","currency":"USD","tags":["food","travel"]}`))
+	req := httptest.NewRequest(http.MethodPost, "/projects?orgId=org-1", strings.NewReader(`{"name":"Launch","currency":"USD","tags":["food","travel"]}`))
 	req = withIdentity(req, "org-1", "user-1")
 
 	controllers.NewProjectController(testLogger(), service).Create(rec, req)
@@ -76,7 +76,7 @@ func TestProjectListTags(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/projects?orgId=org-1&userId=user-1&tags=food,travel", nil)
+	req := httptest.NewRequest(http.MethodGet, "/projects?orgId=org-1&tags=food,travel", nil)
 	req = withIdentity(req, "org-1", "user-1")
 
 	controllers.NewProjectController(testLogger(), service).List(rec, req)
@@ -100,7 +100,7 @@ func TestProjectUpdateTags(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPatch, "/projects/project-1?orgId=org-1&userId=user-1", strings.NewReader(`{"tags":["food","travel"]}`))
+	req := httptest.NewRequest(http.MethodPatch, "/projects/project-1?orgId=org-1", strings.NewReader(`{"tags":["food","travel"]}`))
 	req = withIdentity(req, "org-1", "user-1")
 	req = withRouteParams(req, map[string]string{"projectID": "project-1"})
 
@@ -119,7 +119,7 @@ func TestProjectCreateValidation(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodPost, "/projects?orgId=org-1&userId=user-1", strings.NewReader(`{"name":"","currency":"USD"}`))
+	req := httptest.NewRequest(http.MethodPost, "/projects?orgId=org-1", strings.NewReader(`{"name":"","currency":"USD"}`))
 	req = withIdentity(req, "org-1", "user-1")
 
 	controllers.NewProjectController(testLogger(), service).Create(rec, req)
@@ -135,7 +135,7 @@ func TestProjectGetNotFound(t *testing.T) {
 	}
 
 	rec := httptest.NewRecorder()
-	req := httptest.NewRequest(http.MethodGet, "/projects/missing?orgId=org-1&userId=user-1", nil)
+	req := httptest.NewRequest(http.MethodGet, "/projects/missing?orgId=org-1", nil)
 	req = withIdentity(req, "org-1", "user-1")
 	req = withRouteParams(req, map[string]string{"projectID": "missing"})
 

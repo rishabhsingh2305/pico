@@ -56,7 +56,6 @@ export function OrgCard({
             </Badge>
             {isOwner ? (
               <EditOrgTagsDialog
-                userId={userId}
                 org={org}
                 onUpdated={onTagsUpdated}
                 onSessionInvalid={onSessionInvalid}

@@ -8,17 +8,17 @@ import (
 	"picoservice/internal/controllers"
 )
 
-func projectRoutes(h *controllers.ProjectController, requireMember func(http.Handler) http.Handler) chi.Router {
+func projectRoutes(h *controllers.ProjectController, requireOrg func(http.Handler) http.Handler) chi.Router {
 	r := chi.NewRouter()
 
-	r.With(requireMember).Get("/", h.List)
-	r.With(requireMember).Head("/", h.List)
-	r.With(requireMember).Post("/", h.Create)
+	r.With(requireOrg).Get("/", h.List)
+	r.With(requireOrg).Head("/", h.List)
+	r.With(requireOrg).Post("/", h.Create)
 
 	r.Route("/{projectID}", func(r chi.Router) {
-		r.With(requireMember).Get("/", h.Get)
-		r.With(requireMember).Head("/", h.Get)
-		r.With(requireMember).Patch("/", h.Update)
+		r.With(requireOrg).Get("/", h.Get)
+		r.With(requireOrg).Head("/", h.Get)
+		r.With(requireOrg).Patch("/", h.Update)
 	})
 
 	return r

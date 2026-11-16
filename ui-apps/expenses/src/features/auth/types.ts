@@ -28,6 +28,8 @@ export type SessionResponse = {
   tokenType: string
   user: User
   expiresAt: string
+  refreshToken?: string
+  refreshExpiresAt?: string
 }
 
 export type VerificationResponse = {

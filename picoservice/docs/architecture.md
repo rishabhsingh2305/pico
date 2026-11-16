@@ -14,7 +14,7 @@ client
   -> Go Lambda runtime
   -> internal/lambdahttp.Adapter
   -> internal/routes (chi router)
-  -> internal/middleware (request ID, logging, recovery, identity checks)
+  -> internal/middleware (request ID, logging, recovery, auth and org access)
   -> internal/controllers
   -> internal/services
   -> internal/dao interfaces
@@ -29,8 +29,9 @@ client
 | `main` | Lambda entrypoint; opens MongoDB, calls `app.New` | `internal/app`, `internal/lambdahttp`, `internal/dao/mongodb` |
 | `cmd/server` | Local HTTP server and graceful shutdown | `internal/app`, `internal/dao/mongodb` |
 | `cmd/indexes` | Create MongoDB indexes | `internal/dao/mongodb` |
-| `internal/app` | Composition root: DAO implementations, services, routes | `internal/dao/mongodb`, `internal/email`, `internal/services`, `internal/routes` |
-| `internal/routes` | chi setup, middleware wiring, domain subrouters, per-route `Allow` | `internal/controllers`, `internal/middleware`, `internal/httpx`, chi |
+| `internal/app` | Composition root: DAO implementations, services, policy, routes | `internal/authz`, `internal/dao/mongodb`, `internal/email`, `internal/services`, `internal/routes` |
+| `internal/authz` | Embedded route and feature-role policy: YAML loading, validation, permission lookup | `internal/entities`, stdlib, `gopkg.in/yaml.v3` |
+| `internal/routes` | chi setup, middleware wiring, domain subrouters, per-route `Allow` | `internal/controllers`, `internal/middleware`, `internal/authz`, `internal/httpx`, chi |
 | `internal/controllers` | HTTP parsing, status codes, request/response DTOs, response mapping | `net/http`, `context`, `internal/services`, `internal/middleware`, `internal/entities`, `internal/httpx`, `internal/validation` |
 | `internal/services` | Business rules, bcrypt, email verification, service input structs, narrow lookup interfaces | stdlib, `internal/dao`, `internal/entities`, `internal/validation`, `golang.org/x/crypto/bcrypt`, `github.com/golang-jwt/jwt/v5` |
 | `internal/dao` | Per-domain persistence contracts and query/update structs | `internal/entities`, stdlib |
@@ -40,7 +41,7 @@ client
 | `internal/validation` | Shared validation error, name checks, pagination | stdlib |
 | `internal/httpx` | JSON response helpers, request-ID context, error envelope | stdlib |
 | `internal/lambdahttp` | Function URL event ↔ `net/http`; cookies, base64 bodies, response conversion | `events`, `net/http`, `internal/httpx` |
-| `internal/middleware` | CORS, request ID propagation, structured request logging, panic recovery, query identity and membership checks | stdlib, chi middleware, `internal/httpx` |
+| `internal/middleware` | CORS, request ID propagation, structured request logging, panic recovery, JWT authentication, declarative org authorization | stdlib, chi, `internal/authz`, `internal/httpx` |
 | `test/*` | External tests mirroring the `internal` packages | `internal/*`, stdlib, `httptest`; MongoDB driver for integration fixtures |
 
 Tests live under `test/` and use only exported APIs. Integration tests are gated
@@ -53,8 +54,11 @@ Dependency rules:
 - `routes` must not import `dao` or the MongoDB driver; it wires middleware,
   controllers, and service lookups through `routes.Deps`.
 - `middleware` must not import `routes`, `controllers`, `services`, `dao`, or
-  `entities`; it defines small lookup interfaces and depends on `internal/httpx`
-  and chi middleware.
+  `entities`; it defines a small access-token interface and depends on
+  `internal/authz`, `internal/httpx`, and chi.
+- `authz` must not import `routes`, `middleware`, `controllers`, `services`, or
+  `dao`. It is pure policy: YAML types, validation, and role/permission checks;
+  it depends on `entities` only for the feature and role vocabulary.
 - `controllers` must not import `routes`, `lambdahttp`, `dao`, `dao/mongodb`, or
   the MongoDB driver. They depend on small consumer-side service interfaces.
 - `services` must not import HTTP, AWS, or MongoDB driver packages. They consume
@@ -100,6 +104,7 @@ memberships
   _id          ObjectID
   orgId        string
   userId       string
+  roles        object (feature -> viewer|editor|admin; ignored for the owner)
   createdAt    time
   unique (orgId, userId)
 
@@ -132,8 +137,12 @@ expenses
 are stored as ObjectID hex strings. This keeps filters and indexes consistent
 with API identifiers.
 
-Organization ownership is `orgs.userId`. Membership roles are derived, not
-stored: the owner is `owner`; every other membership is `member`.
+Organization ownership is `orgs.userId`. The owner is implicit: it is not stored
+as a membership role and token issuance writes `["*"]` for owned organizations.
+Every other membership stores a feature-to-role map such as
+`{"org":"viewer","project":"editor","expense":"viewer"}`. Memberships created
+before feature roles existed decode the legacy `role` field: `org.editor` maps to
+the default member roles and `org.viewer` maps to read-only roles.
 
 ## API contract
 
@@ -155,31 +164,33 @@ accept `limit` and `offset` (default 20, maximum 100).
 
 | Method | Path | Success | Notes |
 | --- | --- | --- | --- |
-| POST | `/auth/login` | 200 | `{"email","password"}`; returns `{"accessToken","tokenType","user","expiresAt"}` and also sets the `pico_auth` cookie fallback |
-| POST | `/auth/logout` | 204 | Clears the auth cookie; the client clears its stored token |
-| GET | `/auth/session` | 200 | Returns `{"user","expiresAt"}` from `Authorization: Bearer` or the cookie; `401` when neither is valid |
+| POST | `/auth/login` | 200 | `{"email","password"}`; returns `accessToken`, `refreshToken`, `tokenType`, `user`, `expiresAt`, and `refreshExpiresAt`; sets `pico_auth` and `pico_refresh` cookie fallbacks |
+| POST | `/auth/refresh` | 200 | `{"refreshToken":"..."}` or the `pico_refresh` cookie; returns a new token pair |
+| POST | `/auth/logout` | 204 | Clears both auth cookies; the client clears its stored tokens |
+| GET | `/auth/session` | 200 | Returns `{"accessToken","user","expiresAt"}` from `Authorization: Bearer` or the cookie; `401` when neither is valid |
 
-Access tokens are HS256 JWTs valid for 7 days. Claims are `sub` (user ID),
-`iss=picoservice`, `aud=picoservice-api`, `type=access`, `iat`, and `exp`.
-Login requires a verified email. Wrong credentials return `401 invalid email or
-password`; unverified accounts return `403 email not verified`. Tokens are
-stateless: a valid token requires no user lookup, and logout does not revoke an
-already-issued token.
+Access tokens are HS256 JWTs valid for 30 minutes. Claims are `sub` (user ID),
+`iss=picoservice`, `aud=picoservice-api`, `type=access`, `orgs`, `jti`, `iat`,
+and `exp`. Refresh tokens use `type=refresh` and are valid for 30 days.
+Refreshing re-queries memberships, so a role change takes effect within one
+access-token lifetime. Login requires a verified email. Wrong credentials return
+`401 invalid email or password`; unverified accounts return `403 email not
+verified`. Tokens are stateless: a valid token requires no user lookup, logout
+does not revoke an already-issued token, and refresh rotation does not invalidate
+older refresh tokens.
 
 ### Users
 
 | Method | Path | Success | Notes |
 | --- | --- | --- | --- |
-| POST | `/users` | 201 | `{"name","email","password"}`; creates an unverified user and sends a verification email; `Location: /users/{id}` |
-| GET | `/users?userId=actor` | 200 | Paginated list |
-| GET | `/users/{userID}?userId=actor` | 200 | |
-| PATCH | `/users/{userID}?userId=actor` | 200 | Self only; `name` and/or `email`; changing email resets verification |
-| POST | `/users/{userID}/password?userId=actor` | 204 | Self only; `currentPassword`, `newPassword` |
+| POST | `/users` | 201 | `{"name","email","password"}`; creates an unverified user and sends a verification email |
+| GET | `/users/me` | 200 | The authenticated user |
+| PATCH | `/users/me` | 200 | `name` and/or `email`; changing email resets verification |
+| POST | `/users/me/password` | 204 | `currentPassword`, `newPassword` |
 
-No user delete. Password hashes are never returned. Responses include
-`emailVerified`. Duplicate email returns `409`. Protected user routes use
-`Authorization: Bearer` (or the cookie fallback); the `userId` query parameter
-is a temporary fallback.
+No user delete and no global user directory. Password hashes are never returned.
+Responses include `emailVerified`. Duplicate email returns `409`. The actor is
+the token `sub`; there is no `?userId=` identity fallback.
 
 ### Email verification
 
@@ -199,14 +210,14 @@ or already verified addresses still return `202` to avoid enumeration.
 
 | Method | Path | Success | Notes |
 | --- | --- | --- | --- |
-| POST | `/orgs?userId=actor` | 201 | `{"name"}`; creates owner membership |
-| GET | `/orgs?userId=actor` | 200 | Orgs where actor is a member |
-| GET | `/orgs/{orgID}?orgId=actor&userId=actor` | 200 | Member only |
-| PATCH | `/orgs/{orgID}?orgId=actor&userId=actor` | 200 | Owner only; `{"name"}` |
+| POST | `/orgs` | 201 | `{"name"}`; creates owner membership |
+| GET | `/orgs` | 200 | Orgs where the actor has a role |
+| GET | `/orgs/{orgID}?orgId={orgID}` | 200 | Any org role |
+| PATCH | `/orgs/{orgID}?orgId={orgID}` | 200 | Requires `org.admin` or the owner wildcard; `{"name"}` |
 
-Path-scoped org routes repeat `orgId` in the query because `RequireMember`
-reads the tenant from the query. The actor comes from the bearer token or
-cookie fallback.
+Path-scoped org routes repeat `orgId` in the query and it must match the path.
+`RequireOrgAccess` reads the tenant from the query, the role from the token
+`orgs` map, and the required unit permission from `routes.yml`.
 
 No org delete.
 
@@ -214,20 +225,24 @@ No org delete.
 
 | Method | Path | Success | Notes |
 | --- | --- | --- | --- |
-| POST | `/orgs/{orgID}/members?orgId=actor&userId=actor` | 201 | Owner only; `{"userId"}` |
-| GET | `/orgs/{orgID}/members?orgId=actor&userId=actor` | 200 | Member only; paginated |
-| DELETE | `/orgs/{orgID}/members/{memberUserID}?orgId=actor&userId=actor` | 204 | Owner only; owner cannot be removed |
+| POST | `/orgs/{orgID}/members?orgId={orgID}` | 201 | Requires `member.admin` or the owner wildcard; `{"userId","roles":{"expense":"editor"}}`; omitted roles use the legacy editor map |
+| GET | `/orgs/{orgID}/members?orgId={orgID}` | 200 | Owner and `member.viewer`/`member.admin`; paginated |
+| PATCH | `/orgs/{orgID}/members/{memberUserID}?orgId={orgID}` | 204 | Requires `member.admin`; replaces `{"roles":{"project":"viewer","expense":"editor"}}`; owner cannot change |
+| DELETE | `/orgs/{orgID}/members/{memberUserID}?orgId={orgID}` | 204 | Requires `member.admin`; owner cannot be removed |
 
-Membership responses include a derived `role` of `owner` or `member`.
+Membership responses include `owner: true` for the organization owner and a
+`roles` map for everyone else. `"*"` is never accepted or stored. `member.admin`
+is a high-trust role: it can manage membership and assign feature roles. The
+owner account cannot be added, removed, or have its roles changed.
 
 ### Projects
 
 | Method | Path | Success | Notes |
 | --- | --- | --- | --- |
-| POST | `/projects?orgId=&userId=` | 201 | `{"name","currency","tags"}` |
-| GET | `/projects?orgId=&userId=` | 200 | Paginated list; `tags` filter uses any match |
-| GET | `/projects/{projectID}?orgId=&userId=` | 200 | |
-| PATCH | `/projects/{projectID}?orgId=&userId=` | 200 | Partial `{"name"}` and/or `{"tags"}` |
+| POST | `/projects?orgId={orgID}` | 201 | `{"name","currency","tags"}` |
+| GET | `/projects?orgId={orgID}` | 200 | Paginated list; `tags` filter uses any match |
+| GET | `/projects/{projectID}?orgId={orgID}` | 200 | |
+| PATCH | `/projects/{projectID}?orgId={orgID}` | 200 | Partial `{"name"}` and/or `{"tags"}` |
 
 Project `currency` is immutable after creation. Expenses inherit it. Project
 tags are trimmed, deduplicated, sorted, and capped at 20 items with a 32-byte
@@ -240,12 +255,12 @@ No project delete.
 
 | Method | Path | Success | Notes |
 | --- | --- | --- | --- |
-| POST | `/expenses?orgId=&userId=` | 201 | Create |
-| GET | `/expenses?orgId=&userId=` | 200 | Filters: `projectId`, `projectIds`, `tags`, `tag`, `from`, `to`; returns one page |
-| GET | `/expenses/summary?orgId=&userId=` | 200 | Same filters; totals grouped by project and currency |
-| GET | `/expenses/{expenseID}?orgId=&userId=` | 200 | |
-| PATCH | `/expenses/{expenseID}?orgId=&userId=` | 200 | Partial update |
-| DELETE | `/expenses/{expenseID}?orgId=&userId=` | 204 | |
+| POST | `/expenses?orgId={orgID}` | 201 | Create |
+| GET | `/expenses?orgId={orgID}` | 200 | Filters: `projectId`, `projectIds`, `tags`, `tag`, `from`, `to`; returns one page |
+| GET | `/expenses/summary?orgId={orgID}` | 200 | Same filters; totals grouped by project and currency |
+| GET | `/expenses/{expenseID}?orgId={orgID}` | 200 | |
+| PATCH | `/expenses/{expenseID}?orgId={orgID}` | 200 | Partial update |
+| DELETE | `/expenses/{expenseID}?orgId={orgID}` | 204 | |
 
 Expense `type` is `debit` for money out or `credit` for money in. It defaults to
 debit when omitted on create, and records without a type are read and aggregated
@@ -294,9 +309,9 @@ project and currency:
 
 | Status | Meaning |
 | --- | --- |
-| 400 | Validation error, malformed JSON, missing `orgId` query parameter, invalid verification token |
-| 401 | Missing, invalid, or expired auth token; invalid login credentials |
-| 403 | Email not verified, actor is not a member, or a non-owner attempted an owner-only action |
+| 400 | Validation error, malformed JSON, missing or mismatched `orgId`, invalid verification token |
+| 401 | Missing, invalid, or expired access or refresh token; invalid login credentials |
+| 403 | Email not verified, no role for the org, or the role lacks the route permission |
 | 404 | Resource missing or malformed ObjectID |
 | 405 | Method not allowed; includes `Allow` |
 | 409 | Duplicate email/membership, owner removal, or conflict |
@@ -310,23 +325,35 @@ Invalid ObjectIDs are treated as not found rather than as a separate error.
 Protected routes authenticate with `Authorization: Bearer <token>`, falling back
 to the `pico_auth` cookie:
 
-- `RequireAuth` validates the access JWT and stores its `sub` as the actor. A
-  valid token requires no database lookup.
-- Requests without either credential fall back to the temporary `userId` query
-  parameter and verify that the user exists. A present but invalid bearer token
-  or cookie never falls back.
-- `RequireMember` reads the actor from the request context and the tenant from
-  the `orgId` query parameter, then verifies the organization and membership
-  before calling the controller. Missing `orgId` returns `400`; missing orgs
-  return `404`; non-members return `403`.
+- `RequireAuth` validates the access JWT and stores its `sub` and `orgs` feature
+  role lists in the request context. A valid token requires no database lookup.
+- `RequireOrgAccess` reads the tenant from `?orgId=`. It rejects a path/query
+  mismatch with `400`, a missing tenant with `400`, and an organization absent
+  from the token with `403`.
+- The matched chi route pattern is looked up in `routes.yml`; a missing or
+  non-org policy fails closed with `500`. The route key is the unit permission.
+- `"*"` grants every defined permission for that organization. Otherwise any
+  feature role in the token may grant the route permission through
+  `features.yml`.
 
-The query fallback is temporary and spoofable. Remove it once the UI always
-sends a token.
+Authentication and authorization are declarative and in-memory:
 
-Owner-only operations are enforced in the org and membership services by
-comparing the actor to `orgs.userId`. Creating an org inserts the org and then
-the owner membership. If the membership insert fails, the org is deleted as a
-best-effort cleanup.
+```text
+token sub + token orgs[orgId] feature roles + route pattern
++ routes.yml permission + features.yml grants
+= allow or deny
+```
+
+Feature-management permissions are enforced by middleware: `org.admin` can
+update organization settings, and `member.admin` can add, update, or remove
+members. Services still protect the owner account: the owner cannot be added as
+a member, removed, or have their roles changed. Creating an org inserts the org
+and then the owner membership. If the membership insert fails, the org is
+deleted as a best-effort cleanup.
+
+The owner role is never declared in `features.yml` and `"*"` is never accepted
+from a membership API. The policy is embedded from `internal/authz/resources`,
+validated at startup, and checked against the chi router by `test/routes`.
 
 ## Email verification
 
@@ -403,7 +430,6 @@ not only performance:
 
 ```text
 users:        {email:1} unique
-              {createdAt:-1, _id:-1}
 orgs:         {userId:1, createdAt:-1, _id:-1}
 memberships:  {orgId:1, userId:1} unique
               {userId:1, createdAt:-1, _id:-1}
@@ -543,19 +569,30 @@ define small service interfaces. `internal/app` wires the concrete
 implementations. This keeps HTTP, MongoDB, and business rules independently
 testable.
 
-### Stateless JWT access tokens with temporary query fallback
+### Stateless tokens with declarative org authorization
 
-Login issues an HS256 access JWT returned in the response body and also sets an
-HttpOnly cookie fallback. The browser client stores the token in `localStorage`
-and sends it as `Authorization: Bearer`. Token validation is local, so protected
-requests with a valid token do not query the user collection. Tokens expire
-after 7 days and cannot be revoked before expiry; logout clears the client token
-and the cookie. Refresh tokens, rotation, and server-side revocation are
-intentionally deferred.
+Login issues a 30-minute HS256 access JWT and a 30-day refresh token, returns
+both in the response body, and sets `pico_auth` and `pico_refresh` HttpOnly
+cookie fallbacks. Browser clients store both in `localStorage` and send the
+access token as `Authorization: Bearer`. A `401` triggers one refresh attempt
+against `POST /auth/refresh`, which re-queries memberships before reissuing the
+pair. Token validation and authorization are local, so protected requests with
+a valid token do not query users or memberships. Tokens cannot be revoked before
+expiry; see Known debt.
 
-The `userId` query parameter remains as a temporary fallback for clients that
-have not migrated. It is spoofable and must be removed once the UI always sends
-a token.
+The actor is always the access-token `sub`. The tenant is `?orgId=`, and on
+`/orgs/{orgID}` routes it must match the path. `RequireOrgAccess` looks up the
+matched chi route pattern in `internal/authz/resources/routes.yml`, resolves the
+unit permission (`expenses.list`, `expenses.create`, and so on), and checks the
+organization's feature roles against `features.yml`. The route YAML is embedded,
+validated at startup, and covered by a router-walk test. There is no `?userId=`
+fallback and no global user directory.
+
+The organization owner is implicit. Token issuance writes `["*"]` for an
+organization whose `orgs.userId` matches the subject; `["*"]` grants every defined
+permission. It is never declared in `features.yml` and never stored on a
+membership. This keeps the owner current when new permissions are added and
+prevents an owner lockout caused by a forgotten role entry.
 
 ### Separate index command
 
@@ -628,11 +665,15 @@ A legacy document with no `type` is counted as debit through `$ifNull`.
 
 ## Known debt
 
-- **Access tokens cannot be revoked.** Logout clears the client token and
-  cookie, but a copied token stays valid for up to 7 days, and password changes
-  do not invalidate existing tokens.
-- **Query identity fallback remains spoofable.** Requests without a token or
-  cookie may still supply `userId`. Remove the fallback once the UI migrates.
+- **Tokens cannot be revoked.** Logout clears the client tokens and cookies, but
+  a copied access token stays valid for up to 30 minutes and a copied refresh
+  token for up to 30 days. Password changes do not invalidate existing tokens.
+- **Refresh tokens are stateless and replayable.** Rotation returns a new token
+  but does not invalidate the old one. Add token-version or session storage if
+  immediate revocation is required.
+- **Access tokens carry at most 20 organization role lists.** `RolesForUser`
+  caps the `orgs` map so the token stays small. A user with more memberships
+  loses access to the oldest organizations until the cap is raised.
 - Login has no rate limiting or lockout, so online password guessing is
   unthrottled.
 - Verification links carry the JWT in the query string. Application request
@@ -643,8 +684,6 @@ A legacy document with no `type` is counted as debit through `$ifNull`.
   is no migration or backfill command.
 - `JWT_SECRET` and SMTP credentials are CloudFormation parameters, not Secrets
   Manager values.
-- `GET /users` is a global directory. It should become admin-only or scoped to
-  shared organizations once authentication and roles exist.
 - Tag-filtered project and expense lists use multikey tag indexes that do not
   include the sort field. `explain` should confirm the plan before adding
   sort-aware compound indexes at larger data volumes.
@@ -677,8 +716,11 @@ A legacy document with no `type` is counted as debit through `$ifNull`.
   `internal/dao/mongodb`, then register the route in the matching domain
   subrouter in `internal/routes` (`routes_users.go`, `routes_auth.go`,
   `routes_orgs.go`, and so on). `routes/router.go` mounts each subrouter under
-  its prefix. Wrap org-scoped routes with `middleware.RequireMember` and
-  user-scoped routes with `middleware.RequireAuth`.
+  its prefix. Wrap org-scoped routes with `middleware.RequireOrgAccess` after
+  `middleware.RequireAuth`, user-scoped routes with `middleware.RequireAuth`,
+  and add the route to `internal/authz/resources/routes.yml` (plus
+  `features.yml` for org routes). `test/routes` fails when the router and policy
+  drift.
 - **Business logic:** add a service in `internal/services` and keep controllers
   thin. Controllers call services; services do not know about HTTP.
 - **Persistence or AWS calls:** define the contract in `internal/dao` and

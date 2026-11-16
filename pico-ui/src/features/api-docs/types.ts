@@ -1,6 +1,6 @@
 export type ApiMethod = "GET" | "HEAD" | "POST" | "PATCH" | "DELETE"
 
-export type ApiAccess = "Public" | "User" | "Member" | "Owner"
+export type ApiAccess = "Public" | "User" | "Member" | "Org role" | "Owner"
 
 export type ApiParameter = {
   name: string

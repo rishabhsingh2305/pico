@@ -121,22 +121,6 @@ func TestListFiltersByTags(t *testing.T) {
 	}
 }
 
-func TestUpdateRequiresOwner(t *testing.T) {
-	store := newFakeStore()
-	store.addOrg("org-1", "Acme", "user-1")
-	service := services.NewOrgService(store, &fakeMembershipStore{})
-	name := "New name"
-
-	_, err := service.Update(context.Background(), services.UpdateOrgInput{
-		ActorID: "user-2",
-		OrgID:   "org-1",
-		Name:    &name,
-	})
-	if !errors.Is(err, entities.ErrForbidden) {
-		t.Fatalf("expected ErrForbidden, got %v", err)
-	}
-}
-
 func TestUpdateRenamesForOwner(t *testing.T) {
 	store := newFakeStore()
 	store.addOrg("org-1", "Acme", "user-1")
@@ -144,9 +128,8 @@ func TestUpdateRenamesForOwner(t *testing.T) {
 	name := "  New name "
 
 	org, err := service.Update(context.Background(), services.UpdateOrgInput{
-		ActorID: "user-1",
-		OrgID:   "org-1",
-		Name:    &name,
+		OrgID: "org-1",
+		Name:  &name,
 	})
 	if err != nil {
 		t.Fatalf("update org: %v", err)
@@ -163,9 +146,8 @@ func TestUpdateTagsOnly(t *testing.T) {
 	tags := []string{" team ", "team", "finance"}
 
 	org, err := service.Update(context.Background(), services.UpdateOrgInput{
-		ActorID: "user-1",
-		OrgID:   "org-1",
-		Tags:    &tags,
+		OrgID: "org-1",
+		Tags:  &tags,
 	})
 	if err != nil {
 		t.Fatalf("update org tags: %v", err)
@@ -190,28 +172,20 @@ func TestUpdateRequiresAtLeastOneField(t *testing.T) {
 	service := services.NewOrgService(store, &fakeMembershipStore{})
 
 	_, err := service.Update(context.Background(), services.UpdateOrgInput{
-		ActorID: "user-1",
-		OrgID:   "org-1",
+		OrgID: "org-1",
 	})
 	if err == nil {
 		t.Fatal("expected a validation error")
 	}
 }
 
-func TestGetAndExists(t *testing.T) {
+func TestGet(t *testing.T) {
 	store := newFakeStore()
 	store.addOrg("org-1", "Acme", "user-1")
 	service := services.NewOrgService(store, &fakeMembershipStore{})
 
 	if _, err := service.Get(context.Background(), "org-1"); err != nil {
 		t.Fatalf("get org: %v", err)
-	}
-	exists, err := service.Exists(context.Background(), "org-1")
-	if err != nil {
-		t.Fatalf("check org: %v", err)
-	}
-	if !exists {
-		t.Fatal("expected org to exist")
 	}
 }
 
@@ -293,17 +267,22 @@ func (s *fakeStore) Delete(_ context.Context, id string) error {
 	return nil
 }
 
-func (s *fakeStore) Exists(_ context.Context, id string) (bool, error) {
-	_, ok := s.orgs[id]
-	return ok, nil
-}
-
 func (s *fakeStore) OwnerID(_ context.Context, id string) (string, bool, error) {
 	org, ok := s.orgs[id]
 	if !ok {
 		return "", false, nil
 	}
 	return org.UserID, true, nil
+}
+
+func (s *fakeStore) OwnerIDs(_ context.Context, ids []string) (map[string]string, error) {
+	owners := make(map[string]string, len(ids))
+	for _, id := range ids {
+		if org, ok := s.orgs[id]; ok {
+			owners[id] = org.UserID
+		}
+	}
+	return owners, nil
 }
 
 type fakeMembershipStore struct {

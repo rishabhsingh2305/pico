@@ -19,7 +19,8 @@ import (
 type MembershipService interface {
 	Add(ctx context.Context, in services.CreateMembershipInput) (entities.Membership, error)
 	List(ctx context.Context, in services.ListMembershipsInput) ([]entities.Membership, error)
-	Remove(ctx context.Context, actorID, orgID, userID string) error
+	UpdateRoles(ctx context.Context, orgID, userID string, roles map[string]string) error
+	Remove(ctx context.Context, orgID, userID string) error
 }
 
 // MembershipController serves organization membership endpoints.
@@ -38,11 +39,6 @@ func NewMembershipController(logger *slog.Logger, service MembershipService) *Me
 
 // Add handles POST /orgs/{orgID}/members.
 func (c *MembershipController) Add(w http.ResponseWriter, r *http.Request) {
-	id, ok := requestIdentity(w, r)
-	if !ok {
-		return
-	}
-
 	var request addMemberRequest
 	if err := httpx.DecodeJSON(w, r, &request); err != nil {
 		httpx.WriteError(w, r, http.StatusBadRequest, "invalid request body")
@@ -50,9 +46,9 @@ func (c *MembershipController) Add(w http.ResponseWriter, r *http.Request) {
 	}
 
 	membership, err := c.service.Add(r.Context(), services.CreateMembershipInput{
-		ActorID: id.UserID,
-		OrgID:   chi.URLParam(r, "orgID"),
-		UserID:  request.UserID,
+		OrgID:  chi.URLParam(r, "orgID"),
+		UserID: request.UserID,
+		Roles:  request.Roles,
 	})
 	if err != nil {
 		c.writeError(w, r, err)
@@ -65,11 +61,6 @@ func (c *MembershipController) Add(w http.ResponseWriter, r *http.Request) {
 
 // List handles GET and HEAD /orgs/{orgID}/members.
 func (c *MembershipController) List(w http.ResponseWriter, r *http.Request) {
-	id, ok := requestIdentity(w, r)
-	if !ok {
-		return
-	}
-
 	limit, offset, message := parsePagination(r)
 	if message != "" {
 		httpx.WriteError(w, r, http.StatusBadRequest, message)
@@ -77,10 +68,9 @@ func (c *MembershipController) List(w http.ResponseWriter, r *http.Request) {
 	}
 
 	items, err := c.service.List(r.Context(), services.ListMembershipsInput{
-		ActorID: id.UserID,
-		OrgID:   chi.URLParam(r, "orgID"),
-		Limit:   limit,
-		Offset:  offset,
+		OrgID:  chi.URLParam(r, "orgID"),
+		Limit:  limit,
+		Offset: offset,
 	})
 	if err != nil {
 		c.writeError(w, r, err)
@@ -94,16 +84,30 @@ func (c *MembershipController) List(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, r, http.StatusOK, response)
 }
 
-// Remove handles DELETE /orgs/{orgID}/members/{memberUserID}.
-func (c *MembershipController) Remove(w http.ResponseWriter, r *http.Request) {
-	id, ok := requestIdentity(w, r)
-	if !ok {
+// UpdateRoles handles PATCH /orgs/{orgID}/members/{memberUserID}.
+func (c *MembershipController) UpdateRoles(w http.ResponseWriter, r *http.Request) {
+	var request updateMemberRolesRequest
+	if err := httpx.DecodeJSON(w, r, &request); err != nil {
+		httpx.WriteError(w, r, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
+	if err := c.service.UpdateRoles(
+		r.Context(),
+		chi.URLParam(r, "orgID"),
+		chi.URLParam(r, "memberUserID"),
+		request.Roles,
+	); err != nil {
+		c.writeError(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Remove handles DELETE /orgs/{orgID}/members/{memberUserID}.
+func (c *MembershipController) Remove(w http.ResponseWriter, r *http.Request) {
 	if err := c.service.Remove(
 		r.Context(),
-		id.UserID,
 		chi.URLParam(r, "orgID"),
 		chi.URLParam(r, "memberUserID"),
 	); err != nil {
@@ -124,27 +128,33 @@ func (c *MembershipController) writeError(w http.ResponseWriter, r *http.Request
 		httpx.WriteError(w, r, http.StatusNotFound, "user not found")
 	case errors.Is(err, entities.ErrMembershipNotFound):
 		httpx.WriteError(w, r, http.StatusNotFound, "membership not found")
-	case errors.Is(err, entities.ErrForbidden):
-		httpx.WriteError(w, r, http.StatusForbidden, "forbidden")
 	case errors.Is(err, entities.ErrAlreadyMember):
 		httpx.WriteError(w, r, http.StatusConflict, "user is already a member")
 	case errors.Is(err, entities.ErrCannotRemoveOwner):
 		httpx.WriteError(w, r, http.StatusConflict, "cannot remove org owner")
+	case errors.Is(err, entities.ErrCannotChangeOwner):
+		httpx.WriteError(w, r, http.StatusConflict, "cannot change org owner role")
 	default:
 		logInternalError(c.logger, w, r, "membership request failed", err)
 	}
 }
 
 type addMemberRequest struct {
-	UserID string `json:"userId"`
+	UserID string            `json:"userId"`
+	Roles  map[string]string `json:"roles"`
+}
+
+type updateMemberRolesRequest struct {
+	Roles map[string]string `json:"roles"`
 }
 
 type membershipResponse struct {
-	ID        string    `json:"id"`
-	OrgID     string    `json:"orgId"`
-	UserID    string    `json:"userId"`
-	Role      string    `json:"role"`
-	CreatedAt time.Time `json:"createdAt"`
+	ID        string            `json:"id"`
+	OrgID     string            `json:"orgId"`
+	UserID    string            `json:"userId"`
+	Owner     bool              `json:"owner"`
+	Roles     map[string]string `json:"roles,omitempty"`
+	CreatedAt time.Time         `json:"createdAt"`
 }
 
 type membershipListResponse struct {
@@ -152,11 +162,16 @@ type membershipListResponse struct {
 }
 
 func membershipResponseFrom(membership entities.Membership) membershipResponse {
+	roles := membership.Roles
+	if membership.Owner {
+		roles = nil
+	}
 	return membershipResponse{
 		ID:        membership.ID,
 		OrgID:     membership.OrgID,
 		UserID:    membership.UserID,
-		Role:      membership.Role,
+		Owner:     membership.Owner,
+		Roles:     roles,
 		CreatedAt: membership.CreatedAt,
 	}
 }

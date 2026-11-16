@@ -134,34 +134,6 @@ func (s *UserStore) PasswordHash(ctx context.Context, id string) (string, error)
 	return document.PasswordHash, nil
 }
 
-// List returns users ordered by creation time.
-func (s *UserStore) List(ctx context.Context, limit, offset int) ([]entities.User, error) {
-	opts := options.Find().
-		SetSort(bson.D{{Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}}).
-		SetLimit(int64(limit)).
-		SetSkip(int64(offset))
-
-	cursor, err := s.collection.Find(ctx, bson.M{}, opts)
-	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
-	}
-
-	var documents []userDocument
-	if err := cursor.All(ctx, &documents); err != nil {
-		_ = cursor.Close(ctx)
-		return nil, fmt.Errorf("decode users: %w", err)
-	}
-	if err := cursor.Close(ctx); err != nil {
-		return nil, fmt.Errorf("close user cursor: %w", err)
-	}
-
-	items := make([]entities.User, 0, len(documents))
-	for _, document := range documents {
-		items = append(items, document.user())
-	}
-	return items, nil
-}
-
 // Update changes a user's name and email. Changing the email clears email
 // verification.
 func (s *UserStore) Update(ctx context.Context, id, name, email string, emailVerified bool, updatedAt time.Time) (entities.User, error) {

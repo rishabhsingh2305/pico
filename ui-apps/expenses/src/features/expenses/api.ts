@@ -1,4 +1,4 @@
-import { requestJSON } from "@/lib/api-client"
+import { refreshTokens, requestJSON } from "@/lib/api-client"
 import type {
   CreateExpenseInput,
   Expense,
@@ -27,12 +27,16 @@ export async function findExpensesOrg(userId: string): Promise<Org | null> {
   )
 }
 
-export function createExpensesOrg(): Promise<Org> {
-  return requestJSON<Org>("/orgs", {
+export async function createExpensesOrg(): Promise<Org> {
+  const org = await requestJSON<Org>("/orgs", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ name: "Expenses", tags: [EXPENSES_TAG] }),
   })
+  // The new organization is not in the current access token yet. Refresh so
+  // the owner wildcard is available before the first expense request.
+  await refreshTokens()
+  return org
 }
 
 export type ListExpensesOptions = {

@@ -21,6 +21,6 @@ type OrgDAO interface {
 	FindByIDs(ctx context.Context, ids []string, tags []string) ([]entities.Org, error)
 	Update(ctx context.Context, id string, update OrgUpdate) (entities.Org, error)
 	Delete(ctx context.Context, id string) error
-	Exists(ctx context.Context, id string) (bool, error)
 	OwnerID(ctx context.Context, orgID string) (ownerID string, found bool, err error)
+	OwnerIDs(ctx context.Context, orgIDs []string) (map[string]string, error)
 }

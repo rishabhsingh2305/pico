@@ -22,14 +22,12 @@ import { validateOrgTags } from "@/features/orgs/validation"
 import { normalizeTags } from "@/lib/tags"
 
 type EditOrgTagsDialogProps = {
-  userId: string
   org: Org
   onUpdated: () => void
   onSessionInvalid: () => void
 }
 
 export function EditOrgTagsDialog({
-  userId,
   org,
   onUpdated,
   onSessionInvalid,
@@ -71,7 +69,7 @@ export function EditOrgTagsDialog({
 
     setIsSubmitting(true)
     try {
-      await updateOrgTags(userId, org.id, normalizeTags(tags))
+      await updateOrgTags(org.id, normalizeTags(tags))
       setIsSubmitting(false)
       setOpen(false)
       onUpdated()

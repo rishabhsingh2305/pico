@@ -26,13 +26,11 @@ import { validateOrgName, validateOrgTags } from "@/features/orgs/validation"
 import { normalizeTags } from "@/lib/tags"
 
 type CreateOrgFormProps = {
-  userId: string
   onCreated: (org: Org) => void
   onSessionInvalid: () => void
 }
 
 export function CreateOrgForm({
-  userId,
   onCreated,
   onSessionInvalid,
 }: CreateOrgFormProps) {
@@ -68,7 +66,7 @@ export function CreateOrgForm({
 
     setIsSubmitting(true)
     try {
-      const org = await createOrg(userId, {
+      const org = await createOrg({
         name: name.trim(),
         tags: normalizeTags(tags),
       })

@@ -25,8 +25,9 @@ contains a link and a 6-digit code. The link opens the UI at
 `/verify-email#token=...`; the UI reads the fragment and calls the API. The UI
 uses the link only for now; code verification is available through
 `POST /auth/verify-email/otp`. After verification the user signs in at
-`/login`, which returns an access token. `AuthProvider` stores it in
-`localStorage` and restores the session from `/auth/session` on load.
+`/login`, which returns an access token and a refresh token. `AuthProvider`
+stores both in `localStorage` and restores the session from `/auth/session` on
+load; `requestJSON` refreshes once on `401`.
 
 ## Structure
 
@@ -147,12 +148,13 @@ The form is disabled while the request is in flight. The success state offers a
 1. `LoginPage` renders the email and password form.
 2. `validateLogin` checks the email shape and required password.
 3. `AuthProvider.login` posts `{email,password}` to `/auth/login`.
-4. The backend returns an access token; the UI stores it in `localStorage`,
-   keeps the user in memory, and navigates to `/orgs`.
+4. The backend returns an access token and a refresh token; the UI stores both
+   in `localStorage`, keeps the user in memory, and navigates to `/orgs`.
 5. `401` maps to "Email or password is incorrect." and `403` maps to "Verify your
    email before signing in."
-6. On reload, `AuthProvider` reads the stored token and calls
-   `GET /auth/session` to restore the user. A `401` clears the token and
+6. On reload, `AuthProvider` reads the stored tokens and calls
+   `GET /auth/session` to restore the user. A `401` refreshes once; a failed
+   refresh clears the tokens and
    protected routes redirect to `/login`.
 
 `requestJSON` sends the token as `Authorization: Bearer`. Signing out clears the
@@ -188,14 +190,15 @@ session.
 - `GET /orgs?tags=...&limit=100` loads the organization list.
 - `POST /orgs` creates an organization and its owner membership.
 - `PATCH /orgs/{orgID}?orgId=...` updates the owner's organization name or tags.
-- A `401` or a stale `404 user not found` clears the session and redirects to
-  `/login`.
+- A `401` triggers one refresh attempt; when refreshing also fails, it clears
+  the session and redirects to `/login`.
 - New organizations are prepended when no tag filter is active; otherwise the
   filtered list reloads.
 - The workspace sidebar shows the signed-in email and offers sign out.
 
-The legacy `userId` query parameter is still sent while the backend supports the
-temporary fallback; the bearer token is the authoritative identity.
+The actor is the access-token `sub`; the UI never sends a `userId` query
+parameter. Org-scoped requests send `?orgId=`, which must match the
+organization used to render the screen.
 
 ## Workspace shell
 
@@ -460,7 +463,7 @@ Success: `202` with `{"status":"sent","retryAfterSeconds":60}` and the
 `Retry-After: 60` header. The response is generic for unknown or verified
 addresses and each resend rotates the code.
 
-### `GET /orgs?userId=...&tags=food,travel&limit=100`
+### `GET /orgs?tags=food,travel&limit=100`
 
 Success: `200` with
 `{"items":[{"id","name","userId","tags","createdAt","updatedAt"}]}`. Only
@@ -469,7 +472,7 @@ any-match semantics: an organization is returned when it has at least one of the
 requested tags. Absent or empty tags returns all organizations. Organizations
 without a stored tags field read as an empty list.
 
-### `POST /orgs?userId=...`
+### `POST /orgs`
 
 Request:
 
@@ -484,13 +487,13 @@ Success: `201` with the created organization. The backend also creates the
 owner membership. Names are required and capped at 120 bytes. Tags are optional,
 trimmed, deduplicated, sorted, and capped at 20 items of 32 bytes each.
 
-### `GET /orgs/{orgID}?orgId=...&userId=...`
+### `GET /orgs/{orgID}?orgId=...`
 
-Success: `200` with the organization, including `tags`. The user must be a
-member. The path ID is canonical; `orgId` is repeated in the query for
-`RequireMember`.
+Success: `200` with the organization, including `tags`. The token must carry a
+role for the organization. The path ID is canonical; `?orgId=` must match it and
+`RequireOrgAccess` checks the route permission against the role.
 
-### `PATCH /orgs/{orgID}?orgId=...&userId=...`
+### `PATCH /orgs/{orgID}?orgId=...`
 
 Request with either or both fields:
 
@@ -504,17 +507,17 @@ Request with either or both fields:
 Success: `200` with the updated organization. At least one field is required.
 Only the owner may update. `tags: []` clears all organization tags.
 
-### `GET /projects?orgId=...&userId=...&tags=food,travel&limit=100`
+### `GET /projects?orgId=...&tags=food,travel&limit=100`
 
 Success: `200` with `{"items":[...]}`. Projects belong to the organization.
 `tags` uses any-match semantics: a project is returned when it has at least one
 of the requested tags. Absent or empty tags returns all projects.
 
-### `GET /projects/{projectID}?orgId=...&userId=...`
+### `GET /projects/{projectID}?orgId=...`
 
 Success: `200` with the project. The user must be a member of the organization.
 
-### `POST /projects?orgId=...&userId=...`
+### `POST /projects?orgId=...`
 
 Request:
 
@@ -530,7 +533,7 @@ Success: `201` with the created project. Names are required and capped at 120
 bytes. Currency is a three-letter ISO code and is immutable after creation.
 Tags are trimmed, deduplicated, sorted, and capped at 20 items of 32 bytes each.
 
-### `PATCH /projects/{projectID}?orgId=...&userId=...`
+### `PATCH /projects/{projectID}?orgId=...`
 
 Request with either or both fields:
 
@@ -544,7 +547,7 @@ Request with either or both fields:
 Success: `200` with the updated project. At least one field is required.
 `tags: []` clears all project tags.
 
-### `GET /expenses?orgId=...&userId=...&projectId=...&projectIds=...&tags=...&from=...&to=...&limit=20&offset=0`
+### `GET /expenses?orgId=...&projectId=...&projectIds=...&tags=...&from=...&to=...&limit=20&offset=0`
 
 Success: `200` with:
 
@@ -561,7 +564,7 @@ Expenses are scoped to the organization. `projectId` limits them to one project;
 single-tag fallback. `from` and `to` are inclusive RFC 3339 bounds. `limit` and
 `offset` paginate `items` only. `nextOffset` is `null` on the last page.
 
-### `GET /expenses/summary?orgId=...&userId=...&projectId=...&projectIds=...&tags=...&from=...&to=...`
+### `GET /expenses/summary?orgId=...&projectId=...&projectIds=...&tags=...&from=...&to=...`
 
 Success: `200` with totals grouped by project and currency:
 
@@ -584,7 +587,7 @@ The summary accepts the same filters as the list and has no pagination.
 `netTotal` is `totalCredit - totalDebit`. Amounts are never added across
 currencies.
 
-### `POST /expenses?orgId=...&userId=...`
+### `POST /expenses?orgId=...`
 
 Request:
 
@@ -604,14 +607,14 @@ when omitted. `amount` is a positive integer in minor units; `type` carries the
 direction. The project must belong to the organization. Currency is inherited
 from the project. Records without a type are read and aggregated as debit.
 
-### `PATCH /expenses/{expenseID}?orgId=...&userId=...`
+### `PATCH /expenses/{expenseID}?orgId=...`
 
 Request with any subset of `projectId`, `type`, `amount`, `description`, `tags`,
 and `spentAt`. At least one field is required. `type`, when supplied, must be
 `debit` or `credit`. Currency is inherited from the project and cannot be
 changed.
 
-### `DELETE /expenses/{expenseID}?orgId=...&userId=...`
+### `DELETE /expenses/{expenseID}?orgId=...`
 
 Success: `204`.
 
@@ -638,8 +641,9 @@ Organization errors:
 
 - `400` — server validation message
 - `403` — permission message
-- `401` — expired or invalid session; clear it and redirect to login
-- `404` — stale `userId` fallback; clear the session and redirect to login
+- `401` — expired or invalid session; after one refresh attempt, clear it and redirect to login
+- `403` — the token lacks the role or route permission
+- `404` — a resource was removed or the account no longer exists
 - network or other failures — retry or generic message
 
 ## Configuration
@@ -729,14 +733,16 @@ reloading effects. UI-only state remains local React state.
 disable `react-hooks/set-state-in-effect`. Application code keeps the strict
 rule.
 
-### Bearer token in localStorage
+### Tokens in localStorage
 
-Login posts credentials to `/auth/login`, which returns a stateless JWT.
-`AuthProvider` stores it in `localStorage` and `requestJSON` sends it as
-`Authorization: Bearer`. The backend also sets an HttpOnly cookie fallback, but
-the UI does not rely on it. This survives refresh and works across origins
-without third-party cookie restrictions. The tradeoff is that XSS can read the
-token; tokens cannot be revoked before they expire.
+Login posts credentials to `/auth/login`, which returns a 30-minute access JWT
+and a 30-day refresh token. `AuthProvider` stores both in `localStorage` and
+`requestJSON` sends the access token as `Authorization: Bearer`. On a `401`,
+`requestJSON` calls `/auth/refresh` once, stores the rotated pair, and retries
+the original request. The backend also sets HttpOnly cookie fallbacks, but the
+UI does not rely on them. This survives refresh and works across origins without
+third-party cookie restrictions. The tradeoff is that XSS can read both tokens,
+and stateless tokens cannot be revoked before they expire.
 
 ### Project-owned currency
 
@@ -828,11 +834,10 @@ it and refreshes the current page and totals.
 
 ## Known debt
 
-- Access tokens are stateless and cannot be revoked before they expire; signing
-  out clears the stored token only. The token is in `localStorage`, so XSS can
-  read it.
-- The legacy `userId` query parameter is still sent alongside the bearer token
-  until the backend removes the temporary fallback.
+- Tokens are stateless and cannot be revoked before they expire; signing out
+  clears the stored tokens only. Both tokens are in `localStorage`, so XSS can
+  read them.
+- Refresh rotation returns a new token but does not invalidate the old one.
 - No resend UI; an expired link has no recovery path in the UI yet.
 - No OTP input in the UI yet; code verification is API-only.
 - No organization settings or membership screens.

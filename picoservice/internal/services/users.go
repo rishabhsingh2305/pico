@@ -42,12 +42,6 @@ type ChangePasswordInput struct {
 	NewPassword     string
 }
 
-// ListUsersInput contains pagination fields for listing users.
-type ListUsersInput struct {
-	Limit  int
-	Offset int
-}
-
 // EmailVerifier sends and validates email verification links and codes.
 type EmailVerifier interface {
 	Send(ctx context.Context, user entities.User) error
@@ -74,15 +68,8 @@ func NewUserService(store dao.UserDAO, hasher Hasher, verification EmailVerifier
 
 // Create validates and registers a user.
 func (s *UserService) Create(ctx context.Context, in CreateUserInput) (entities.User, error) {
-	name, err := validation.Name(in.Name)
+	values, err := validateNewUser(in)
 	if err != nil {
-		return entities.User{}, err
-	}
-	email, err := validateEmail(in.Email)
-	if err != nil {
-		return entities.User{}, err
-	}
-	if err := validatePassword(in.Password); err != nil {
 		return entities.User{}, err
 	}
 
@@ -91,34 +78,69 @@ func (s *UserService) Create(ctx context.Context, in CreateUserInput) (entities.
 		return entities.User{}, fmt.Errorf("hash password: %w", err)
 	}
 
+	created, err := s.insertUser(ctx, values, passwordHash)
+	if err != nil {
+		return entities.User{}, err
+	}
+	if err := s.sendVerificationOrCleanup(ctx, created); err != nil {
+		return entities.User{}, err
+	}
+	return created, nil
+}
+
+type newUserValues struct {
+	name  string
+	email string
+}
+
+func validateNewUser(in CreateUserInput) (newUserValues, error) {
+	name, err := validation.Name(in.Name)
+	if err != nil {
+		return newUserValues{}, err
+	}
+	email, err := validateEmail(in.Email)
+	if err != nil {
+		return newUserValues{}, err
+	}
+	if err := validatePassword(in.Password); err != nil {
+		return newUserValues{}, err
+	}
+	return newUserValues{name: name, email: email}, nil
+}
+
+func (s *UserService) insertUser(ctx context.Context, values newUserValues, passwordHash string) (entities.User, error) {
 	now := time.Now().UTC()
 	user := entities.User{
-		Name:      name,
-		Email:     email,
+		Name:      values.name,
+		Email:     values.email,
 		CreatedAt: now,
 		UpdatedAt: now,
 	}
 
 	opCtx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
+
 	created, err := s.store.Insert(opCtx, user, passwordHash)
-	cancel()
 	if err != nil {
 		return entities.User{}, fmt.Errorf("create user: %w", err)
 	}
+	return created, nil
+}
 
-	if err := s.verification.Send(ctx, created); err != nil {
+func (s *UserService) sendVerificationOrCleanup(ctx context.Context, user entities.User) error {
+	if err := s.verification.Send(ctx, user); err != nil {
 		// Use a fresh context so cleanup still has a chance when the request
 		// context has been canceled or its deadline has expired.
 		cleanupCtx, cleanupCancel := context.WithTimeout(context.Background(), operationTimeout)
 		defer cleanupCancel()
 
-		cleanupErr := s.store.Delete(cleanupCtx, created.ID)
+		cleanupErr := s.store.Delete(cleanupCtx, user.ID)
 		if cleanupErr != nil {
-			return entities.User{}, fmt.Errorf("send verification email: %w", errors.Join(err, fmt.Errorf("cleanup user: %w", cleanupErr)))
+			return fmt.Errorf("send verification email: %w", errors.Join(err, fmt.Errorf("cleanup user: %w", cleanupErr)))
 		}
-		return entities.User{}, fmt.Errorf("send verification email: %w", err)
+		return fmt.Errorf("send verification email: %w", err)
 	}
-	return created, nil
+	return nil
 }
 
 // Get returns a user by ID.
@@ -133,23 +155,6 @@ func (s *UserService) Get(ctx context.Context, id string) (entities.User, error)
 	return user, nil
 }
 
-// List returns a page of users.
-func (s *UserService) List(ctx context.Context, in ListUsersInput) ([]entities.User, error) {
-	limit, offset, err := validation.Pagination(in.Limit, in.Offset)
-	if err != nil {
-		return nil, err
-	}
-
-	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
-	defer cancel()
-
-	items, err := s.store.List(ctx, limit, offset)
-	if err != nil {
-		return nil, fmt.Errorf("list users: %w", err)
-	}
-	return items, nil
-}
-
 // Update changes a user's name and/or email. Users may only update themselves.
 func (s *UserService) Update(ctx context.Context, in UpdateUserInput) (entities.User, error) {
 	if in.ActorID != in.UserID {
@@ -159,19 +164,32 @@ func (s *UserService) Update(ctx context.Context, in UpdateUserInput) (entities.
 		return entities.User{}, &validation.Error{Field: "body", Message: "no fields to update"}
 	}
 
+	updated, emailChanged, err := s.updateUser(ctx, in)
+	if err != nil {
+		return entities.User{}, err
+	}
+	if emailChanged {
+		if err := s.applyEmailChange(ctx, updated); err != nil {
+			return entities.User{}, err
+		}
+	}
+	return updated, nil
+}
+
+func (s *UserService) updateUser(ctx context.Context, in UpdateUserInput) (entities.User, bool, error) {
 	opCtx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
 	current, err := s.store.FindByID(opCtx, in.UserID)
 	if err != nil {
-		return entities.User{}, fmt.Errorf("get user: %w", err)
+		return entities.User{}, false, fmt.Errorf("get user: %w", err)
 	}
 
 	name := current.Name
 	if in.Name != nil {
 		name, err = validation.Name(*in.Name)
 		if err != nil {
-			return entities.User{}, err
+			return entities.User{}, false, err
 		}
 	}
 
@@ -179,7 +197,7 @@ func (s *UserService) Update(ctx context.Context, in UpdateUserInput) (entities.
 	if in.Email != nil {
 		email, err = validateEmail(*in.Email)
 		if err != nil {
-			return entities.User{}, err
+			return entities.User{}, false, err
 		}
 	}
 
@@ -187,18 +205,22 @@ func (s *UserService) Update(ctx context.Context, in UpdateUserInput) (entities.
 	emailVerified := current.EmailVerified && !emailChanged
 	updated, err := s.store.Update(opCtx, in.UserID, name, email, emailVerified, time.Now().UTC())
 	if err != nil {
-		return entities.User{}, fmt.Errorf("update user: %w", err)
+		return entities.User{}, false, fmt.Errorf("update user: %w", err)
 	}
+	return updated, emailChanged, nil
+}
 
-	if emailChanged {
-		if err := s.store.ClearVerificationOTP(opCtx, updated.ID); err != nil {
-			return entities.User{}, fmt.Errorf("clear verification otp: %w", err)
-		}
-		if err := s.verification.Send(ctx, updated); err != nil {
-			return entities.User{}, fmt.Errorf("send verification email: %w", err)
-		}
+func (s *UserService) applyEmailChange(ctx context.Context, user entities.User) error {
+	opCtx, cancel := context.WithTimeout(ctx, operationTimeout)
+	defer cancel()
+
+	if err := s.store.ClearVerificationOTP(opCtx, user.ID); err != nil {
+		return fmt.Errorf("clear verification otp: %w", err)
 	}
-	return updated, nil
+	if err := s.verification.Send(ctx, user); err != nil {
+		return fmt.Errorf("send verification email: %w", err)
+	}
+	return nil
 }
 
 // VerifyEmail validates a verification token and marks the user's email as

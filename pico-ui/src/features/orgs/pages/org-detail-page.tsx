@@ -56,11 +56,11 @@ function OrgDetailView({ session }: { session: Session }) {
 
   const orgQuery = useQuery({
     queryKey: queryKeys.org(session.userId, orgId),
-    queryFn: () => getOrg(session.userId, orgId),
+    queryFn: () => getOrg(orgId),
   })
   const projectsQuery = useQuery({
     queryKey: queryKeys.projects(session.userId, orgId, projectTags),
-    queryFn: () => listProjects(session.userId, orgId, projectTags),
+    queryFn: () => listProjects(orgId, projectTags),
   })
 
   const org = orgQuery.data ?? null
@@ -275,7 +275,6 @@ function OrgDetailView({ session }: { session: Session }) {
                           </DialogDescription>
                         </DialogHeader>
                         <CreateProjectForm
-                          userId={session.userId}
                           orgId={orgId}
                           onCreated={() => handleProjectCreated()}
                           onCancel={() => setIsProjectDialogOpen(false)}
@@ -351,7 +350,6 @@ function OrgDetailView({ session }: { session: Session }) {
                   {projects.map((project) => (
                     <li key={project.id}>
                       <ProjectCard
-                        userId={session.userId}
                         orgId={orgId}
                         project={project}
                         activeTags={projectTags}

@@ -70,11 +70,11 @@ function ProjectDetailView({ session }: { session: Session }) {
 
   const orgQuery = useQuery({
     queryKey: queryKeys.org(session.userId, orgId),
-    queryFn: () => getOrg(session.userId, orgId),
+    queryFn: () => getOrg(orgId),
   })
   const projectQuery = useQuery({
     queryKey: queryKeys.project(session.userId, orgId, projectId),
-    queryFn: () => getProject(session.userId, orgId, projectId),
+    queryFn: () => getProject(orgId, projectId),
   })
   const expensesQuery = useQuery({
     queryKey: queryKeys.expenses(
@@ -86,7 +86,6 @@ function ProjectDetailView({ session }: { session: Session }) {
     ),
     queryFn: () =>
       listExpenses({
-        userId: session.userId,
         orgId,
         projectId,
         tags: filters.tags,
@@ -105,7 +104,6 @@ function ProjectDetailView({ session }: { session: Session }) {
     ),
     queryFn: () =>
       summarizeExpenses({
-        userId: session.userId,
         orgId,
         projectId,
         tags: filters.tags,
@@ -204,7 +202,7 @@ function ProjectDetailView({ session }: { session: Session }) {
     setDeletingId(expense.id)
     setDeleteError("")
     try {
-      await deleteExpense(session.userId, orgId, expense.id)
+      await deleteExpense(orgId, expense.id)
       const remainingCount = summary ? summary.totalCount - 1 : null
       void queryClient.invalidateQueries({
         queryKey: queryKeys.expenseRoot(session.userId, orgId, projectId),
@@ -339,7 +337,6 @@ function ProjectDetailView({ session }: { session: Session }) {
                     </DialogDescription>
                   </DialogHeader>
                   <CreateExpenseForm
-                    userId={session.userId}
                     orgId={orgId}
                     projectId={projectId}
                     currency={project.currency}

@@ -29,7 +29,6 @@ import {
 } from "@/features/expenses/validation"
 
 type CreateExpenseFormProps = {
-  userId: string
   orgId: string
   projectId: string
   currency: string
@@ -39,7 +38,6 @@ type CreateExpenseFormProps = {
 }
 
 export function CreateExpenseForm({
-  userId,
   orgId,
   projectId,
   currency,
@@ -97,7 +95,7 @@ export function CreateExpenseForm({
 
     setIsSubmitting(true)
     try {
-      const expense = await createExpense(userId, orgId, {
+      const expense = await createExpense(orgId, {
         projectId,
         type: result.type,
         amount: result.amountMinorUnits,

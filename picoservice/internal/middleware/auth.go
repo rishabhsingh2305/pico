@@ -1,8 +1,6 @@
 package middleware
 
 import (
-	"context"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -13,73 +11,48 @@ import (
 // AuthCookieName is the cookie carrying the access token.
 const AuthCookieName = "pico_auth"
 
-// AccessTokens validates an access token and returns its subject.
+// RefreshCookieName is the cookie carrying the refresh token.
+const RefreshCookieName = "pico_refresh"
+
+// AccessTokens validates an access token and returns its subject and
+// organization role map.
 type AccessTokens interface {
-	ParseSubject(token string) (string, error)
+	ParseAccess(token string) (subject string, orgs map[string][]string, err error)
 }
 
-// RequireAuth authenticates the request from the auth cookie. Requests without a
-// cookie fall back to the temporary userId query parameter until the UI
-// migrates to tokens. A present but invalid cookie never falls back.
-func RequireAuth(logger *slog.Logger, users UserLookup, tokens AccessTokens) func(http.Handler) http.Handler {
-	if logger == nil {
-		logger = slog.Default()
-	}
-
+// RequireAuth authenticates the request from a Bearer token or the auth cookie
+// and stores the identity in the request context. There is no query-parameter
+// fallback: the actor always comes from a signed token.
+func RequireAuth(tokens AccessTokens) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if token := bearerToken(r); token != "" {
-				userID, err := tokens.ParseSubject(token)
-				if err != nil {
-					httpx.WriteError(w, r, http.StatusUnauthorized, "authentication required")
-					return
-				}
-
-				ctx := WithContext(r.Context(), Identity{UserID: userID})
-				next.ServeHTTP(w, r.WithContext(ctx))
+				authenticate(w, r, next, tokens, token, false)
 				return
 			}
 
 			if cookie, err := r.Cookie(AuthCookieName); err == nil && cookie.Value != "" {
-				userID, err := tokens.ParseSubject(cookie.Value)
-				if err != nil {
-					ClearAuthCookie(w)
-					httpx.WriteError(w, r, http.StatusUnauthorized, "authentication required")
-					return
-				}
-
-				ctx := WithContext(r.Context(), Identity{UserID: userID})
-				next.ServeHTTP(w, r.WithContext(ctx))
+				authenticate(w, r, next, tokens, cookie.Value, true)
 				return
 			}
 
-			userID := strings.TrimSpace(r.URL.Query().Get(UserIDParam))
-			if userID == "" {
-				httpx.WriteError(w, r, http.StatusUnauthorized, "authentication required")
-				return
-			}
-			if len(userID) > maxIDLength {
-				httpx.WriteError(w, r, http.StatusBadRequest, UserIDParam+" must be at most 128 characters")
-				return
-			}
-
-			lookupCtx, cancel := context.WithTimeout(r.Context(), lookupTimeout)
-			defer cancel()
-
-			exists, err := users.Exists(lookupCtx, userID)
-			if err != nil {
-				writeLookupError(logger, w, r, "user lookup failed", err)
-				return
-			}
-			if !exists {
-				httpx.WriteError(w, r, http.StatusNotFound, "user not found")
-				return
-			}
-
-			ctx := WithContext(r.Context(), Identity{UserID: userID})
-			next.ServeHTTP(w, r.WithContext(ctx))
+			httpx.WriteError(w, r, http.StatusUnauthorized, "authentication required")
 		})
 	}
+}
+
+func authenticate(w http.ResponseWriter, r *http.Request, next http.Handler, tokens AccessTokens, token string, clearCookie bool) {
+	subject, orgs, err := tokens.ParseAccess(token)
+	if err != nil {
+		if clearCookie {
+			ClearAuthCookie(w)
+		}
+		httpx.WriteError(w, r, http.StatusUnauthorized, "authentication required")
+		return
+	}
+
+	ctx := WithContext(r.Context(), Identity{UserID: subject, Orgs: orgs})
+	next.ServeHTTP(w, r.WithContext(ctx))
 }
 
 func bearerToken(r *http.Request) string {
@@ -93,8 +66,17 @@ func bearerToken(r *http.Request) string {
 
 // ClearAuthCookie expires the auth cookie.
 func ClearAuthCookie(w http.ResponseWriter) {
+	clearCookie(w, AuthCookieName)
+}
+
+// ClearRefreshCookie expires the refresh cookie.
+func ClearRefreshCookie(w http.ResponseWriter) {
+	clearCookie(w, RefreshCookieName)
+}
+
+func clearCookie(w http.ResponseWriter, name string) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     AuthCookieName,
+		Name:     name,
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
