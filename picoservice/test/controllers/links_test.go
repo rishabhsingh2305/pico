@@ -43,12 +43,18 @@ func TestLinkCreate(t *testing.T) {
 		},
 	}
 
+	var purged string
+	purger := &fakes.LinkPurger{PurgeFunc: func(_ context.Context, url string) error {
+		purged = url
+		return nil
+	}}
+
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPost, "/orgs/org-1/links?orgId=org-1", strings.NewReader(`{"url":"https://example.com","slug":"launch","title":"Launch","tags":["marketing"]}`))
 	req.Host = "api.example.com"
 	req = withIdentity(req, "org-1", "user-1")
 
-	controllers.NewLinkController(testLogger(), service).Create(rec, req)
+	controllers.NewLinkController(testLogger(), service, "https://link.uppixl.com", purger).Create(rec, req)
 
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, rec.Code, rec.Body.String())
@@ -64,11 +70,14 @@ func TestLinkCreate(t *testing.T) {
 	if got, want := body["shortPath"], "/s/launch"; got != want {
 		t.Fatalf("expected shortPath %q, got %v", want, got)
 	}
-	if got, want := body["shortUrl"], "http://api.example.com/s/launch"; got != want {
+	if got, want := body["shortUrl"], "https://link.uppixl.com/s/launch"; got != want {
 		t.Fatalf("expected shortUrl %q, got %v", want, got)
 	}
 	if got, want := body["disabled"], false; got != want {
 		t.Fatalf("expected disabled %v, got %v", want, got)
+	}
+	if got, want := purged, "https://link.uppixl.com/s/launch"; got != want {
+		t.Fatalf("expected purge URL %q, got %q", want, got)
 	}
 }
 
@@ -83,7 +92,7 @@ func TestLinkCreateSlugConflict(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/orgs/org-1/links?orgId=org-1", strings.NewReader(`{"url":"https://example.com","slug":"launch"}`))
 	req = withIdentity(req, "org-1", "user-1")
 
-	controllers.NewLinkController(testLogger(), service).Create(rec, req)
+	newLinkController(service).Create(rec, req)
 
 	assertJSONError(t, rec, http.StatusConflict, "slug already in use")
 }
@@ -99,7 +108,7 @@ func TestLinkCreateValidation(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/orgs/org-1/links?orgId=org-1", strings.NewReader(`{"url":""}`))
 	req = withIdentity(req, "org-1", "user-1")
 
-	controllers.NewLinkController(testLogger(), service).Create(rec, req)
+	newLinkController(service).Create(rec, req)
 
 	assertJSONError(t, rec, http.StatusBadRequest, "url is required")
 }
@@ -135,7 +144,7 @@ func TestLinkList(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/orgs/org-1/links?orgId=org-1&q=lau&tags=food,travel&limit=20", nil)
 	req = withIdentity(req, "org-1", "user-1")
 
-	controllers.NewLinkController(testLogger(), service).List(rec, req)
+	newLinkController(service).List(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d", http.StatusOK, rec.Code)
@@ -150,6 +159,9 @@ func TestLinkList(t *testing.T) {
 	}
 	if len(body.Items) != 1 || body.Items[0]["slug"] != "launch" {
 		t.Fatalf("unexpected items: %v", body.Items)
+	}
+	if got, want := body.Items[0]["shortUrl"], "http://example.com/s/launch"; got != want {
+		t.Fatalf("expected shortUrl %q, got %v", want, got)
 	}
 	if body.NextOffset == nil || *body.NextOffset != 20 {
 		t.Fatalf("expected nextOffset 20, got %v", body.NextOffset)
@@ -168,7 +180,7 @@ func TestLinkGetNotFound(t *testing.T) {
 	req = withIdentity(req, "org-1", "user-1")
 	req = withRouteParams(req, map[string]string{"linkID": "link-1"})
 
-	controllers.NewLinkController(testLogger(), service).Get(rec, req)
+	newLinkController(service).Get(rec, req)
 
 	assertJSONError(t, rec, http.StatusNotFound, "link not found")
 }
@@ -197,12 +209,18 @@ func TestLinkUpdate(t *testing.T) {
 		},
 	}
 
+	var purged string
+	purger := &fakes.LinkPurger{PurgeFunc: func(_ context.Context, url string) error {
+		purged = url
+		return nil
+	}}
+
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodPatch, "/orgs/org-1/links/link-1?orgId=org-1", strings.NewReader(`{"url":"https://example.com/new","disabled":true}`))
 	req = withIdentity(req, "org-1", "user-1")
 	req = withRouteParams(req, map[string]string{"linkID": "link-1"})
 
-	controllers.NewLinkController(testLogger(), service).Update(rec, req)
+	controllers.NewLinkController(testLogger(), service, "https://link.uppixl.com", purger).Update(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("expected status %d, got %d: %s", http.StatusOK, rec.Code, rec.Body.String())
@@ -214,30 +232,63 @@ func TestLinkUpdate(t *testing.T) {
 	if got, want := body["disabled"], true; got != want {
 		t.Fatalf("expected disabled %v, got %v", want, got)
 	}
+	if got, want := purged, "https://link.uppixl.com/s/launch"; got != want {
+		t.Fatalf("expected purge URL %q, got %q", want, got)
+	}
 }
 
 func TestLinkDelete(t *testing.T) {
 	service := &fakes.LinkService{
-		DeleteFunc: func(_ context.Context, orgID, id string) error {
+		DeleteFunc: func(_ context.Context, orgID, id string) (entities.Link, error) {
 			if orgID != "org-1" || id != "link-1" {
 				t.Fatalf("unexpected scope: %q %q", orgID, id)
 			}
-			return nil
+			return entities.Link{ID: id, OrgID: orgID, Slug: "launch"}, nil
 		},
 	}
+
+	var purged string
+	purger := &fakes.LinkPurger{PurgeFunc: func(_ context.Context, url string) error {
+		purged = url
+		return nil
+	}}
 
 	rec := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodDelete, "/orgs/org-1/links/link-1?orgId=org-1", nil)
 	req = withIdentity(req, "org-1", "user-1")
 	req = withRouteParams(req, map[string]string{"linkID": "link-1"})
 
-	controllers.NewLinkController(testLogger(), service).Delete(rec, req)
+	controllers.NewLinkController(testLogger(), service, "https://link.uppixl.com", purger).Delete(rec, req)
 
 	if rec.Code != http.StatusNoContent {
 		t.Fatalf("expected status %d, got %d", http.StatusNoContent, rec.Code)
 	}
 	if rec.Body.Len() != 0 {
 		t.Fatalf("expected an empty body, got %q", rec.Body.String())
+	}
+	if got, want := purged, "https://link.uppixl.com/s/launch"; got != want {
+		t.Fatalf("expected purge URL %q, got %q", want, got)
+	}
+}
+
+func TestLinkPurgeFailureDoesNotFailMutation(t *testing.T) {
+	service := &fakes.LinkService{
+		CreateFunc: func(_ context.Context, in services.CreateLinkInput) (entities.Link, error) {
+			return entities.Link{ID: "link-1", OrgID: in.OrgID, Slug: "launch"}, nil
+		},
+	}
+	purger := &fakes.LinkPurger{PurgeFunc: func(context.Context, string) error {
+		return errors.New("bunny unavailable")
+	}}
+
+	rec := httptest.NewRecorder()
+	req := httptest.NewRequest(http.MethodPost, "/orgs/org-1/links?orgId=org-1", strings.NewReader(`{"url":"https://example.com","slug":"launch"}`))
+	req = withIdentity(req, "org-1", "user-1")
+
+	controllers.NewLinkController(testLogger(), service, "https://link.uppixl.com", purger).Create(rec, req)
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected status %d, got %d: %s", http.StatusCreated, rec.Code, rec.Body.String())
 	}
 }
 
@@ -254,7 +305,7 @@ func TestLinkRedirect(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/s/launch", nil)
 	req = withRouteParams(req, map[string]string{"slug": "launch"})
 
-	controllers.NewLinkController(testLogger(), service).Redirect(rec, req)
+	newLinkController(service).Redirect(rec, req)
 
 	if gotSlug != "launch" {
 		t.Fatalf("expected slug launch, got %q", gotSlug)
@@ -287,8 +338,11 @@ func TestLinkRedirectNotFound(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/s/missing", nil)
 	req = withRouteParams(req, map[string]string{"slug": "missing"})
 
-	controllers.NewLinkController(testLogger(), service).Redirect(rec, req)
+	newLinkController(service).Redirect(rec, req)
 
+	if got, want := rec.Header().Get("Cache-Control"), "no-store"; got != want {
+		t.Fatalf("expected Cache-Control %q, got %q", want, got)
+	}
 	assertJSONError(t, rec, http.StatusNotFound, "link not found")
 }
 
@@ -303,11 +357,15 @@ func TestLinkRedirectInternalError(t *testing.T) {
 	req := httptest.NewRequest(http.MethodGet, "/s/launch", nil)
 	req = withRouteParams(req, map[string]string{"slug": "launch"})
 
-	controllers.NewLinkController(testLogger(), service).Redirect(rec, req)
+	newLinkController(service).Redirect(rec, req)
 
 	assertJSONError(t, rec, http.StatusInternalServerError, "internal server error")
 }
 
 func ptrTime(value time.Time) *time.Time {
 	return &value
+}
+
+func newLinkController(service controllers.LinkService) *controllers.LinkController {
+	return controllers.NewLinkController(testLogger(), service, "", nil)
 }

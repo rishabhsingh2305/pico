@@ -423,8 +423,12 @@ func TestStoresIntegration(t *testing.T) {
 		t.Fatalf("expected enabled link to resolve: %v", err)
 	}
 
-	if err := linkStore.Delete(ctx, org.ID, link.ID, now.Add(3*time.Minute)); err != nil {
+	deletedLink, err := linkStore.Delete(ctx, org.ID, link.ID, now.Add(3*time.Minute))
+	if err != nil {
 		t.Fatalf("delete link: %v", err)
+	}
+	if deletedLink.Slug != "docs" {
+		t.Fatalf("expected deleted link slug docs, got %+v", deletedLink)
 	}
 	if _, err := linkStore.FindBySlug(ctx, "docs"); !errors.Is(err, entities.ErrLinkNotFound) {
 		t.Fatalf("expected deleted link to be hidden, got %v", err)

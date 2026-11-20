@@ -97,8 +97,8 @@ includes searchable endpoint cards, request/response examples, and copy buttons.
 Owners and members with a `link.*` role can manage organization short links at
 `/orgs/:orgId/links`. A link can use a custom alias or a generated one, carries
 optional tags, and can be edited, disabled, re-enabled, deleted, copied, opened,
-or shown as a QR code. The redirect itself is public at the API origin under
-`/s/{slug}`; only management requires an account.
+or shown as a QR code. The redirect itself is public at the short-link origin
+under `/s/{slug}`; only management requires an account.
 
 Owners and members with `share.admin` can create organization or project links
 from the share buttons on those screens. Share links expire after 7, 30, or 365 days,

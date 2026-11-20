@@ -277,7 +277,8 @@ token lacks the matching `link.*` role.
 - Disable/enable is reversible. Delete is a tombstone and the confirmation says
   the alias cannot be reused. Deleted links disappear from the list.
 - The copy action and QR dialog use `shortUrl` from the API, not a URL built
-  from the UI origin. The redirect itself is public at the API origin.
+  from the UI origin. The redirect itself is public at the configured
+  short-link origin (`https://link.uppixl.com` in deployment).
 - Query keys derive from the user ID, organization ID, filters, and offset.
   Mutations invalidate the organization's link root.
 
@@ -559,7 +560,8 @@ Only the owner may update. `tags: []` clears all organization tags.
 
 Returns one page of organization short links as `{items,nextOffset}`. `q` is an
 alias prefix; `tags` uses any-match semantics. Disabled links are included.
-Deleted links are excluded. `shortUrl` is an absolute URL on the API origin.
+Deleted links are excluded. `shortUrl` is an absolute URL on the configured
+short-link origin.
 
 ### `POST /orgs/{orgID}/links?orgId=...`
 

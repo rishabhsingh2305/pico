@@ -40,7 +40,8 @@
   backend endpoint. Content lives in typed data under `src/features/api-docs`.
 - Organization short links live at `/orgs/:orgId/links` and are managed by
   `link.viewer`, `link.editor`, and `link.admin` (owners use the wildcard). The
-  short URL is public at the API origin under `/s/{slug}`; the UI never builds
+  short URL is public at the configured short-link origin under `/s/{slug}`;
+  the UI never builds
   it from the UI origin. The list filters by alias prefix and any-match tags.
   Link aliases are immutable. Delete is a tombstone, so the alias is not reused.
   QR codes are rendered client-side from `shortUrl`.

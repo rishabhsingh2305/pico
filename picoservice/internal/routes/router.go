@@ -68,6 +68,8 @@ type Deps struct {
 	Projects       ProjectService
 	Expenses       ExpenseService
 	Links          LinkService
+	LinkPurger     controllers.LinkPurger
+	ShortBaseURL   string
 	Credentials    CredentialService
 	Policy         *authz.Policy
 	SecureCookies  bool
@@ -91,7 +93,7 @@ func New(deps Deps) (*chi.Mux, error) {
 	membershipController := controllers.NewMembershipController(logger, deps.Memberships)
 	projectController := controllers.NewProjectController(logger, deps.Projects)
 	expenseController := controllers.NewExpenseController(logger, deps.Expenses)
-	linkController := controllers.NewLinkController(logger, deps.Links)
+	linkController := controllers.NewLinkController(logger, deps.Links, deps.ShortBaseURL, deps.LinkPurger)
 	credentialController := controllers.NewCredentialController(logger, deps.Credentials)
 
 	requireAuth := middleware.RequireAuth(deps.Auth)
@@ -147,6 +149,8 @@ func (d Deps) validate() error {
 		return errors.New("routes: expense service is required")
 	case d.Links == nil:
 		return errors.New("routes: link service is required")
+	case (d.ShortBaseURL == "") != (d.LinkPurger == nil):
+		return errors.New("routes: short base URL and link purger must be set together")
 	case d.Credentials == nil:
 		return errors.New("routes: credential service is required")
 	case d.Policy == nil:

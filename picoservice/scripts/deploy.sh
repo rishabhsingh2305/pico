@@ -112,6 +112,11 @@ for name in MONGODB_URI MONGODB_DATABASE JWT_SECRET PUBLIC_BASE_URL EMAIL_FROM S
   require_var "$name" "$APP_ENV_FILE"
 done
 
+if [[ -n "${SHORT_BASE_URL:-}" || -n "${BUNNY_API_KEY:-}" ]]; then
+  require_var SHORT_BASE_URL "$APP_ENV_FILE"
+  require_var BUNNY_API_KEY "$APP_ENV_FILE"
+fi
+
 require_var AWS_REGION "$AWS_ENV_FILE"
 STACK_NAME="${STACK_NAME:-picoservice}"
 
@@ -223,6 +228,10 @@ fi
 
 if [[ -n "${CORS_ALLOWED_ORIGINS:-}" ]]; then
   deploy_args+=("CorsAllowedOrigins=$CORS_ALLOWED_ORIGINS")
+fi
+
+if [[ -n "${SHORT_BASE_URL:-}" ]]; then
+  deploy_args+=("ShortBaseURL=$SHORT_BASE_URL" "BunnyApiKey=$BUNNY_API_KEY")
 fi
 
 if ((ASSUME_YES)); then

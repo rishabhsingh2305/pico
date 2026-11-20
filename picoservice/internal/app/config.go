@@ -13,6 +13,8 @@ import (
 const (
 	jwtSecretEnv          = "JWT_SECRET"
 	publicBaseURLEnv      = "PUBLIC_BASE_URL"
+	shortBaseURLEnv       = "SHORT_BASE_URL"
+	bunnyAPIKeyEnv        = "BUNNY_API_KEY"
 	corsAllowedOriginsEnv = "CORS_ALLOWED_ORIGINS"
 	emailFromEnv          = "EMAIL_FROM"
 	smtpAddrEnv           = "SMTP_ADDR"
@@ -20,10 +22,12 @@ const (
 	smtpPasswordEnv       = "SMTP_PASSWORD"
 )
 
-// Config contains authentication and email delivery settings.
+// Config contains authentication, email delivery, and short-link settings.
 type Config struct {
 	JWTSecret          string
 	PublicBaseURL      string
+	ShortBaseURL       string
+	BunnyAPIKey        string
 	CORSAllowedOrigins []string
 	EmailFrom          string
 	SMTPAddr           string
@@ -42,6 +46,8 @@ func ConfigFromEnv() (Config, error) {
 	cfg := Config{
 		JWTSecret:          strings.TrimSpace(os.Getenv(jwtSecretEnv)),
 		PublicBaseURL:      strings.TrimRight(strings.TrimSpace(os.Getenv(publicBaseURLEnv)), "/"),
+		ShortBaseURL:       strings.TrimRight(strings.TrimSpace(os.Getenv(shortBaseURLEnv)), "/"),
+		BunnyAPIKey:        strings.TrimSpace(os.Getenv(bunnyAPIKeyEnv)),
 		CORSAllowedOrigins: origins,
 		EmailFrom:          strings.TrimSpace(os.Getenv(emailFromEnv)),
 		SMTPAddr:           strings.TrimSpace(os.Getenv(smtpAddrEnv)),
@@ -68,15 +74,16 @@ func (c Config) validate() error {
 		return fmt.Errorf("%s must be at least 32 bytes", jwtSecretEnv)
 	}
 
-	baseURL, err := url.Parse(c.PublicBaseURL)
-	if err != nil || (baseURL.Scheme != "http" && baseURL.Scheme != "https") || baseURL.Host == "" {
-		return fmt.Errorf("%s must be an absolute http or https URL", publicBaseURLEnv)
+	if err := validateBaseURL(publicBaseURLEnv, c.PublicBaseURL); err != nil {
+		return err
 	}
-	if baseURL.RawQuery != "" || baseURL.Fragment != "" {
-		return fmt.Errorf("%s must not contain a query or fragment", publicBaseURLEnv)
+	if c.ShortBaseURL != "" {
+		if err := validateBaseURL(shortBaseURLEnv, c.ShortBaseURL); err != nil {
+			return err
+		}
 	}
-	if baseURL.Path != "" {
-		return fmt.Errorf("%s must not contain a path", publicBaseURLEnv)
+	if (c.ShortBaseURL == "") != (c.BunnyAPIKey == "") {
+		return fmt.Errorf("%s and %s must be set together", shortBaseURLEnv, bunnyAPIKeyEnv)
 	}
 
 	for _, origin := range c.CORSAllowedOrigins {
@@ -144,6 +151,20 @@ func parseCORSAllowedOrigins(raw string) ([]string, error) {
 		return nil, fmt.Errorf("%s must contain at least one origin", corsAllowedOriginsEnv)
 	}
 	return origins, nil
+}
+
+func validateBaseURL(name, raw string) error {
+	parsed, err := url.Parse(raw)
+	if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+		return fmt.Errorf("%s must be an absolute http or https URL", name)
+	}
+	if parsed.RawQuery != "" || parsed.Fragment != "" {
+		return fmt.Errorf("%s must not contain a query or fragment", name)
+	}
+	if parsed.Path != "" {
+		return fmt.Errorf("%s must not contain a path", name)
+	}
+	return nil
 }
 
 func validateOrigin(origin string) error {

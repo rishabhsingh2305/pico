@@ -221,8 +221,17 @@ X-Robots-Tag: noindex
 ```
 
 Missing, disabled, and deleted aliases return `404 {"error":"link not found"}`.
-`shortUrl` in management responses is built from the API request origin, so it
-uses the Function URL until a custom domain is placed in front of the API.
+`shortUrl` uses `SHORT_BASE_URL` when set, for example
+`https://link.uppixl.com/s/launch`. If it is unset, the API request origin is
+used, which is convenient for local development.
+
+When `SHORT_BASE_URL` and `BUNNY_API_KEY` are set, successful create, update,
+disable/enable, and delete requests purge the exact public URL through the
+Bunny.net API. The purge is best-effort: a Bunny failure is logged and the link
+mutation still succeeds. The redirect itself sends `Cache-Control: no-store`
+for browsers, while Bunny caches the edge response for the TTL configured in the
+pull zone (10 minutes in the current deployment). Disable Bunny error caching so
+a `404` is not cached before a link exists.
 
 The `link` feature governs management:
 
@@ -424,6 +433,7 @@ or membership constraints. The command is idempotent.
 │   └── engineering-standards.md   # Clean code, DRY, modularity, testing
 ├── internal/
 │   ├── app/                       # Shared composition root
+│   ├── cdn/                       # Bunny.net cache purge client
 │   ├── controllers/               # HTTP request/response DTOs and controllers
 │   ├── dao/                       # Persistence contracts
 │   │   └── mongodb/               # MongoDB stores, indexes, client lifecycle
@@ -672,15 +682,19 @@ make deploy
 `make deploy` does not load `.env`. It requires `MONGODB_URI`, `JWT_SECRET`,
 `PUBLIC_BASE_URL`, `EMAIL_FROM`, and `SMTP_ADDR`. `SMTP_USERNAME` and
 `SMTP_PASSWORD` are optional but must be set together. `CORS_ALLOWED_ORIGINS`
-is optional and defaults to `PUBLIC_BASE_URL`. `MongoDBURI`, `JwtSecret`,
-`SmtpUsername`, and `SmtpPassword` are `NoEcho` parameters, so CloudFormation
-masks them in stack descriptions. To deploy without the Makefile:
+is optional and defaults to `PUBLIC_BASE_URL`. `SHORT_BASE_URL` and
+`BUNNY_API_KEY` are optional together: set both to enable the custom short-link
+origin and CDN purging, or leave both unset. `MongoDBURI`, `JwtSecret`,
+`SmtpUsername`, `SmtpPassword`, and `BunnyApiKey` are `NoEcho` parameters, so
+CloudFormation masks them in stack descriptions. To deploy without the Makefile:
 
 ```bash
 sam deploy --parameter-overrides \
   MongoDBURI='mongodb+srv://...' \
   JwtSecret='...' \
   PublicBaseURL='https://example.com' \
+  ShortBaseURL='https://link.uppixl.com' \
+  BunnyApiKey='...' \
   CorsAllowedOrigins='https://example.com' \
   EmailFrom='noreply@example.com' \
   SmtpAddr='smtp.example.com:587' \
@@ -717,7 +731,8 @@ Application settings stay in `.env` (template: `sample.env`):
 ```bash
 chmod 600 .env
 # MONGODB_URI, MONGODB_DATABASE, JWT_SECRET, PUBLIC_BASE_URL,
-# CORS_ALLOWED_ORIGINS, EMAIL_FROM, SMTP_ADDR, optional SMTP_USERNAME/SMTP_PASSWORD
+# CORS_ALLOWED_ORIGINS, EMAIL_FROM, SMTP_ADDR, optional SMTP_USERNAME/SMTP_PASSWORD,
+# optional SHORT_BASE_URL/BUNNY_API_KEY
 ```
 
 Then deploy:
@@ -731,6 +746,7 @@ Or run `./scripts/deploy.sh` directly. The script:
 - requires both env files to exist with mode `600`
 - loads the selected application env file and deploy env file
 - checks the required values
+- requires `SHORT_BASE_URL` and `BUNNY_API_KEY` together when either is set
 - verifies AWS credentials with `aws sts get-caller-identity`
 - uses a dedicated `S3_BUCKET` when configured, creating it if missing unless
   `--no-create-bucket` is passed
@@ -788,6 +804,8 @@ curl -i "$(make url)ready"
 | `MONGODB_DATABASE` | yes | Database name, `picoservice` in `template.yaml` |
 | `JWT_SECRET` | yes | Signs email verification and access tokens; at least 32 bytes |
 | `PUBLIC_BASE_URL` | yes | Frontend origin used in verification links and as the default CORS origin |
+| `SHORT_BASE_URL` | no | Public short-link origin, for example `https://link.uppixl.com`; set with `BUNNY_API_KEY` or leave both unset |
+| `BUNNY_API_KEY` | no | Bunny.net API key used to purge cached redirects; set with `SHORT_BASE_URL` or leave both unset |
 | `CORS_ALLOWED_ORIGINS` | no | Comma-separated allowed browser origins; defaults to `PUBLIC_BASE_URL`; `*` allows all |
 | `EMAIL_FROM` | yes | Sender address for verification email |
 | `SMTP_ADDR` | yes | SMTP server address, `host:port` |

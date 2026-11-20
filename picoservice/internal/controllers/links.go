@@ -23,21 +23,33 @@ type LinkService interface {
 	Get(ctx context.Context, orgID, id string) (entities.Link, error)
 	Resolve(ctx context.Context, slug string) (entities.Link, error)
 	Update(ctx context.Context, in services.UpdateLinkInput) (entities.Link, error)
-	Delete(ctx context.Context, orgID, id string) error
+	Delete(ctx context.Context, orgID, id string) (entities.Link, error)
+}
+
+// LinkPurger removes a public short link from the CDN cache.
+type LinkPurger interface {
+	Purge(ctx context.Context, url string) error
 }
 
 // LinkController serves short-link management and public redirects.
 type LinkController struct {
-	logger  *slog.Logger
-	service LinkService
+	logger       *slog.Logger
+	service      LinkService
+	shortBaseURL string
+	purger       LinkPurger
 }
 
 // NewLinkController returns a link controller backed by service.
-func NewLinkController(logger *slog.Logger, service LinkService) *LinkController {
+func NewLinkController(logger *slog.Logger, service LinkService, shortBaseURL string, purger LinkPurger) *LinkController {
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &LinkController{logger: logger, service: service}
+	return &LinkController{
+		logger:       logger,
+		service:      service,
+		shortBaseURL: strings.TrimRight(strings.TrimSpace(shortBaseURL), "/"),
+		purger:       purger,
+	}
 }
 
 // Create handles POST /orgs/{orgID}/links.
@@ -66,8 +78,9 @@ func (c *LinkController) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	c.purgeLink(r, link)
 	w.Header().Set(httpx.HeaderLocation, "/orgs/"+link.OrgID+"/links/"+link.ID)
-	httpx.WriteJSON(w, r, http.StatusCreated, linkResponseFor(r, link))
+	httpx.WriteJSON(w, r, http.StatusCreated, c.linkResponse(r, link))
 }
 
 // List handles GET and HEAD /orgs/{orgID}/links.
@@ -100,7 +113,7 @@ func (c *LinkController) List(w http.ResponseWriter, r *http.Request) {
 		NextOffset: result.NextOffset,
 	}
 	for _, link := range result.Items {
-		response.Items = append(response.Items, linkResponseFor(r, link))
+		response.Items = append(response.Items, c.linkResponse(r, link))
 	}
 	httpx.WriteJSON(w, r, http.StatusOK, response)
 }
@@ -117,7 +130,7 @@ func (c *LinkController) Get(w http.ResponseWriter, r *http.Request) {
 		c.writeError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, r, http.StatusOK, linkResponseFor(r, link))
+	httpx.WriteJSON(w, r, http.StatusOK, c.linkResponse(r, link))
 }
 
 // Update handles PATCH /orgs/{orgID}/links/{linkID}.
@@ -145,7 +158,8 @@ func (c *LinkController) Update(w http.ResponseWriter, r *http.Request) {
 		c.writeError(w, r, err)
 		return
 	}
-	httpx.WriteJSON(w, r, http.StatusOK, linkResponseFor(r, link))
+	c.purgeLink(r, link)
+	httpx.WriteJSON(w, r, http.StatusOK, c.linkResponse(r, link))
 }
 
 // Delete handles DELETE /orgs/{orgID}/links/{linkID}.
@@ -155,15 +169,22 @@ func (c *LinkController) Delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := c.service.Delete(r.Context(), id.OrgID, chi.URLParam(r, "linkID")); err != nil {
+	link, err := c.service.Delete(r.Context(), id.OrgID, chi.URLParam(r, "linkID"))
+	if err != nil {
 		c.writeError(w, r, err)
 		return
 	}
+	c.purgeLink(r, link)
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // Redirect handles the public GET /s/{slug} redirect.
 func (c *LinkController) Redirect(w http.ResponseWriter, r *http.Request) {
+	// Browsers must not cache redirects. Bunny caches at the edge with its own
+	// TTL and the controller purges the exact URL after every mutation.
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Robots-Tag", "noindex")
+
 	link, err := c.service.Resolve(r.Context(), chi.URLParam(r, "slug"))
 	if err != nil {
 		if errors.Is(err, entities.ErrLinkNotFound) {
@@ -174,8 +195,6 @@ func (c *LinkController) Redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	w.Header().Set("Cache-Control", "no-store")
-	w.Header().Set("X-Robots-Tag", "noindex")
 	w.Header().Set(httpx.HeaderLocation, link.URL)
 	w.WriteHeader(http.StatusFound)
 }
@@ -228,13 +247,23 @@ type linkListResponse struct {
 	NextOffset *int           `json:"nextOffset"`
 }
 
-func linkResponseFor(r *http.Request, link entities.Link) linkResponse {
+const (
+	shortLinkPathPrefix = "/s/"
+	purgeTimeout        = 2 * time.Second
+)
+
+func (c *LinkController) linkResponse(r *http.Request, link entities.Link) linkResponse {
 	tags := link.Tags
 	if tags == nil {
 		tags = []string{}
 	}
 
-	shortPath := "/s/" + link.Slug
+	shortPath := shortLinkPathPrefix + link.Slug
+	baseURL := c.shortBaseURL
+	if baseURL == "" {
+		baseURL = requestOrigin(r)
+	}
+
 	return linkResponse{
 		ID:        link.ID,
 		OrgID:     link.OrgID,
@@ -244,10 +273,28 @@ func linkResponseFor(r *http.Request, link entities.Link) linkResponse {
 		Title:     link.Title,
 		Tags:      tags,
 		ShortPath: shortPath,
-		ShortURL:  requestOrigin(r) + shortPath,
+		ShortURL:  baseURL + shortPath,
 		Disabled:  link.Disabled(),
 		CreatedAt: link.CreatedAt,
 		UpdatedAt: link.UpdatedAt,
+	}
+}
+
+func (c *LinkController) purgeLink(r *http.Request, link entities.Link) {
+	if c.purger == nil || c.shortBaseURL == "" || link.Slug == "" {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(r.Context(), purgeTimeout)
+	defer cancel()
+
+	target := c.shortBaseURL + shortLinkPathPrefix + link.Slug
+	if err := c.purger.Purge(ctx, target); err != nil {
+		c.logger.WarnContext(r.Context(), "purge short link cache",
+			"slug", link.Slug,
+			"error", err,
+			"request_id", httpx.RequestID(r.Context()),
+		)
 	}
 }
 

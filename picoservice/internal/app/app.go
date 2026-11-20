@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	"picoservice/internal/authz"
+	"picoservice/internal/cdn"
 	"picoservice/internal/dao/mongodb"
 	"picoservice/internal/email"
 	"picoservice/internal/routes"
@@ -71,7 +72,7 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 	linkService := services.NewLinkService(linkStore)
 	credentialService := services.NewCredentialService(credentialStore, orgStore, projectStore, expenseStore)
 
-	return routes.New(routes.Deps{
+	deps := routes.Deps{
 		Logger:         logger,
 		Pinger:         db,
 		Users:          userService,
@@ -81,9 +82,19 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 		Projects:       projectService,
 		Expenses:       expenseService,
 		Links:          linkService,
+		ShortBaseURL:   cfg.ShortBaseURL,
 		Credentials:    credentialService,
 		Policy:         policy,
 		SecureCookies:  strings.HasPrefix(cfg.PublicBaseURL, "https://"),
 		AllowedOrigins: cfg.AllowedOrigins(),
-	})
+	}
+	if cfg.BunnyAPIKey != "" {
+		purger, err := cdn.NewBunnyPurger(cdn.BunnyConfig{APIKey: cfg.BunnyAPIKey})
+		if err != nil {
+			return nil, fmt.Errorf("app: create bunny purger: %w", err)
+		}
+		deps.LinkPurger = purger
+	}
+
+	return routes.New(deps)
 }

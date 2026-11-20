@@ -221,13 +221,15 @@ func (s *LinkService) Update(ctx context.Context, in UpdateLinkInput) (entities.
 	return updated, nil
 }
 
-// Delete tombstones a link. Deleted aliases stay reserved.
-func (s *LinkService) Delete(ctx context.Context, orgID, id string) error {
+// Delete tombstones a link and returns it so callers can invalidate its cache
+// entry. Deleted aliases stay reserved.
+func (s *LinkService) Delete(ctx context.Context, orgID, id string) (entities.Link, error) {
 	ctx, cancel := context.WithTimeout(ctx, operationTimeout)
 	defer cancel()
 
-	if err := s.store.Delete(ctx, orgID, id, time.Now().UTC()); err != nil {
-		return fmt.Errorf("delete link: %w", err)
+	link, err := s.store.Delete(ctx, orgID, id, time.Now().UTC())
+	if err != nil {
+		return entities.Link{}, fmt.Errorf("delete link: %w", err)
 	}
-	return nil
+	return link, nil
 }

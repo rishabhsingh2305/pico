@@ -58,9 +58,14 @@ invoke:
 	test -n "$$PUBLIC_BASE_URL" || (echo "PUBLIC_BASE_URL is required"; exit 1); \
 	test -n "$$EMAIL_FROM" || (echo "EMAIL_FROM is required"; exit 1); \
 	test -n "$$SMTP_ADDR" || (echo "SMTP_ADDR is required"; exit 1); \
+	if [ -n "$$SHORT_BASE_URL" ] || [ -n "$$BUNNY_API_KEY" ]; then \
+		test -n "$$SHORT_BASE_URL" || (echo "SHORT_BASE_URL is required when BUNNY_API_KEY is set"; exit 1); \
+		test -n "$$BUNNY_API_KEY" || (echo "BUNNY_API_KEY is required when SHORT_BASE_URL is set"; exit 1); \
+	fi; \
 	params="MongoDBURI=$$MONGODB_URI JwtSecret=$$JWT_SECRET PublicBaseURL=$$PUBLIC_BASE_URL EmailFrom=$$EMAIL_FROM SmtpAddr=$$SMTP_ADDR"; \
 	if [ -n "$$CORS_ALLOWED_ORIGINS" ]; then params="$$params CorsAllowedOrigins=$$CORS_ALLOWED_ORIGINS"; fi; \
 	if [ -n "$$SMTP_USERNAME" ]; then params="$$params SmtpUsername=$$SMTP_USERNAME SmtpPassword=$$SMTP_PASSWORD"; fi; \
+	if [ -n "$$SHORT_BASE_URL" ]; then params="$$params ShortBaseURL=$$SHORT_BASE_URL BunnyApiKey=$$BUNNY_API_KEY"; fi; \
 	sam local invoke ApiFunction -e events/function-url.json --parameter-overrides "$$params"
 
 deploy:
@@ -69,9 +74,14 @@ deploy:
 	@test -n "$$PUBLIC_BASE_URL" || (echo "PUBLIC_BASE_URL is required"; exit 1)
 	@test -n "$$EMAIL_FROM" || (echo "EMAIL_FROM is required"; exit 1)
 	@test -n "$$SMTP_ADDR" || (echo "SMTP_ADDR is required"; exit 1)
+	@if [ -n "$$SHORT_BASE_URL" ] || [ -n "$$BUNNY_API_KEY" ]; then \
+		test -n "$$SHORT_BASE_URL" || (echo "SHORT_BASE_URL is required when BUNNY_API_KEY is set"; exit 1); \
+		test -n "$$BUNNY_API_KEY" || (echo "BUNNY_API_KEY is required when SHORT_BASE_URL is set"; exit 1); \
+	fi
 	@params="MongoDBURI=$$MONGODB_URI JwtSecret=$$JWT_SECRET PublicBaseURL=$$PUBLIC_BASE_URL EmailFrom=$$EMAIL_FROM SmtpAddr=$$SMTP_ADDR"; \
 	if [ -n "$$CORS_ALLOWED_ORIGINS" ]; then params="$$params CorsAllowedOrigins=$$CORS_ALLOWED_ORIGINS"; fi; \
 	if [ -n "$$SMTP_USERNAME" ]; then params="$$params SmtpUsername=$$SMTP_USERNAME SmtpPassword=$$SMTP_PASSWORD"; fi; \
+	if [ -n "$$SHORT_BASE_URL" ]; then params="$$params ShortBaseURL=$$SHORT_BASE_URL BunnyApiKey=$$BUNNY_API_KEY"; fi; \
 	sam deploy --parameter-overrides "$$params"
 
 ship:

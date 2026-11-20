@@ -85,7 +85,7 @@ const linkExample = `{
   "title": "Launch page",
   "tags": ["marketing"],
   "shortPath": "/s/launch",
-  "shortUrl": "https://api-host/s/launch",
+  "shortUrl": "https://link.uppixl.com/s/launch",
   "disabled": false,
   "createdAt": "2026-11-20T10:00:00Z",
   "updatedAt": "2026-11-20T10:00:00Z"
@@ -910,7 +910,7 @@ export const API_SECTIONS: ApiSection[] = [
         response: {
           status: 201,
           description:
-            "Link created. shortUrl is built from the API request origin.",
+            "Link created. shortUrl uses SHORT_BASE_URL when configured, otherwise the API request origin.",
           body: linkExample,
         },
         errors: [

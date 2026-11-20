@@ -31,13 +31,14 @@ client
 | `main` | Lambda entrypoint; opens MongoDB, calls `app.New` | `internal/app`, `internal/lambdahttp`, `internal/dao/mongodb` |
 | `cmd/server` | Local HTTP server and graceful shutdown | `internal/app`, `internal/dao/mongodb` |
 | `cmd/indexes` | Create MongoDB indexes | `internal/dao/mongodb` |
-| `internal/app` | Composition root: DAO implementations, services, policy, routes | `internal/authz`, `internal/dao/mongodb`, `internal/email`, `internal/services`, `internal/routes` |
+| `internal/app` | Composition root: DAO implementations, services, policy, CDN purger, routes | `internal/authz`, `internal/cdn`, `internal/dao/mongodb`, `internal/email`, `internal/services`, `internal/routes` |
 | `internal/authz` | Embedded route and feature-role policy: YAML loading, validation, permission lookup | `internal/entities`, stdlib, `gopkg.in/yaml.v3` |
 | `internal/routes` | chi setup, middleware wiring, domain subrouters, per-route `Allow` | `internal/controllers`, `internal/middleware`, `internal/authz`, `internal/httpx`, chi |
 | `internal/controllers` | HTTP parsing, status codes, request/response DTOs, response mapping | `net/http`, `context`, `internal/services`, `internal/middleware`, `internal/entities`, `internal/httpx`, `internal/validation` |
 | `internal/services` | Business rules, bcrypt, email verification, service input structs, narrow lookup interfaces | stdlib, `internal/dao`, `internal/entities`, `internal/validation`, `golang.org/x/crypto/bcrypt`, `github.com/golang-jwt/jwt/v5` |
 | `internal/dao` | Per-domain persistence contracts and query/update structs | `internal/entities`, stdlib |
 | `internal/dao/mongodb` | MongoDB client lifecycle, stores, index creation, readiness ping | MongoDB driver, `internal/dao`, `internal/entities`, stdlib |
+| `internal/cdn` | Bunny.net cache purge HTTP client | stdlib |
 | `internal/email` | SMTP delivery and multipart verification messages | stdlib |
 | `internal/entities` | Domain records and sentinel errors | stdlib |
 | `internal/validation` | Shared validation error, name checks, pagination | stdlib |
@@ -70,6 +71,8 @@ Dependency rules:
 - `dao/mongodb` must not import `controllers`, `routes`, or `services`.
 - `email` implements the mailer interface consumed by `services`; it must not
   import `controllers`, `routes`, `services`, `dao`, or `entities`.
+- `cdn` implements the link purger consumed by `controllers`; it imports stdlib
+  only. `app` wires the purger from configuration.
 - `httpx` and `validation` must not import feature packages.
 - `entities` imports stdlib only.
 - AWS-specific types must not leak past `lambdahttp`. MongoDB driver types stay
@@ -317,10 +320,17 @@ than per organization. An omitted alias is generated from a 32-character
 lowercase alphabet with seven characters. Custom aliases are 3–32 characters,
 lowercase, and immutable. Only `http` and `https` destinations are accepted.
 
-The redirect response sets `Cache-Control: no-store` so edits and disables take
-effect immediately, and `X-Robots-Tag: noindex`. Missing, disabled, and deleted
-links return `404 {"error":"link not found"}`. There is no click tracking and no
-write on redirect.
+The redirect response sets `Cache-Control: no-store` for browsers and
+`X-Robots-Tag: noindex`. Missing, disabled, and deleted links return
+`404 {"error":"link not found"}`. There is no click tracking and no write on
+redirect.
+
+`SHORT_BASE_URL` supplies the public origin used in `shortUrl`; if unset, the
+request origin is used for local development. `BUNNY_API_KEY` enables a
+best-effort purge of the exact redirect URL after every link mutation. The edge
+cache TTL (10 minutes in the current deployment) is configured in Bunny, not in
+the application. Purge failures are logged at the controller boundary and do not
+fail the mutation.
 
 Delete is a tombstone (`deletedAt`) rather than a hard delete. The slug remains
 reserved, which prevents a deleted alias from being recreated for a different
@@ -507,7 +517,9 @@ validated at startup, and checked against the chi router by `test/routes`.
   required at startup. `PUBLIC_BASE_URL` is the UI origin used in verification
   links and as the default CORS origin. `CORS_ALLOWED_ORIGINS` is optional and
   overrides that origin list. `SMTP_USERNAME` and `SMTP_PASSWORD` are optional
-  and must be set together.
+  and must be set together. `SHORT_BASE_URL` and `BUNNY_API_KEY` are optional
+  and must be set together; both empty disables custom short URLs and CDN
+  purging.
 - The client is created once during process startup and reused. It is never
   created per request. `mongo.Connect` does not validate reachability, so
   startup does not depend on Atlas being available. An SRV connection string
@@ -610,8 +622,9 @@ a caching library that is pinned to AWS SDK v1.
   `sample.prod.deploy.env` / `sample.deploy.env`). `make deploy` remains the
   explicit-env fallback and does not load env files.
 - Environment: `MONGODB_URI` (parameter), `MONGODB_DATABASE`, `JWT_SECRET`,
-  `PUBLIC_BASE_URL`, optional `CORS_ALLOWED_ORIGINS`, `EMAIL_FROM`, `SMTP_ADDR`,
-  and optional `SMTP_USERNAME` / `SMTP_PASSWORD`
+  `PUBLIC_BASE_URL`, optional `SHORT_BASE_URL` / `BUNNY_API_KEY` (set together),
+  optional `CORS_ALLOWED_ORIGINS`, `EMAIL_FROM`, `SMTP_ADDR`, and optional
+  `SMTP_USERNAME` / `SMTP_PASSWORD`
 - Local development: `cmd/server` on `PORT` (default `8080`). `make run`,
   `make indexes`, `make test-integration`, and `make invoke` load the selected
   application env file (`APP_ENV=dev` uses `dev.env`); `sample.env` is the
@@ -641,6 +654,17 @@ decision if authentication, throttling, or other gateway features are needed.
 streaming-only Function URLs, which complicates local invocation and CORS. The
 small adapter in `internal/lambdahttp` keeps buffered mode, supports
 `sam local invoke`, and is covered by tests.
+
+### Bunny CDN in front of public short links
+
+`https://link.uppixl.com/s/{slug}` is a Bunny pull zone whose origin is the
+Lambda Function URL. The application keeps `Cache-Control: no-store` so
+browsers never cache a redirect; Bunny caches at the edge with a 10-minute TTL.
+After create, update, disable/enable, and delete, the controller purges the exact
+URL through `internal/cdn` with `async=false`. Purge failures are logged and do
+not fail the mutation, so a failed purge can leave a stale redirect until the
+edge TTL expires. `SHORT_BASE_URL` and `BUNNY_API_KEY` are set together or not
+at all.
 
 ### chi instead of a full framework or stdlib-only routing
 
@@ -789,6 +813,8 @@ A legacy document with no `type` is counted as debit through `$ifNull`.
 - **Short links are open redirects.** Creation requires an organization role,
   but there is no destination denylist, abuse reporting, or per-user creation
   rate limit. Add those before exposing creation to untrusted users at scale.
+- **CDN purging is best-effort.** If Bunny is unreachable after an edit or
+  disable, the stale redirect can live until the 10-minute edge TTL expires.
 - **Access tokens carry at most 20 organization role lists.** `RolesForUser`
   caps the `orgs` map so the token stays small. A user with more memberships
   loses access to the oldest organizations until the cap is raised.

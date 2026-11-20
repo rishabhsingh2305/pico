@@ -34,5 +34,5 @@ type LinkDAO interface {
 	FindBySlug(ctx context.Context, slug string) (entities.Link, error)
 	List(ctx context.Context, filter LinkFilter) ([]entities.Link, error)
 	Update(ctx context.Context, orgID, id string, update LinkUpdate) (entities.Link, error)
-	Delete(ctx context.Context, orgID, id string, deletedAt time.Time) error
+	Delete(ctx context.Context, orgID, id string, deletedAt time.Time) (entities.Link, error)
 }

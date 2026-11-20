@@ -18,6 +18,15 @@ Parameters:
   PublicBaseURL:
     Type: String
     Description: Public base URL used to build verification links.
+  ShortBaseURL:
+    Type: String
+    Default: ""
+    Description: Public origin for short links, for example https://link.uppixl.com. Must be set with BunnyApiKey.
+  BunnyApiKey:
+    Type: String
+    NoEcho: true
+    Default: ""
+    Description: Bunny.net API key used to purge cached short-link redirects. Must be set with ShortBaseURL.
   CorsAllowedOrigins:
     Type: String
     Default: ""
@@ -61,6 +70,8 @@ Resources:
           MONGODB_DATABASE: picoservice
           JWT_SECRET: !Ref JwtSecret
           PUBLIC_BASE_URL: !Ref PublicBaseURL
+          SHORT_BASE_URL: !Ref ShortBaseURL
+          BUNNY_API_KEY: !Ref BunnyApiKey
           CORS_ALLOWED_ORIGINS: !Ref CorsAllowedOrigins
           EMAIL_FROM: !Ref EmailFrom
           SMTP_ADDR: !Ref SmtpAddr

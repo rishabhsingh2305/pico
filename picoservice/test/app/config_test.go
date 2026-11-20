@@ -12,16 +12,18 @@ func TestConfigFromEnv(t *testing.T) {
 	validSecret := strings.Repeat("s", 32)
 
 	tests := []struct {
-		name        string
-		secret      string
-		baseURL     string
-		corsOrigins string
-		from        string
-		smtpAddr    string
-		username    string
-		password    string
-		wantOrigins []string
-		wantErr     bool
+		name         string
+		secret       string
+		baseURL      string
+		shortBaseURL string
+		bunnyAPIKey  string
+		corsOrigins  string
+		from         string
+		smtpAddr     string
+		username     string
+		password     string
+		wantOrigins  []string
+		wantErr      bool
 	}{
 		{
 			name:        "valid with cors origins",
@@ -74,6 +76,43 @@ func TestConfigFromEnv(t *testing.T) {
 			smtpAddr: "smtp.example.com:587",
 			username: "user",
 			password: "password",
+		},
+		{
+			name:         "valid short link settings",
+			secret:       validSecret,
+			baseURL:      "https://api.example.com",
+			shortBaseURL: "https://link.uppixl.com/",
+			bunnyAPIKey:  "bunny-key",
+			from:         "noreply@example.com",
+			smtpAddr:     "smtp.example.com:587",
+		},
+		{
+			name:         "short base without bunny key",
+			secret:       validSecret,
+			baseURL:      "https://api.example.com",
+			shortBaseURL: "https://link.uppixl.com",
+			from:         "noreply@example.com",
+			smtpAddr:     "smtp.example.com:587",
+			wantErr:      true,
+		},
+		{
+			name:        "bunny key without short base",
+			secret:      validSecret,
+			baseURL:     "https://api.example.com",
+			bunnyAPIKey: "bunny-key",
+			from:        "noreply@example.com",
+			smtpAddr:    "smtp.example.com:587",
+			wantErr:     true,
+		},
+		{
+			name:         "short base with path",
+			secret:       validSecret,
+			baseURL:      "https://api.example.com",
+			shortBaseURL: "https://link.uppixl.com/s",
+			bunnyAPIKey:  "bunny-key",
+			from:         "noreply@example.com",
+			smtpAddr:     "smtp.example.com:587",
+			wantErr:      true,
 		},
 		{
 			name:     "short secret",
@@ -144,6 +183,8 @@ func TestConfigFromEnv(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv("JWT_SECRET", tt.secret)
 			t.Setenv("PUBLIC_BASE_URL", tt.baseURL)
+			t.Setenv("SHORT_BASE_URL", tt.shortBaseURL)
+			t.Setenv("BUNNY_API_KEY", tt.bunnyAPIKey)
 			t.Setenv("CORS_ALLOWED_ORIGINS", tt.corsOrigins)
 			t.Setenv("EMAIL_FROM", tt.from)
 			t.Setenv("SMTP_ADDR", tt.smtpAddr)
@@ -162,6 +203,9 @@ func TestConfigFromEnv(t *testing.T) {
 			}
 			if got, want := cfg.PublicBaseURL, strings.TrimRight(tt.baseURL, "/"); got != want {
 				t.Fatalf("expected base URL %q, got %q", want, got)
+			}
+			if got, want := cfg.ShortBaseURL, strings.TrimRight(tt.shortBaseURL, "/"); got != want {
+				t.Fatalf("expected short base URL %q, got %q", want, got)
 			}
 			if !slices.Equal(cfg.CORSAllowedOrigins, tt.wantOrigins) {
 				t.Fatalf("expected CORS origins %v, got %v", tt.wantOrigins, cfg.CORSAllowedOrigins)

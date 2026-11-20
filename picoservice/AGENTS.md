@@ -27,6 +27,10 @@
   click tracking. Aliases are globally unique and immutable; delete is a
   tombstone that keeps the alias reserved. The redirect is resolved without
   organization context.
+- `SHORT_BASE_URL` builds public `shortUrl` values. `BUNNY_API_KEY` enables
+  best-effort purging of the exact redirect URL after create/update/delete.
+  Set both together or neither. The edge cache TTL (10 minutes) lives in Bunny,
+  not application config. Purge failures are logged, never returned to clients.
 - pico-ui serves a public `/api-docs` guide mirroring this API contract. Keep
   API changes reflected in `../pico-ui/src/features/api-docs/content.ts`.
 - Health API: `GET /ping` returns `200 {"message":"pong"}`; `HEAD /ping`
@@ -60,6 +64,8 @@
   `PUBLIC_BASE_URL` is the UI origin and the default CORS origin.
   `CORS_ALLOWED_ORIGINS` optionally overrides the CORS origin list.
   `SMTP_USERNAME` and `SMTP_PASSWORD` are optional and set together.
+  `SHORT_BASE_URL` and `BUNNY_API_KEY` are optional and set together; both empty
+  disables custom short URLs and CDN purging.
 - Build with SAM (`template.yaml`); run locally with `make run`.
 - `MONGODB_URI` and `MONGODB_DATABASE` are required.
 - Local settings live in `.env` (ignored); `sample.env` is committed.
@@ -92,7 +98,7 @@
 
 ## Non-negotiable rules
 
-- **Boundaries:** Lambda/AWS event types belong only in `internal/lambdahttp`. MongoDB driver types belong only in `internal/dao/mongodb` in production code; integration tests may use the driver to isolate and drop test databases. Transport middleware belongs only in `internal/middleware`. SMTP and message construction belong only in `internal/email`; services consume the `services.Mailer` interface. Controllers must not import `events`, `lambda`, AWS SDKs, `internal/dao`, or the MongoDB driver.
+- **Boundaries:** Lambda/AWS event types belong only in `internal/lambdahttp`. MongoDB driver types belong only in `internal/dao/mongodb` in production code; integration tests may use the driver to isolate and drop test databases. Transport middleware belongs only in `internal/middleware`. SMTP and message construction belong only in `internal/email`; services consume the `services.Mailer` interface. Bunny purge HTTP belongs only in `internal/cdn`; controllers consume the `controllers.LinkPurger` interface. Controllers must not import `events`, `lambda`, AWS SDKs, `internal/dao`, or the MongoDB driver.
 - **Dependency direction:** `main`/`cmd` → `internal/app` → `routes`/`services`/`dao/mongodb`/`email`; `routes` → `controllers`, `middleware`, `httpx`, `authz`; `controllers` → `services`, `middleware`, `entities`, `httpx`, `validation`; `services` → `dao`, `entities`, `validation`, stdlib, JWT; `dao` → `entities`; `dao/mongodb` → `dao`, `entities`, MongoDB driver; `email` → stdlib; `middleware` → `httpx`, `authz`, chi; `authz` → `entities`, stdlib, and YAML parsing; `lambdahttp` → `httpx`; `entities`, `httpx`, and `validation` import stdlib only. Controllers depend on small consumer-side service interfaces.
 - **Thin controllers:** controllers parse/validate HTTP input and write responses. Business logic lives in services. DTOs and response mapping stay in `internal/controllers`; do not query MongoDB from controllers.
 - **Tenancy:** org-scoped routes must use `middleware.RequireOrgAccess` after `middleware.Authenticate`; user-scoped routes that need an actor use only `middleware.RequireAuth`. The actor is the JWT `sub`; the tenant is `?orgId=`; the route permission comes from `routes.yml`; feature roles come from the token `orgs` map and `features.yml`. The owner is implicit: token issuance writes `["*"]` when `orgs.userId` matches the actor, and `"*"` is never stored in `features.yml` or a membership record. Feature-management permissions are enforced by middleware; services only protect the owner account (the owner cannot be added, removed, or have roles changed). Never describe query parameters as authentication.
@@ -105,7 +111,7 @@
   CORS; duplicate `Access-Control-*` headers break browsers.
 - **Architecture:** do not add API Gateway, replace chi, add an ODM/generic repository, or add a Lambda proxy/framework library without explicit approval.
 - **State:** no global mutable state, no `init()`, no hidden I/O. Wire dependencies in `internal/app`; create one MongoDB client per process and never per request.
-- **Configuration:** application values belong in `.env` or `$(APP_ENV).env` (ignored), with `sample.env` as the committed template. `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects `prod.env` and `prod.deploy.env`; unset uses `.env` and `deploy.env`. `make run`, `indexes`, `test-integration`, and `invoke` load the selected app env; `make deploy` must not. AWS deployment settings belong in `deploy.env` or `$(APP_ENV).deploy.env` (ignored), with `sample.deploy.env` and per-environment samples committed; `make ship`/`scripts/deploy.sh` load the selected files. Do not put application secrets in a deploy env file.
+- **Configuration:** `SHORT_BASE_URL` and `BUNNY_API_KEY` are optional together; set both to enable custom short URLs and Bunny purging, or neither. They are application settings and belong in the app env file, never a deploy env file. Application values belong in `.env` or `$(APP_ENV).env` (ignored), with `sample.env` as the committed template. `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects `prod.env` and `prod.deploy.env`; unset uses `.env` and `deploy.env`. `make run`, `indexes`, `test-integration`, and `invoke` load the selected app env; `make deploy` must not. AWS deployment settings belong in `deploy.env` or `$(APP_ENV).deploy.env` (ignored), with `sample.deploy.env` and per-environment samples committed; `make ship`/`scripts/deploy.sh` load the selected files. Do not put application secrets in a deploy env file.
 - **Database:** every call takes a `context.Context` with a timeout; log driver errors with `request_id` and never return them to clients. DAO contracts live in `internal/dao`; implementations live in `internal/dao/mongodb`. Add indexes in `internal/dao/mongodb/indexes.go`.
 - **Query efficiency:** list handlers return one page and must not run unbounded aggregates. Aggregates live on separate summary endpoints, grouped server-side; clients must not issue one totals request per item. Every list query pattern needs an index matching its filters and sort. Verify new or changed patterns with `explain("executionStats")`; do not use `$facet` to combine a page with an unbounded summary.
 - **Errors:** wrap with `%w`, log once at the boundary, never silently ignore. No `log.Fatal`/`os.Exit` outside `main`.

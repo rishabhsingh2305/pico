@@ -14,7 +14,19 @@ type LinkService struct {
 	GetFunc     func(context.Context, string, string) (entities.Link, error)
 	ResolveFunc func(context.Context, string) (entities.Link, error)
 	UpdateFunc  func(context.Context, services.UpdateLinkInput) (entities.Link, error)
-	DeleteFunc  func(context.Context, string, string) error
+	DeleteFunc  func(context.Context, string, string) (entities.Link, error)
+}
+
+// LinkPurger is a configurable fake CDN purger.
+type LinkPurger struct {
+	PurgeFunc func(context.Context, string) error
+}
+
+func (p *LinkPurger) Purge(ctx context.Context, url string) error {
+	if p.PurgeFunc != nil {
+		return p.PurgeFunc(ctx, url)
+	}
+	return nil
 }
 
 func (s *LinkService) Create(ctx context.Context, in services.CreateLinkInput) (entities.Link, error) {
@@ -52,9 +64,9 @@ func (s *LinkService) Update(ctx context.Context, in services.UpdateLinkInput) (
 	return entities.Link{}, nil
 }
 
-func (s *LinkService) Delete(ctx context.Context, orgID, id string) error {
+func (s *LinkService) Delete(ctx context.Context, orgID, id string) (entities.Link, error) {
 	if s.DeleteFunc != nil {
 		return s.DeleteFunc(ctx, orgID, id)
 	}
-	return nil
+	return entities.Link{}, nil
 }

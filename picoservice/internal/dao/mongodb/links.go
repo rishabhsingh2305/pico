@@ -225,25 +225,27 @@ func (s *LinkStore) Update(ctx context.Context, orgID, id string, update dao.Lin
 }
 
 // Delete tombstones a link scoped to orgID. The slug stays reserved.
-func (s *LinkStore) Delete(ctx context.Context, orgID, id string, deletedAt time.Time) error {
+func (s *LinkStore) Delete(ctx context.Context, orgID, id string, deletedAt time.Time) (entities.Link, error) {
 	objectID, err := bson.ObjectIDFromHex(id)
 	if err != nil {
-		return entities.ErrLinkNotFound
+		return entities.Link{}, entities.ErrLinkNotFound
 	}
 
-	result, err := s.collection.UpdateOne(
+	var document linkDocument
+	err = s.collection.FindOneAndUpdate(
 		ctx,
 		bson.M{"_id": objectID, "orgId": orgID, "deletedAt": nil},
 		bson.M{"$set": bson.M{
 			"deletedAt": deletedAt,
 			"updatedAt": deletedAt,
 		}},
-	)
+		options.FindOneAndUpdate().SetReturnDocument(options.After),
+	).Decode(&document)
+	if errors.Is(err, mongo.ErrNoDocuments) {
+		return entities.Link{}, entities.ErrLinkNotFound
+	}
 	if err != nil {
-		return fmt.Errorf("delete link: %w", err)
+		return entities.Link{}, fmt.Errorf("delete link: %w", err)
 	}
-	if result.MatchedCount == 0 {
-		return entities.ErrLinkNotFound
-	}
-	return nil
+	return document.link(), nil
 }

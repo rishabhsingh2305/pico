@@ -19,7 +19,7 @@ type fakeLinkStore struct {
 	findBySlugFunc func(context.Context, string) (entities.Link, error)
 	listFunc       func(context.Context, dao.LinkFilter) ([]entities.Link, error)
 	updateFunc     func(context.Context, string, string, dao.LinkUpdate) (entities.Link, error)
-	deleteFunc     func(context.Context, string, string, time.Time) error
+	deleteFunc     func(context.Context, string, string, time.Time) (entities.Link, error)
 }
 
 func (s fakeLinkStore) Insert(ctx context.Context, link entities.Link) (entities.Link, error) {
@@ -58,11 +58,11 @@ func (s fakeLinkStore) Update(ctx context.Context, orgID, id string, update dao.
 	return entities.Link{}, entities.ErrLinkNotFound
 }
 
-func (s fakeLinkStore) Delete(ctx context.Context, orgID, id string, deletedAt time.Time) error {
+func (s fakeLinkStore) Delete(ctx context.Context, orgID, id string, deletedAt time.Time) (entities.Link, error) {
 	if s.deleteFunc != nil {
 		return s.deleteFunc(ctx, orgID, id, deletedAt)
 	}
-	return nil
+	return entities.Link{}, nil
 }
 
 func TestCreateValidatesInput(t *testing.T) {
@@ -338,20 +338,24 @@ func TestResolve(t *testing.T) {
 func TestDelete(t *testing.T) {
 	var gotDeletedAt time.Time
 	store := fakeLinkStore{
-		deleteFunc: func(_ context.Context, orgID, id string, deletedAt time.Time) error {
+		deleteFunc: func(_ context.Context, orgID, id string, deletedAt time.Time) (entities.Link, error) {
 			if orgID != "org-1" || id != "link-1" {
 				t.Fatalf("unexpected scope: %q %q", orgID, id)
 			}
 			gotDeletedAt = deletedAt
-			return nil
+			return entities.Link{ID: id, OrgID: orgID, Slug: "launch"}, nil
 		},
 	}
 	service := services.NewLinkService(store)
 
-	if err := service.Delete(context.Background(), "org-1", "link-1"); err != nil {
+	link, err := service.Delete(context.Background(), "org-1", "link-1")
+	if err != nil {
 		t.Fatalf("delete link: %v", err)
 	}
 	if gotDeletedAt.IsZero() {
 		t.Fatal("expected deletedAt")
+	}
+	if link.Slug != "launch" {
+		t.Fatalf("expected deleted link slug, got %+v", link)
 	}
 }
