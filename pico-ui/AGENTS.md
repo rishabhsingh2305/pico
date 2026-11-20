@@ -10,19 +10,21 @@
 - pnpm 12 via Corepack. Do not use npm or yarn.
 - Vitest 5 and React Testing Library for UI tests.
 - The backend is the Go service in `../picoservice`.
-- Current scope is signup, login, email verification, an organization dashboard,
-  organization list/create, project list/create, project debits and credits, and
+- Current scope is signup, login, email verification, an API console,
+  organization list/create, a context-sensitive organization workspace with
+  Projects, Expenses, Links, and Sharing, project debits and credits, and
   organization short links.
   An organization shows project names, currencies, and tags; opening a project
   shows that project's debits and credits. Projects are created in a dialog from
-  the organization page, own the currency used by their expenses, and own tags
-  used to filter the project list. Organizations also carry tags, shown on their
+  the Projects page, own the currency used by their expenses, and own tags used
+  to filter the project list. Organizations also carry tags, shown on their
   cards, editable by owners, and filterable with any-match semantics.
-- `/orgs/:orgId/dashboard` is the organization dashboard, opened from the
-  project list. It shows currency-grouped net, credit, and debit totals, a
-  project flow chart, and the latest expense entries. Monetary totals are never
-  summed across currencies; the dashboard groups by currency and offers a
-  currency switch.
+- `/orgs/:orgId` redirects to `/orgs/:orgId/projects`. The organization shell
+  changes the sidebar to Projects, Expenses, Links, and Sharing.
+  `/orgs/:orgId/dashboard` redirects to the organization-wide Expenses page.
+  Expenses shows one ledger across all projects with project/tag/date filters,
+  currency-grouped totals, and pagination. Monetary totals are never summed
+  across currencies.
 - Project expenses are debits (money out) or credits (money in). Amounts stay
   positive; the type carries direction. Existing records without a type are
   treated as debit. They support comma-separated tags (all must match), an
@@ -38,6 +40,16 @@
   tag toggles it in the compact filter toolbar.
 - `/api-docs` is a public, searchable, in-app API reference covering every
   backend endpoint. Content lives in typed data under `src/features/api-docs`.
+- `/api` is a signed-in API console showing the API base URL, `/ping` and
+  `/ready` health, and quick-start commands. It has no API key management or
+  usage analytics yet.
+- `/` redirects signed-in users to `/orgs`, the landing page.
+- Organizations are created from a dialog opened by the New organization button
+  on `/orgs`; the create form is never inline.
+- `/orgs/:orgId/sharing` uses a compact list with status tabs and a details
+  sheet for scopes, status, expiry, and creator. It supports creating
+  replacement links and revoking links. Generated URLs are shown once only.
+  Last-used is not displayed because share requests do not update it.
 - Organization short links live at `/orgs/:orgId/links` and are managed by
   `link.viewer`, `link.editor`, and `link.admin` (owners use the wildcard). The
   short URL is public at the configured short-link origin under `/s/{slug}`;
@@ -49,7 +61,8 @@
   the link only; `POST /auth/verify-email/otp` is API-only for now. Resend
   rotates the code and returns `Retry-After: 60`.
 - Organization settings, memberships, project rename/delete, and expense edit are
-  not implemented yet.
+  not implemented yet. Organization creation opens in a dialog from the New
+  organization button; the form is not rendered inline.
 - Login posts to `/auth/login`; the backend returns a 30-minute access token and
   a 30-day refresh token. `AuthProvider` stores both in `localStorage`,
   `requestJSON` sends the access token as `Authorization: Bearer` and refreshes
@@ -80,23 +93,26 @@
 
 ```text
 src/
-├── app/                    # Router, query client, query keys, providers
+├── app/                    # Router, workspace shell layout, query client/keys, providers
 ├── components/
 │   ├── app-shell.tsx         # Sidebar workspace shell for signed-in screens
 │   ├── page-header.tsx       # Shared page title and actions
 │   ├── brand.tsx             # Shared Pico wordmark
+│   ├── code-snippet.tsx      # Shared code + copy block
+│   ├── copy-button.tsx       # Shared clipboard feedback button
 │   ├── date-range-picker.tsx # Preset/custom date range picker
+│   ├── select-field.tsx      # Themed select with popover menu
 │   ├── tag-input.tsx         # Shared badge-style tag entry
 │   ├── ui/                   # Generated shadcn primitives
 │   └── theme-provider.tsx    # Existing theme provider
 ├── features/
 │   ├── api-docs/           # Public searchable API reference
 │   ├── auth/               # Signup, login, verification, session
-│   ├── dashboard/          # Workspace totals, project flow, recent activity
 │   ├── design-system/      # Public palette/type/pattern style tile
+│   ├── developer/          # API console, health checks, quick start
 │   ├── expenses/           # Expenses, debit/credit, filters, totals, money
 │   ├── links/              # Organization short links, filters, QR codes
-│   ├── orgs/               # Organization list/detail, tags, filtering
+│   ├── orgs/               # Organization list, workspace layout, expenses
 │   └── projects/           # Inline project list/create, tags, filters
 ├── hooks/                  # Shared hooks and page title
 ├── lib/                    # Framework-free utilities and API client
@@ -147,6 +163,8 @@ Boundaries:
   passwords there.
 - **Forms:** controlled fields with a small pure validation function. Mirror
   backend constraints (name 120 bytes, email 254 bytes, password 8–72 bytes).
+  Use the shared `SelectField` for dropdowns; native `<select>` popups ignore
+  the theme.
   Projects own a currency; expense amounts are positive decimal values converted
   to integer minor units using that project currency, and each expense carries a
   debit or credit type. Organizations and projects share the tag input and the
@@ -163,8 +181,14 @@ Boundaries:
   `text-label` instead of one-off display sizes. Credit is `chart-2`, debit is
   `primary`. Keep `/design` in sync when tokens change.
 - **Routing:** register routes in `src/app/router.tsx`. `/` redirects to
-  `/orgs` when authenticated, otherwise `/login`. Protected routes render inside
-  `RequireSession`.
+  `/orgs`; `/orgs` is the landing page. Protected routes render inside
+  `RequireSession`. Global pages render inside `WorkspaceLayout`; organization
+  pages render inside `OrgWorkspaceLayout`, which supplies its own
+  context-sensitive sidebar. Individual pages must not wrap themselves in
+  `AppShell`. Organization pages read the current organization from
+  `useOrgWorkspace` instead of fetching it again.
+  `/orgs/:orgId` redirects to `/orgs/:orgId/projects`; the legacy
+  `/orgs/:orgId/dashboard` route redirects to `/orgs/:orgId/expenses`.
 - **Environment:** only `VITE_*` variables belong in the browser bundle. They are
   public. Never put secrets in the UI. Keep `.env.example` current.
 - **Tests:** every behavior change needs a test. Mock `fetch`; never call a real

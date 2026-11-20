@@ -4,6 +4,7 @@ import { MemoryRouter, Route, Routes } from "react-router"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { RequireSession } from "@/features/auth/auth-provider"
+import { OrgWorkspaceLayout } from "@/features/orgs/layouts/org-workspace-layout"
 import type { Session } from "@/features/auth/session"
 import { LinksPage } from "@/features/links/pages/links-page"
 import type { ShortLink } from "@/features/links/types"
@@ -13,6 +14,15 @@ const session: Session = {
   userId: "user-1",
   email: "ada@example.com",
   orgs: { "org-1": ["*"] },
+}
+
+const org = {
+  id: "org-1",
+  name: "Acme",
+  userId: "user-1",
+  tags: ["team"],
+  createdAt: "2026-01-01T00:00:00Z",
+  updatedAt: "2026-01-01T00:00:00Z",
 }
 
 const launch: ShortLink = {
@@ -56,6 +66,10 @@ function stubApi(initial: ShortLink[] = []) {
   const fetchMock = vi.fn<typeof fetch>(async (input, init) => {
     const url = new URL(String(input), "http://localhost")
     const method = init?.method ?? "GET"
+
+    if (method === "GET" && url.pathname === "/api/orgs/org-1") {
+      return jsonResponse(org)
+    }
 
     if (method === "GET" && url.pathname === "/api/orgs/org-1/links") {
       const query = (url.searchParams.get("q") ?? "").toLowerCase()
@@ -139,13 +153,18 @@ function stubApi(initial: ShortLink[] = []) {
   return { fetchMock, links }
 }
 
-function renderLinksPage(initialSession: Session | null = session) {
+function renderLinksPage(
+  initialSession: Session | null = session,
+  initialEntry = "/orgs/org-1/links"
+) {
   return render(
     <AuthTestProvider session={initialSession}>
-      <MemoryRouter initialEntries={["/orgs/org-1/links"]}>
+      <MemoryRouter initialEntries={[initialEntry]}>
         <Routes>
           <Route element={<RequireSession />}>
-            <Route path="/orgs/:orgId/links" element={<LinksPage />} />
+            <Route path="/orgs/:orgId" element={<OrgWorkspaceLayout />}>
+              <Route path="links" element={<LinksPage />} />
+            </Route>
           </Route>
           <Route
             path="/orgs/:orgId"
@@ -322,8 +341,24 @@ describe("LinksPage", () => {
     expect(screen.getByText("Docs")).toBeInTheDocument()
   })
 
+  it("opens the create dialog from the new query parameter", async () => {
+    stubApi([])
+
+    renderLinksPage(session, "/orgs/org-1/links?new=1")
+
+    expect(
+      await screen.findByRole("dialog", { name: "Create link" })
+    ).toBeInTheDocument()
+  })
+
   it("shows a forbidden state without a link role", async () => {
-    const fetchMock = vi.fn<typeof fetch>()
+    const fetchMock = vi.fn<typeof fetch>(async (input) => {
+      const url = new URL(String(input), "http://localhost")
+      if (url.pathname === "/api/orgs/org-1") {
+        return jsonResponse(org)
+      }
+      return jsonResponse({ error: "unexpected request" }, 500)
+    })
     vi.stubGlobal("fetch", fetchMock)
 
     renderLinksPage({
@@ -337,6 +372,10 @@ describe("LinksPage", () => {
         "You do not have access to links in this organization."
       )
     ).toBeInTheDocument()
-    expect(fetchMock).not.toHaveBeenCalled()
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).startsWith("/api/orgs/org-1/links")
+      )
+    ).toBe(false)
   })
 })

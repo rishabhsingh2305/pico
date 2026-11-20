@@ -1,6 +1,7 @@
 import { useId, useState, type FormEvent } from "react"
 import { CircleAlertIcon } from "lucide-react"
 
+import { SelectField } from "@/components/select-field"
 import { TagInput } from "@/components/tag-input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -11,7 +12,6 @@ import {
   FieldLabel,
 } from "@/components/ui/field"
 import { Input } from "@/components/ui/input"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Spinner } from "@/components/ui/spinner"
 import { isSessionInvalidError } from "@/features/auth/session"
 import { createProject } from "@/features/projects/api"
@@ -124,20 +124,15 @@ export function CreateProjectForm({
 
         <Field>
           <FieldLabel htmlFor={currencyId}>Currency</FieldLabel>
-          <NativeSelect
+          <SelectField
             id={currencyId}
             name="currency"
-            className="w-full"
             value={currency}
-            onChange={(event) => setCurrency(event.target.value)}
+            onValueChange={setCurrency}
+            options={CURRENCIES.map((code) => ({ value: code, label: code }))}
+            className="w-full"
             disabled={isSubmitting}
-          >
-            {CURRENCIES.map((code) => (
-              <NativeSelectOption key={code} value={code}>
-                {code}
-              </NativeSelectOption>
-            ))}
-          </NativeSelect>
+          />
         </Field>
       </div>
 

@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useId, useState } from "react"
-import { useNavigate, useParams } from "react-router"
+import { useNavigate, useParams, useSearchParams } from "react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
-import {
-  ArrowLeftIcon,
-  CircleAlertIcon,
-  LinkIcon,
-  PlusIcon,
-} from "lucide-react"
+import { CircleAlertIcon, LinkIcon, PlusIcon } from "lucide-react"
 
-import { AppShell } from "@/components/app-shell"
 import { PageHeader } from "@/components/page-header"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -24,6 +18,7 @@ import {
 import { Spinner } from "@/components/ui/spinner"
 import { queryKeys } from "@/app/query-keys"
 import { useAuth, useSession } from "@/features/auth/auth-provider"
+import { useOrgWorkspace } from "@/features/orgs/layouts/org-workspace-layout"
 import { isSessionInvalidError, type Session } from "@/features/auth/session"
 import { CreateLinkForm } from "@/features/links/components/create-link-form"
 import { DeleteLinkDialog } from "@/features/links/components/delete-link-dialog"
@@ -41,7 +36,6 @@ import { linkErrorMessage } from "@/features/links/error-message"
 import type { LinkFilters, LinkPage, ShortLink } from "@/features/links/types"
 import { useDebouncedValue } from "@/hooks/use-debounced-value"
 import { usePageTitle } from "@/hooks/use-page-title"
-import { hasFeatureRole } from "@/lib/roles"
 
 type LoadStatus = "forbidden" | "loading" | "error" | "ready"
 
@@ -58,14 +52,18 @@ export function LinksPage() {
 function LinksView({ session }: { session: Session }) {
   const { orgId = "" } = useParams<{ orgId: string }>()
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { logout } = useAuth()
   const queryClient = useQueryClient()
+  const { org, roles, isOwner, canViewLinks } = useOrgWorkspace()
   const createDialogTriggerId = useId()
 
   const [query, setQuery] = useState("")
   const [tags, setTags] = useState<string[]>([])
   const [offset, setOffset] = useState(0)
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
+  const [isCreateOpen, setIsCreateOpen] = useState(
+    () => searchParams.get("new") === "1"
+  )
   const [editing, setEditing] = useState<ShortLink | null>(null)
   const [qrLink, setQrLink] = useState<ShortLink | null>(null)
   const [deleting, setDeleting] = useState<ShortLink | null>(null)
@@ -73,9 +71,7 @@ function LinksView({ session }: { session: Session }) {
   const [actionError, setActionError] = useState("")
 
   const debouncedQuery = useDebouncedValue(query, 300)
-  const roles = session.orgs?.[orgId] ?? []
-  const isOwner = roles.includes("*")
-  const canView = hasFeatureRole(roles, "link")
+  const canView = canViewLinks
   const canWrite =
     isOwner || roles.includes("link.editor") || roles.includes("link.admin")
   const canDelete = isOwner || roles.includes("link.admin")
@@ -118,8 +114,17 @@ function LinksView({ session }: { session: Session }) {
     })
   }, [orgId, queryClient, session.userId])
 
+  function handleCreateOpenChange(open: boolean) {
+    setIsCreateOpen(open)
+    if (!open && searchParams.has("new")) {
+      const next = new URLSearchParams(searchParams)
+      next.delete("new")
+      setSearchParams(next, { replace: true })
+    }
+  }
+
   function handleCreated() {
-    setIsCreateOpen(false)
+    handleCreateOpenChange(false)
     setOffset(0)
     invalidateLinks()
   }
@@ -183,210 +188,195 @@ function LinksView({ session }: { session: Session }) {
   }
 
   return (
-    <AppShell session={session}>
-      <div className="flex flex-col gap-6">
-        <div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className="-ml-2 w-fit text-label text-muted-foreground uppercase"
-            onClick={() => navigate(`/orgs/${orgId}`)}
-          >
-            <ArrowLeftIcon data-icon="inline-start" />
-            Organization
-          </Button>
-        </div>
-
-        <PageHeader
-          eyebrow="Short links"
-          title="Links"
-          description="Create short aliases for this organization. Anyone with the link can open it; management stays private."
-          actions={
-            canWrite ? (
-              <Dialog
-                open={isCreateOpen}
-                onOpenChange={setIsCreateOpen}
-                triggerId={createDialogTriggerId}
-              >
-                <DialogTrigger
-                  id={createDialogTriggerId}
-                  render={
-                    <Button
-                      type="button"
-                      className="h-10 px-4 text-xs font-semibold tracking-[0.14em] uppercase"
-                    />
-                  }
-                >
-                  <PlusIcon data-icon="inline-start" />
-                  New link
-                </DialogTrigger>
-                <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle className="font-display text-2xl tracking-tight">
-                      Create link
-                    </DialogTitle>
-                    <DialogDescription>
-                      Pick a destination and an optional alias. Links are public
-                      once created.
-                    </DialogDescription>
-                  </DialogHeader>
-                  <CreateLinkForm
-                    orgId={orgId}
-                    onCreated={handleCreated}
-                    onCancel={() => setIsCreateOpen(false)}
-                    onSessionInvalid={sessionInvalid}
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        eyebrow="Short links"
+        title="Links"
+        description={`Short links for ${org.name}. Anyone with the link can open it; management stays private.`}
+        actions={
+          canWrite ? (
+            <Dialog
+              open={isCreateOpen}
+              onOpenChange={handleCreateOpenChange}
+              triggerId={createDialogTriggerId}
+            >
+              <DialogTrigger
+                id={createDialogTriggerId}
+                render={
+                  <Button
+                    type="button"
+                    className="h-10 px-4 text-xs font-semibold tracking-[0.14em] uppercase"
                   />
-                </DialogContent>
-              </Dialog>
-            ) : null
-          }
-        />
+                }
+              >
+                <PlusIcon data-icon="inline-start" />
+                New link
+              </DialogTrigger>
+              <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-lg">
+                <DialogHeader>
+                  <DialogTitle className="font-display text-2xl tracking-tight">
+                    Create link
+                  </DialogTitle>
+                  <DialogDescription>
+                    Pick a destination and an optional alias. Links are public
+                    once created.
+                  </DialogDescription>
+                </DialogHeader>
+                <CreateLinkForm
+                  orgId={orgId}
+                  onCreated={handleCreated}
+                  onCancel={() => setIsCreateOpen(false)}
+                  onSessionInvalid={sessionInvalid}
+                />
+              </DialogContent>
+            </Dialog>
+          ) : null
+        }
+      />
 
-        {status === "forbidden" ? (
-          <Card>
-            <CardContent className="flex flex-col gap-4 py-8">
-              <Alert>
-                <CircleAlertIcon aria-hidden="true" />
-                <AlertDescription>
-                  You do not have access to links in this organization.
-                </AlertDescription>
-              </Alert>
-              <div>
+      {status === "forbidden" ? (
+        <Card>
+          <CardContent className="flex flex-col gap-4 py-8">
+            <Alert>
+              <CircleAlertIcon aria-hidden="true" />
+              <AlertDescription>
+                You do not have access to links in this organization.
+              </AlertDescription>
+            </Alert>
+            <div>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => navigate(`/orgs/${orgId}`)}
+              >
+                Back to organization
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      ) : (
+        <>
+          <LinkFilterForm
+            query={query}
+            tags={tags}
+            onQueryChange={(value) => {
+              setQuery(value)
+              setOffset(0)
+            }}
+            onTagsChange={(nextTags) => {
+              setTags(nextTags)
+              setOffset(0)
+            }}
+            onClear={clearFilters}
+          />
+
+          {actionError ? (
+            <Alert variant="destructive">
+              <CircleAlertIcon aria-hidden="true" />
+              <AlertDescription>{actionError}</AlertDescription>
+            </Alert>
+          ) : null}
+
+          {status === "loading" ? (
+            <Card>
+              <CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
+                <Spinner />
+                Loading links...
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {status === "error" ? (
+            <Card>
+              <CardContent className="flex flex-col gap-4 py-6">
+                <Alert variant="destructive">
+                  <CircleAlertIcon aria-hidden="true" />
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => void linksQuery.refetch()}
+                  >
+                    Try again
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => navigate(`/orgs/${orgId}`)}
+                  >
+                    Back to organization
+                  </Button>
+                </div>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          {status === "ready" && page.items.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 border-y border-border py-14 text-center">
+              <div className="flex size-12 items-center justify-center rounded-md border border-border bg-card text-muted-foreground">
+                <LinkIcon className="size-5" aria-hidden="true" />
+              </div>
+              <p className="font-display text-2xl font-semibold tracking-tight">
+                {hasFilters ? "No matching links" : "No links yet"}
+              </p>
+              <p className="max-w-sm text-sm text-muted-foreground">
+                {hasFilters
+                  ? "Try changing the alias search or tags."
+                  : canWrite
+                    ? "Use New link to create the first short link."
+                    : "No links have been created in this organization yet."}
+              </p>
+            </div>
+          ) : null}
+
+          {status === "ready" && page.items.length > 0 ? (
+            <>
+              <LinkList
+                links={page.items}
+                canWrite={canWrite}
+                canDelete={canDelete}
+                busyId={busyId}
+                onEdit={setEditing}
+                onShowQR={setQrLink}
+                onToggleDisabled={(link) => void handleToggleDisabled(link)}
+                onDelete={setDeleting}
+              />
+
+              <nav
+                aria-label="Link pagination"
+                className="flex items-center justify-end gap-2"
+              >
                 <Button
                   type="button"
                   variant="outline"
-                  onClick={() => navigate(`/orgs/${orgId}`)}
+                  size="sm"
+                  disabled={offset === 0}
+                  onClick={() =>
+                    setOffset(Math.max(0, offset - LINK_PAGE_SIZE))
+                  }
                 >
-                  Back to organization
+                  Previous
                 </Button>
-              </div>
-            </CardContent>
-          </Card>
-        ) : (
-          <>
-            <LinkFilterForm
-              query={query}
-              tags={tags}
-              onQueryChange={(value) => {
-                setQuery(value)
-                setOffset(0)
-              }}
-              onTagsChange={(nextTags) => {
-                setTags(nextTags)
-                setOffset(0)
-              }}
-              onClear={clearFilters}
-            />
-
-            {actionError ? (
-              <Alert variant="destructive">
-                <CircleAlertIcon aria-hidden="true" />
-                <AlertDescription>{actionError}</AlertDescription>
-              </Alert>
-            ) : null}
-
-            {status === "loading" ? (
-              <Card>
-                <CardContent className="flex items-center justify-center gap-2 py-12 text-sm text-muted-foreground">
-                  <Spinner />
-                  Loading links...
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {status === "error" ? (
-              <Card>
-                <CardContent className="flex flex-col gap-4 py-6">
-                  <Alert variant="destructive">
-                    <CircleAlertIcon aria-hidden="true" />
-                    <AlertDescription>{error}</AlertDescription>
-                  </Alert>
-                  <div className="flex gap-2">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => void linksQuery.refetch()}
-                    >
-                      Try again
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      onClick={() => navigate(`/orgs/${orgId}`)}
-                    >
-                      Back to organization
-                    </Button>
-                  </div>
-                </CardContent>
-              </Card>
-            ) : null}
-
-            {status === "ready" && page.items.length === 0 ? (
-              <div className="flex flex-col items-center gap-3 border-y border-border py-14 text-center">
-                <div className="flex size-12 items-center justify-center rounded-md border border-border bg-card text-muted-foreground">
-                  <LinkIcon className="size-5" aria-hidden="true" />
-                </div>
-                <p className="font-display text-2xl font-semibold tracking-tight">
-                  {hasFilters ? "No matching links" : "No links yet"}
-                </p>
-                <p className="max-w-sm text-sm text-muted-foreground">
-                  {hasFilters
-                    ? "Try changing the alias search or tags."
-                    : canWrite
-                      ? "Use New link to create the first short link."
-                      : "No links have been created in this organization yet."}
-                </p>
-              </div>
-            ) : null}
-
-            {status === "ready" && page.items.length > 0 ? (
-              <>
-                <LinkList
-                  links={page.items}
-                  canWrite={canWrite}
-                  canDelete={canDelete}
-                  busyId={busyId}
-                  onEdit={setEditing}
-                  onShowQR={setQrLink}
-                  onToggleDisabled={(link) => void handleToggleDisabled(link)}
-                  onDelete={setDeleting}
-                />
-
-                <nav
-                  aria-label="Link pagination"
-                  className="flex items-center justify-end gap-2"
-                >
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={offset === 0}
-                    onClick={() =>
-                      setOffset(Math.max(0, offset - LINK_PAGE_SIZE))
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={page.nextOffset === null}
+                  onClick={() => {
+                    if (page.nextOffset !== null) {
+                      setOffset(page.nextOffset)
                     }
-                  >
-                    Previous
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={page.nextOffset === null}
-                    onClick={() => {
-                      if (page.nextOffset !== null) {
-                        setOffset(page.nextOffset)
-                      }
-                    }}
-                  >
-                    Next
-                  </Button>
-                </nav>
-              </>
-            ) : null}
-          </>
-        )}
-      </div>
+                  }}
+                >
+                  Next
+                </Button>
+              </nav>
+            </>
+          ) : null}
+        </>
+      )}
 
       {editing ? (
         <EditLinkDialog
@@ -408,6 +398,6 @@ function LinksView({ session }: { session: Session }) {
         onCancel={() => setDeleting(null)}
         onConfirm={() => void handleDelete()}
       />
-    </AppShell>
+    </div>
   )
 }

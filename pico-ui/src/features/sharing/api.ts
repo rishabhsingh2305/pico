@@ -81,3 +81,28 @@ export function buildShareUrl(
   }
   return `${window.location.origin}/shared?${query}#share=${encodeURIComponent(token)}`
 }
+
+export async function listOrgShares(
+  orgId: string,
+  filters: {
+    resourceType?: ShareResourceType | "all"
+    activeOnly?: boolean
+  } = {}
+): Promise<ShareCredential[]> {
+  const query = new URLSearchParams({
+    orgId,
+    kind: "share",
+    limit: "100",
+  })
+  if (filters.resourceType && filters.resourceType !== "all") {
+    query.set("resourceType", filters.resourceType)
+  }
+  if (filters.activeOnly) {
+    query.set("active", "true")
+  }
+  const response = await requestJSON<{ items: ShareCredential[] }>(
+    `/orgs/${orgId}/credentials?${query}`,
+    { method: "GET" }
+  )
+  return response.items
+}

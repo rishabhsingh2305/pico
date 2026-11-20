@@ -4,13 +4,13 @@
 
 pico-ui is the browser client for the picoservice Go API. It is a React single
 page application built with Vite. The current features are account signup,
-login, email verification, an organization dashboard, organizations, projects,
-project debits and credits, organization short links, and read-only public
-shares.
+login, email verification, an API console, organizations with a
+context-sensitive Projects/Expenses/Links/Sharing workspace, project debits and
+credits, organization short links, and read-only public shares.
 
 ```text
 browser
-  -> React signup / login / verification / dashboard / organization / project / expense pages
+  -> React signup / login / verification / organizations / projects / expenses / links / sharing pages
   -> TanStack Query hooks (cache, dedupe, invalidation)
   -> requestJSON (fetch, credentials: omit)
   -> VITE_API_BASE_URL (default http://localhost:8080) or the production API origin
@@ -38,6 +38,7 @@ load; `requestJSON` refreshes once on `401`.
 src/
 ├── app/
 │   ├── router.tsx                   # Route table
+│   ├── workspace-layout.tsx         # RequireSession shell + AppShell
 │   ├── query-client.ts              # TanStack Query client defaults
 │   ├── query-keys.ts                # Shared query key factory
 │   └── query-provider.tsx           # QueryClientProvider wiring
@@ -45,7 +46,10 @@ src/
 │   ├── app-shell.tsx                # Sidebar shell for signed-in screens
 │   ├── page-header.tsx              # Shared page title and actions
 │   ├── brand.tsx                    # Shared Pico wordmark
+│   ├── code-snippet.tsx             # Shared code + copy block
+│   ├── copy-button.tsx              # Shared clipboard feedback button
 │   ├── date-range-picker.tsx        # Preset/custom date range picker
+│   ├── select-field.tsx             # Themed select with popover menu
 │   ├── tag-input.tsx                # Shared badge-style tag entry
 │   ├── theme-provider.tsx           # Existing light/dark/system provider
 │   └── ui/                          # Generated shadcn primitives
@@ -53,7 +57,7 @@ src/
 │   ├── api-docs/
 │   │   ├── content.ts               # Curated endpoint reference data
 │   │   ├── types.ts                 # Endpoint/section types
-│   │   ├── components/              # Cards, code blocks, copy, navigation
+│   │   ├── components/              # Cards and endpoint navigation
 │   │   └── pages/
 │   │       └── api-docs-page.tsx
 │   ├── auth/
@@ -72,29 +76,28 @@ src/
 │   │       ├── login-page.tsx
 │   │       ├── sign-up-page.tsx
 │   │       └── verify-email-page.tsx
-│   ├── dashboard/
-│   │   ├── data.ts                  # Currency grouping and flow-bar helpers
-│   │   ├── components/
-│   │   │   ├── dashboard-summary.tsx
-│   │   │   ├── project-flow.tsx
-│   │   │   ├── recent-activity.tsx
-│   │   │   └── section-heading.tsx
-│   │   └── pages/
-│   │       └── dashboard-page.tsx
 │   ├── design-system/
 │   │   └── pages/
 │   │       └── style-tile-page.tsx   # Public palette/type/pattern reference
+│   ├── developer/
+│   │   ├── api.ts                  # Ping and readiness checks
+│   │   └── pages/
+│   │       └── api-console-page.tsx
 │   ├── expenses/
 │   │   ├── api.ts                   # GET/POST/DELETE expenses
 │   │   ├── error-message.ts         # Safe expense error mapping
 │   │   ├── filters.ts               # Tag/date filter parsing
 │   │   ├── money.ts                 # Decimal <-> minor units, formatting
+│   │   ├── summary.ts               # Currency grouping for org totals
 │   │   ├── types.ts                 # Expense, ExpenseType, ExpensePage, CreateExpenseInput
 │   │   ├── validation.ts            # Pure expense validation
 │   │   └── components/
 │   │       ├── create-expense-form.tsx
 │   │       ├── expense-filter-form.tsx
-│   │       └── expense-list.tsx
+│   │       ├── expense-list.tsx
+│   │       ├── expense-pagination.tsx
+│   │       ├── expense-summary.tsx
+│   │       └── org-expense-filter-form.tsx
 │   ├── links/
 │   │   ├── api.ts                   # Organization link management
 │   │   ├── error-message.ts         # Safe link error mapping
@@ -110,6 +113,8 @@ src/
 │   │       └── links-page.tsx
 │   ├── orgs/
 │   │   ├── api.ts                   # GET/POST/PATCH orgs, GET org detail
+│   │   ├── layouts/
+│   │   │   └── org-workspace-layout.tsx
 │   │   ├── error-message.ts         # Safe org error mapping
 │   │   ├── types.ts                 # Org, CreateOrgInput
 │   │   ├── validation.ts            # Pure org name/tag validation
@@ -120,15 +125,20 @@ src/
 │   │   │   └── org-filter-form.tsx
 │   │   └── pages/
 │   │       ├── orgs-page.tsx
-│   │       ├── org-detail-page.tsx
+│   │       ├── org-projects-page.tsx
+│   │       ├── org-expenses-page.tsx
 │   │       └── project-detail-page.tsx
 │   ├── sharing/
 │   │   ├── api.ts                   # Create, list, status, and revoke shares
+│   │   ├── error-message.ts         # Safe sharing error mapping
+│   │   ├── permissions.ts           # Scope label mapping
 │   │   ├── types.ts                 # Share credential and status shapes
 │   │   ├── components/
+│   │   │   ├── create-share-dialog.tsx
 │   │   │   ├── share-dialog.tsx
 │   │   │   └── public-share-badge.tsx
 │   │   └── pages/
+│   │       ├── sharing-page.tsx
 │   │       └── shared-page.tsx      # Public read-only view
 │   └── projects/
 │       ├── api.ts                   # GET/POST/PATCH projects
@@ -224,38 +234,63 @@ The actor is the access-token `sub`; the UI never sends a `userId` query
 parameter. Org-scoped requests send `?orgId=`, which must match the
 organization used to render the screen.
 
+## Landing and API console
+
+`/` redirects signed-in users to `/orgs`, the landing page. Organizations are
+created from a dialog on `/orgs`, not an inline form. Entering an organization
+switches the sidebar to Projects, Expenses, Links, and Sharing.
+
+`/api` is the signed-in API console. It shows the configured `VITE_API_BASE_URL`,
+checks `GET /ping` and `GET /ready`, and provides copyable curl examples. It does
+not manage API keys or show usage analytics yet.
+
 ## Workspace shell
 
-Signed-in screens share `AppShell`: a persistent sidebar from the `lg` breakpoint,
-a compact mobile top bar with a sheet navigator, active navigation state, and a
-footer that shows the signed-in user with a sign-out action. `PageHeader`
-provides the shared eyebrow, title, description, and action layout. Auth screens
-use `AuthShell` with a split brand panel, while `/api-docs` keeps its public
-header so it works without a session.
+`WorkspaceLayout` combines `RequireSession` with `AppShell`, so global signed-in
+pages do not render the shell themselves. `AppShell` provides the sidebar,
+mobile sheet, navigation state, and the signed-in user footer. The global
+sidebar contains Organizations, API console, and a new-tab link to the public
+API docs. `/` redirects to `/orgs`.
 
-## Organization dashboard
+`OrgWorkspaceLayout` wraps `/orgs/:orgId`. It loads the organization once,
+replaces the sidebar with Projects, Expenses, Links, and Sharing, and provides
+the organization, roles, and permission flags through `Outlet` context. It
+renders its own `AppShell`; organization pages are not nested inside
+`WorkspaceLayout`. Links and Sharing are hidden without the corresponding
+feature role. Child pages do not fetch the organization again.
 
-`/orgs/:orgId/dashboard` is the organization dashboard. It is opened from the
-organization's project list and is scoped to that organization; there is no
-global dashboard or organization switcher.
+`PageHeader` provides the shared eyebrow, title, description, and action layout.
+Auth screens use `AuthShell` with a split brand panel, while `/api-docs` keeps
+its public header so it works without a session.
 
-- KPIs show the net total, credit, and debit for the selected currency. The net
-  uses the oversized `text-metric` display; credit is moss (`chart-2`) and debit
-  is vermilion (`primary`).
-- Monetary totals are grouped by project currency. When an organization uses
-  more than one currency, currency tabs switch the KPI and flow views. Amounts
-  from different currencies are never added together.
-- The project flow chart is a pure CSS ledger: one row per project in the active
-  currency, with debit extending left, credit extending right, and the project
-  net on the right. Bars scale to the largest credit or debit in the group.
-- Recent activity lists the latest six expenses for the organization. Each row
-  shows its own currency code because the list may mix currencies.
-- The dashboard loads `GET /orgs/{orgID}`, `GET /projects`, one
-  `GET /expenses/summary` for all project totals, and one organization-wide
-  `GET /expenses?limit=6` for recent activity. It never derives totals from a
-  returned page and never issues one totals request per project.
-- Empty states cover an organization with no projects and no recent activity.
-  Network and access errors offer a retry.
+## Organization expenses
+
+`/orgs/:orgId` redirects to `/orgs/:orgId/projects`. The organization-wide
+Expenses page at `/orgs/:orgId/expenses` lists expenses across every project.
+
+- Project filter, all-match tag filter, and inclusive date range.
+- 20-item pagination using `GET /expenses`.
+- Currency-grouped net, credit, and debit totals from
+  `GET /expenses/summary`; amounts are never added across currencies.
+- Each row shows its project name.
+- Creating an expense stays on the project page because the project owns the
+  currency. Deleting is available from the organization ledger.
+- The legacy `/orgs/:orgId/dashboard` route redirects to this page.
+
+## Sharing
+
+`/orgs/:orgId/sharing` lists organization share credentials from
+`GET /orgs/{orgID}/credentials?kind=share`.
+
+- The list is intentionally compact: name, resource, access summary, status,
+  and expiry. Permissions, creator, and dates live in a details sheet.
+- Status tabs filter All/Active/Expired/Revoked with counts; search and resource
+  filters run client-side over the fetched page.
+- Existing URLs cannot be recovered because only the token hash is stored.
+  The details sheet offers "Create replacement" for org and project shares.
+- Last-used is not displayed because share requests do not update it.
+- `share.admin` or the owner can revoke; `share.viewer` is read-only.
+- Expense shares are deferred until a project/expense picker exists.
 
 ## Organization links
 
@@ -284,11 +319,11 @@ token lacks the matching `link.*` role.
 
 ## Organization and project workspace
 
-`/orgs/:orgId` is the project list. `/orgs/:orgId/projects/:projectId` is the
-project expense page.
+`/orgs/:orgId/projects` is the project list tab.
+`/orgs/:orgId/projects/:projectId` is the project expense page.
 
-- Projects are listed on the organization page; there is no separate Projects
-  section. The New project action opens a dialog containing the create form.
+- Projects are listed in the Projects tab. The New project action opens a dialog
+  containing the create form.
 - Organization cards show their tags. Clicking a tag toggles it in the compact
   “Filter tags (any)” toolbar and reloads the organization list from the server.
 - Organization tag filtering uses any-match semantics: selecting team and
@@ -299,18 +334,17 @@ project expense page.
 - Creating an organization while a filter is active reloads the filtered list;
   without a filter, the new organization is prepended.
 - The filtered empty state is “No organizations match these tags.”
-- The organization detail page shows the organization's tags below its title.
-- The project list links to the organization dashboard with a Dashboard action
-  next to New project.
-- The organization page shows project names, currencies, and tags, with no
-  expense information.
+- The organization sidebar context shows the organization's name, tags, owner
+  badge, and share action. It provides Projects, Expenses, Links, and Sharing.
+- The Projects page shows project names, currencies, and tags, with no expense
+  information.
 - Each project has a currency selected at creation; it is shown next to the
   project name.
 - Project tags can be edited from the project card. The list reloads after an
   edit because the project may no longer match the active filter.
 - Clicking a project name or arrow opens its expense page.
-- The project page loads the organization, project, and that project's debits and
-  credits.
+- The project page consumes the organization from the workspace context and
+  loads the project and its debits and credits.
 - If the project list is paginated, request its summary with `projectIds` from the
   current page and merge rows by `projectId`, zero-filling projects without
   matching expenses. Never map projects to summary rows by array position.
@@ -735,13 +769,17 @@ Organization errors:
 - `/verify-email` — reads the fragment token and verifies it
 - `/api-docs` — public, searchable API reference
 - `/design` — public design-system style tile
+- `/` — redirects to `/orgs`
+- `/api` — signed-in API console
 - `/orgs` — organization list and creation
-- `/orgs/:orgId` — project list for an organization
-- `/orgs/:orgId/dashboard` — organization dashboard
-- `/orgs/:orgId/links` — organization short links
+- `/orgs/:orgId` — redirects to `/orgs/:orgId/projects`
+- `/orgs/:orgId/projects` — project list for an organization
 - `/orgs/:orgId/projects/:projectId` — project expenses
+- `/orgs/:orgId/expenses` — organization-wide expenses
+- `/orgs/:orgId/links` — organization short links
+- `/orgs/:orgId/sharing` — share links and permissions
+- `/orgs/:orgId/dashboard` — redirects to organization expenses
 - `/shared` — public read-only view opened by a share link
-- `/` — redirects to `/orgs` when authenticated, otherwise `/login`
 - `*` — redirects through `/`
 
 Protected routes render inside `RequireSession`.
@@ -857,6 +895,15 @@ so their inclusive boundaries are unit tested. The picker writes the same
 `yyyy-MM-dd` form values as before, which keeps the RFC 3339 conversion and the
 backend contract unchanged.
 
+### Themed select menus instead of native popups
+
+Native `<select>` popups are rendered by the operating system and ignore the
+paper-and-ink tokens, which is especially visible in dark mode. All dropdowns
+use `src/components/select-field.tsx`, a small wrapper over the Base UI select
+primitives. It keeps the trigger aligned with `Input`, opens a themed popover
+below the field, and shows the selected option with a check mark. Use it instead
+of adding native selects.
+
 ### Curated API guide instead of Swagger
 
 The API is small enough that a hand-curated guide is clearer than generated
@@ -875,10 +922,10 @@ displayed total and filters are the single source of truth. A page request stays
 bounded by its limit, and all project summaries arrive in one request instead of
 one request per project.
 
-### Currency-grouped dashboard totals
+### Currency-grouped expense totals
 
 An organization can hold projects in different currencies, and minor units are
-not comparable across them. The dashboard loads one grouped summary and sums
+not comparable across them. The Expenses page loads one grouped summary and sums
 within each currency before displaying it. A single organization-wide expense
 total would be numerically wrong for mixed-currency organizations.
 
@@ -926,8 +973,8 @@ it and refreshes the current page and totals.
 - Date filters use the browser's local timezone; there is no timezone selector.
 - TanStack Query caches server data for 30 seconds by default; a stale project can
   briefly appear until a mutation invalidates its query or the cache expires.
-- The organization list and dashboard still use effect-based fetching. Migrate
-  them to TanStack Query incrementally; the org/project pages are already on it.
+- The organization list still uses effect-based fetching. Migrate it to TanStack
+  Query; the org/project pages are already on it.
 - No deployment configuration or static-host SPA rewrite.
 - `VITE_API_BASE_URL` is fixed at build time, so each environment needs its own
   build.

@@ -7,6 +7,7 @@ import type { Session } from "@/features/auth/session"
 import { RequireSession } from "@/features/auth/auth-provider"
 import type { Expense } from "@/features/expenses/types"
 import type { Org } from "@/features/orgs/types"
+import { OrgWorkspaceLayout } from "@/features/orgs/layouts/org-workspace-layout"
 import { ProjectDetailPage } from "@/features/orgs/pages/project-detail-page"
 import type { Project } from "@/features/projects/types"
 import { AuthTestProvider } from "@/test/auth"
@@ -205,10 +206,12 @@ function renderProjectDetail(initialSession: Session | null = session) {
       <MemoryRouter initialEntries={["/orgs/org-1/projects/project-1"]}>
         <Routes>
           <Route element={<RequireSession />}>
-            <Route
-              path="/orgs/:orgId/projects/:projectId"
-              element={<ProjectDetailPage />}
-            />
+            <Route path="/orgs/:orgId" element={<OrgWorkspaceLayout />}>
+              <Route
+                path="projects/:projectId"
+                element={<ProjectDetailPage />}
+              />
+            </Route>
           </Route>
           <Route
             path="/orgs/:orgId"

@@ -1,6 +1,6 @@
 import { useState, type ComponentType, type ReactNode } from "react"
 import { Link, useLocation, useNavigate } from "react-router"
-import { BookOpenIcon, Building2Icon, LogOutIcon, MenuIcon } from "lucide-react"
+import { LogOutIcon, MenuIcon } from "lucide-react"
 
 import { Brand } from "@/components/brand"
 import { Button } from "@/components/ui/button"
@@ -17,47 +17,33 @@ import { useAuth } from "@/features/auth/auth-provider"
 import type { Session } from "@/features/auth/session"
 import { cn } from "cn"
 
-type AppShellProps = {
-  session: Session
-  children: ReactNode
-}
-
-type NavigationItem = {
+export type NavigationItem = {
   to: string
   label: string
   index: string
   icon: ComponentType<{ className?: string }>
   isActive: (pathname: string) => boolean
+  newTab?: boolean
 }
 
-const navigationGroups: { label: string; items: NavigationItem[] }[] = [
-  {
-    label: "Workspace",
-    items: [
-      {
-        to: "/orgs",
-        label: "Organizations",
-        index: "01",
-        icon: Building2Icon,
-        isActive: (pathname) => pathname.startsWith("/orgs"),
-      },
-    ],
-  },
-  {
-    label: "Resources",
-    items: [
-      {
-        to: "/api-docs",
-        label: "API docs",
-        index: "02",
-        icon: BookOpenIcon,
-        isActive: (pathname) => pathname === "/api-docs",
-      },
-    ],
-  },
-]
+export type NavigationGroup = {
+  label: string
+  items: NavigationItem[]
+}
 
-export function AppShell({ session, children }: AppShellProps) {
+type AppShellProps = {
+  session: Session
+  navigation: NavigationGroup[]
+  sidebarContext?: ReactNode
+  children: ReactNode
+}
+
+export function AppShell({
+  session,
+  navigation,
+  sidebarContext,
+  children,
+}: AppShellProps) {
   const location = useLocation()
   const [mobileOpen, setMobileOpen] = useState(false)
 
@@ -74,8 +60,15 @@ export function AppShell({ session, children }: AppShellProps) {
           </Link>
         </div>
 
+        {sidebarContext ? (
+          <div className="border-b border-sidebar-border px-4 py-3">
+            {sidebarContext}
+          </div>
+        ) : null}
+
         <nav aria-label="Workspace navigation" className="flex-1 p-4">
           <NavigationGroups
+            navigation={navigation}
             pathname={location.pathname}
             onNavigate={() => setMobileOpen(false)}
           />
@@ -120,11 +113,17 @@ export function AppShell({ session, children }: AppShellProps) {
                   Navigate Pico and manage your session.
                 </SheetDescription>
               </SheetHeader>
+              {sidebarContext ? (
+                <div className="border-b border-sidebar-border px-4 py-3">
+                  {sidebarContext}
+                </div>
+              ) : null}
               <nav
                 aria-label="Workspace navigation"
                 className="flex-1 px-3 py-2"
               >
                 <NavigationGroups
+                  navigation={navigation}
                   pathname={location.pathname}
                   onNavigate={() => setMobileOpen(false)}
                 />
@@ -145,15 +144,17 @@ export function AppShell({ session, children }: AppShellProps) {
 }
 
 function NavigationGroups({
+  navigation,
   pathname,
   onNavigate,
 }: {
+  navigation: NavigationGroup[]
   pathname: string
   onNavigate: () => void
 }) {
   return (
     <div className="flex flex-col gap-7">
-      {navigationGroups.map((group) => (
+      {navigation.map((group) => (
         <div key={group.label}>
           <p className="px-3 pb-2 text-label text-sidebar-foreground/45 uppercase">
             {group.label}
@@ -191,6 +192,8 @@ function NavigationLink({
     <Link
       to={item.to}
       onClick={onClick}
+      target={item.newTab ? "_blank" : undefined}
+      rel={item.newTab ? "noreferrer" : undefined}
       aria-current={active ? "page" : undefined}
       className={cn(
         "flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors focus-visible:ring-3 focus-visible:ring-sidebar-ring/50 focus-visible:outline-none",

@@ -3,16 +3,17 @@
 The browser client for picoservice. Built with React 19, TypeScript, Vite,
 Tailwind CSS 4, shadcn/ui, React Router, and TanStack Query.
 
-Current scope: signup, login, email verification, an organization dashboard,
-organization list/create, project list/create, project expenses, organization
-short links, and read-only public share pages.
-Organizations carry tags and can be filtered by any matching tag. Each
-organization’s project list links to its dashboard, which summarizes that
-organization with currency-grouped net, credit, and debit totals, a project flow
-chart, and recent activity. Opening an organization shows its projects, which
-can carry tags and be filtered by any matching tag. Opening a project shows that
-project's debits and credits, with tag/date filters, a server-computed net total,
-and 20-item pagination.
+Current scope: signup, login, email verification, an API console, organization
+list/create, a context-sensitive organization workspace, project expenses,
+organization-wide expenses, short links, share-link management, and read-only
+public share pages.
+Organizations carry tags and can be filtered by any matching tag. Entering an
+organization changes the sidebar to Projects, Expenses, Links, and Sharing. The
+Expenses page lists every expense across the organization with project, tag, and
+date filters plus currency-grouped totals. Projects carry tags and can be
+filtered by any matching tag. Opening a project shows its debits and credits,
+with tag/date filters, a server-computed net total, and 20-item pagination.
+Organizations are created in a modal from the Organizations page.
 
 The UI uses an editorial “paper and ink” design system: warm parchment surfaces,
 vermilion and moss data accents, acid-lime navigation, Bricolage Grotesque
@@ -80,11 +81,11 @@ The UI restores the session from `/auth/session` on reload. Then
 continue to `/orgs` to create and list organizations. Organizations accept tags
 at creation, show them on their cards,
 and can be filtered with a tag toolbar; owners can edit tags from the card. Open
-an organization to see and create projects; projects have editable tags and can
-be filtered server-side by any matching tag. The organization’s project list
-also links to its dashboard, which groups totals by project currency and shows
-project flow and recent entries. Open a project to manage its expenses. The
-project page records each entry as a debit (money out) or credit (money in),
+an organization to see its context-sensitive sidebar. Projects have editable
+tags and can be filtered server-side by any matching tag. The Expenses page
+shows every expense across the organization with project, tag, and date filters
+and currency-grouped totals. Open a project to manage its expenses. The project
+page records each entry as a debit (money out) or credit (money in),
 filters by comma-separated tags (all must match) and a date range picker with
 presets or custom start/end dates, shows the filtered net total with credit and
 debit breakdowns, and paginates the expense list without changing that total. On
@@ -100,9 +101,12 @@ optional tags, and can be edited, disabled, re-enabled, deleted, copied, opened,
 or shown as a QR code. The redirect itself is public at the short-link origin
 under `/s/{slug}`; only management requires an account.
 
-Owners and members with `share.admin` can create organization or project links
-from the share buttons on those screens. Share links expire after 7, 30, or 365 days,
-are read-only, and can be revoked from the same dialog. A link opens
+Owners and members with `share.*` roles can manage share links from the
+organization's Sharing page. Generated URLs are shown once at creation; the
+page uses a compact list with status tabs and a details panel for resources,
+scopes/permissions, status, expiry, and creator. It supports creating
+replacement links and revoking links. Share links expire after 7, 30, or 365 days,
+are read-only, and can also be created from the quick share buttons. A link opens
 `/shared` with an opaque token in the URL fragment (`#share=...`). The page reads
 the token, stores it in `sessionStorage`, removes it from the URL, and sends it
 as `Authorization: Share` on the existing read routes. Public badges appear only
@@ -126,14 +130,19 @@ token in the `Authorization` header. The API allows the UI origin through CORS.
 | `/signup`                          | Signup page                 |
 | `/login`                           | Sign-in page                |
 | `/verify-email`                    | Email verification          |
+| `/`                                | Redirects to `/orgs`        |
+| `/api`                             | API console                 |
 | `/api-docs`                        | Public API documentation    |
+| `/design`                          | Public design-system tile   |
 | `/orgs`                            | Organization list + create  |
-| `/orgs/:orgId`                     | Project list + create       |
-| `/orgs/:orgId/dashboard`           | Organization dashboard      |
-| `/orgs/:orgId/links`               | Organization short links    |
+| `/orgs/:orgId`                     | Redirects to Projects       |
+| `/orgs/:orgId/projects`            | Project list + create       |
 | `/orgs/:orgId/projects/:projectId` | Project expenses            |
+| `/orgs/:orgId/expenses`            | Organization-wide expenses  |
+| `/orgs/:orgId/links`               | Organization short links    |
+| `/orgs/:orgId/sharing`             | Share links and permissions |
+| `/orgs/:orgId/dashboard`           | Redirects to Expenses       |
 | `/shared`                          | Public read-only share view |
-| `/`                                | Session-aware redirect      |
 | `*`                                | Redirect through `/`        |
 
 ## API integration
@@ -149,6 +158,8 @@ token in the `Authorization` header. The API allows the UI origin through CORS.
   `PATCH /orgs/{id}` for owner tag edits. `GET /orgs` sends `tags` for
   any-match filtering. Organization creation includes tags. Tags are normalized
   with the shared 20-tag/32-byte limits.
+- `src/features/developer/api.ts` checks `GET /ping` and `GET /ready` for the
+  API console. Both are public endpoints.
 - `src/features/links/api.ts` calls the organization link management routes and
   paginates with `nextOffset`. The page treats `shortUrl` from the API as
   authoritative.
@@ -160,18 +171,17 @@ token in the `Authorization` header. The API allows the UI origin through CORS.
   `GET /expenses/summary`, and `DELETE /expenses/{id}`. Expenses inherit currency
   from their project and carry a `type` of `debit` (money out) or `credit` (money
   in). Amounts stay positive; the type supplies the direction.
-- `src/features/dashboard/pages/dashboard-page.tsx` composes the org, project,
-  and expense APIs. It is opened from the organization’s project list. It loads
-  one grouped `GET /expenses/summary` for project totals, groups those totals by
-  currency, and loads an organization-wide `limit=6` page for recent activity.
 - `GET /expenses` returns `{"items","nextOffset"}`. `items` is the current page;
   `nextOffset` is `null` on the last page. `GET /expenses/summary` returns
   per-project, per-currency totals with `totalCount`, `totalDebit`,
   `totalCredit`, and `netTotal`. `netTotal` is `totalCredit - totalDebit`.
   Amounts are in minor units and are formatted with the project currency.
-- The dashboard never adds minor units across currencies. It shows currency tabs
-  when an organization has projects in more than one currency, and each recent
-  activity row carries its own currency code.
+- Organization-wide expenses use `GET /expenses` and `GET /expenses/summary`
+  with project, tag, and date filters. Currency totals are never added across
+  currencies; currency tabs switch the summary shown.
+- The Sharing page lists `GET /orgs/{orgID}/credentials?kind=share`, creates
+  organization/project shares, and revokes links. Generated URLs are shown only
+  once, at creation.
 - The organization page shows project names, currencies, and tags. Project tags
   are clickable and toggle the active server-side filter; the filter toolbar
   also accepts manual tag badges. Tags can be edited from each project card.

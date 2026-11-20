@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { Session } from "@/features/auth/session"
 import { RequireSession } from "@/features/auth/auth-provider"
+import { WorkspaceLayout } from "@/app/workspace-layout"
 import { OrgsPage } from "@/features/orgs/pages/orgs-page"
 import type { Org } from "@/features/orgs/types"
 import { AuthTestProvider } from "@/test/auth"
@@ -46,7 +47,9 @@ function renderOrgsPage(initialSession: Session | null = session) {
       <MemoryRouter initialEntries={["/orgs"]}>
         <Routes>
           <Route element={<RequireSession />}>
-            <Route path="/orgs" element={<OrgsPage />} />
+            <Route element={<WorkspaceLayout />}>
+              <Route path="/orgs" element={<OrgsPage />} />
+            </Route>
           </Route>
           <Route path="/login" element={<div>Login destination</div>} />
         </Routes>
@@ -121,17 +124,27 @@ describe("OrgsPage", () => {
     renderOrgsPage()
     await screen.findByText("No organizations yet")
 
-    await userEventInstance.type(screen.getByLabelText("Name"), "  Acme  ")
-    await userEventInstance.type(screen.getByLabelText("Tags"), "team,")
     await userEventInstance.click(
-      screen.getByRole("button", { name: "Create organization" })
+      screen.getByRole("button", { name: "New organization" })
+    )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Create organization",
+    })
+    await userEventInstance.type(
+      within(dialog).getByLabelText("Name"),
+      "  Acme  "
+    )
+    await userEventInstance.type(within(dialog).getByLabelText("Tags"), "team,")
+    await userEventInstance.click(
+      within(dialog).getByRole("button", { name: "Create organization" })
     )
 
     expect(await screen.findByText("Acme")).toBeInTheDocument()
     expect(screen.getByText("Owner")).toBeInTheDocument()
     expect(screen.getByText("team")).toBeInTheDocument()
-    expect(screen.getByLabelText("Name")).toHaveValue("")
-    expect(screen.getByLabelText("Tags")).toHaveValue("")
+    expect(
+      screen.queryByRole("dialog", { name: "Create organization" })
+    ).not.toBeInTheDocument()
 
     const [url, init] = fetchMock.mock.calls[1]
     expect(url).toBe("/api/orgs")
@@ -256,6 +269,32 @@ describe("OrgsPage", () => {
     })
   })
 
+  it("closes organization creation without submitting on cancel", async () => {
+    const fetchMock = vi
+      .fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ items: [] }))
+    vi.stubGlobal("fetch", fetchMock)
+    const userEventInstance = userEvent.setup()
+
+    renderOrgsPage()
+    await screen.findByText("No organizations yet")
+
+    await userEventInstance.click(
+      screen.getByRole("button", { name: "New organization" })
+    )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Create organization",
+    })
+    await userEventInstance.click(
+      within(dialog).getByRole("button", { name: "Cancel" })
+    )
+
+    await waitFor(() => {
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+    })
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+  })
+
   it("validates the organization name before submitting", async () => {
     const fetchMock = vi
       .fn<typeof fetch>()
@@ -267,10 +306,18 @@ describe("OrgsPage", () => {
     await screen.findByText("No organizations yet")
 
     await userEventInstance.click(
-      screen.getByRole("button", { name: "Create organization" })
+      screen.getByRole("button", { name: "New organization" })
+    )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Create organization",
+    })
+    await userEventInstance.click(
+      within(dialog).getByRole("button", { name: "Create organization" })
     )
 
-    expect(screen.getByText("Enter an organization name.")).toBeInTheDocument()
+    expect(
+      within(dialog).getByText("Enter an organization name.")
+    ).toBeInTheDocument()
     expect(fetchMock).toHaveBeenCalledTimes(1)
   })
 
@@ -289,9 +336,15 @@ describe("OrgsPage", () => {
     renderOrgsPage()
     await screen.findByText("No organizations yet")
 
-    await userEventInstance.type(screen.getByLabelText("Name"), "Acme")
     await userEventInstance.click(
-      screen.getByRole("button", { name: "Create organization" })
+      screen.getByRole("button", { name: "New organization" })
+    )
+    const dialog = await screen.findByRole("dialog", {
+      name: "Create organization",
+    })
+    await userEventInstance.type(within(dialog).getByLabelText("Name"), "Acme")
+    await userEventInstance.click(
+      within(dialog).getByRole("button", { name: "Create organization" })
     )
 
     expect(

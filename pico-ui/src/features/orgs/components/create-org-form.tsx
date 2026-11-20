@@ -5,12 +5,6 @@ import { TagInput } from "@/components/tag-input"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-} from "@/components/ui/card"
-import {
   Field,
   FieldDescription,
   FieldError,
@@ -27,11 +21,13 @@ import { normalizeTags } from "@/lib/tags"
 
 type CreateOrgFormProps = {
   onCreated: (org: Org) => void
+  onCancel: () => void
   onSessionInvalid: () => void
 }
 
 export function CreateOrgForm({
   onCreated,
+  onCancel,
   onSessionInvalid,
 }: CreateOrgFormProps) {
   const id = useId()
@@ -86,98 +82,94 @@ export function CreateOrgForm({
   }
 
   return (
-    <Card>
-      <CardHeader>
-        <h2 className="font-display text-xl font-semibold tracking-tight">
-          Create organization
-        </h2>
-        <CardDescription>
-          Organizations group your projects and shared expenses.
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form
-          onSubmit={handleSubmit}
-          noValidate
-          aria-busy={isSubmitting}
-          className="flex flex-col gap-4"
+    <form
+      onSubmit={handleSubmit}
+      noValidate
+      aria-busy={isSubmitting}
+      className="flex flex-col gap-4"
+    >
+      <Field data-invalid={Boolean(nameError)}>
+        <FieldLabel htmlFor={nameId}>Name</FieldLabel>
+        <Input
+          ref={inputRef}
+          id={nameId}
+          name="name"
+          type="text"
+          autoComplete="organization"
+          placeholder="Acme Inc."
+          value={name}
+          onChange={(event) => {
+            setName(event.target.value)
+            if (nameError) {
+              setNameError("")
+            }
+            if (formError) {
+              setFormError("")
+            }
+          }}
+          disabled={isSubmitting}
+          aria-invalid={Boolean(nameError)}
+          aria-describedby={nameError ? nameErrorId : `${id}-name-help`}
+        />
+        <FieldDescription id={`${id}-name-help`}>
+          Use a recognizable team or company name.
+        </FieldDescription>
+        <FieldError id={nameErrorId}>{nameError}</FieldError>
+      </Field>
+
+      <Field data-invalid={Boolean(tagsError)}>
+        <FieldLabel htmlFor={tagsId}>Tags</FieldLabel>
+        <TagInput
+          id={tagsId}
+          name="tags"
+          value={tags}
+          onChange={(nextTags) => {
+            setTags(nextTags)
+            setTagsError("")
+            setFormError("")
+          }}
+          placeholder="team, finance"
+          disabled={isSubmitting}
+          invalid={Boolean(tagsError)}
+          describedBy={tagsError ? tagsErrorId : tagsHelpId}
+        />
+        <FieldDescription id={tagsHelpId}>
+          Type a tag and press comma or Enter. Up to 20 tags.
+        </FieldDescription>
+        <FieldError id={tagsErrorId}>{tagsError}</FieldError>
+      </Field>
+
+      {formError ? (
+        <Alert variant="destructive">
+          <CircleAlertIcon aria-hidden="true" />
+          <AlertDescription>{formError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
+        <Button
+          type="button"
+          variant="outline"
+          onClick={onCancel}
+          disabled={isSubmitting}
         >
-          <Field data-invalid={Boolean(nameError)}>
-            <FieldLabel htmlFor={nameId}>Name</FieldLabel>
-            <Input
-              ref={inputRef}
-              id={nameId}
-              name="name"
-              type="text"
-              autoComplete="organization"
-              placeholder="Acme Inc."
-              value={name}
-              onChange={(event) => {
-                setName(event.target.value)
-                if (nameError) {
-                  setNameError("")
-                }
-                if (formError) {
-                  setFormError("")
-                }
-              }}
-              disabled={isSubmitting}
-              aria-invalid={Boolean(nameError)}
-              aria-describedby={nameError ? nameErrorId : `${id}-name-help`}
-            />
-            <FieldDescription id={`${id}-name-help`}>
-              Use a recognizable team or company name.
-            </FieldDescription>
-            <FieldError id={nameErrorId}>{nameError}</FieldError>
-          </Field>
-
-          <Field data-invalid={Boolean(tagsError)}>
-            <FieldLabel htmlFor={tagsId}>Tags</FieldLabel>
-            <TagInput
-              id={tagsId}
-              name="tags"
-              value={tags}
-              onChange={(nextTags) => {
-                setTags(nextTags)
-                setTagsError("")
-                setFormError("")
-              }}
-              placeholder="team, finance"
-              disabled={isSubmitting}
-              invalid={Boolean(tagsError)}
-              describedBy={tagsError ? tagsErrorId : tagsHelpId}
-            />
-            <FieldDescription id={tagsHelpId}>
-              Type a tag and press comma or Enter. Up to 20 tags.
-            </FieldDescription>
-            <FieldError id={tagsErrorId}>{tagsError}</FieldError>
-          </Field>
-
-          {formError ? (
-            <Alert variant="destructive">
-              <CircleAlertIcon aria-hidden="true" />
-              <AlertDescription>{formError}</AlertDescription>
-            </Alert>
-          ) : null}
-
-          <div className="flex justify-end">
-            <Button
-              type="submit"
-              disabled={isSubmitting}
-              className="w-full sm:w-auto"
-            >
-              {isSubmitting ? (
-                <>
-                  <Spinner data-icon="inline-start" />
-                  Creating...
-                </>
-              ) : (
-                "Create organization"
-              )}
-            </Button>
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+          Cancel
+        </Button>
+        <Button
+          type="submit"
+          disabled={isSubmitting}
+          className="w-full sm:w-auto"
+        >
+          {isSubmitting ? (
+            <>
+              <Spinner data-icon="inline-start" />
+              Creating...
+            </>
+          ) : (
+            "Create organization"
+          )}
+        </Button>
+      </div>
+    </form>
   )
 }

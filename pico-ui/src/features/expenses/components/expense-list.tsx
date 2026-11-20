@@ -22,6 +22,8 @@ type ExpenseListProps = {
   expenses: Expense[]
   deletingId: string | null
   hasFilters?: boolean
+  projectNames?: Record<string, string>
+  emptyDescription?: string
   onDelete: (expense: Expense) => void
 }
 
@@ -29,6 +31,8 @@ export function ExpenseList({
   expenses,
   deletingId,
   hasFilters = false,
+  projectNames,
+  emptyDescription,
   onDelete,
 }: ExpenseListProps) {
   const [pendingDelete, setPendingDelete] = useState<Expense | null>(null)
@@ -52,8 +56,9 @@ export function ExpenseList({
         </p>
         <p className="max-w-sm text-sm text-muted-foreground">
           {hasFilters
-            ? "Try changing the tags or date range."
-            : "Use New expense to add the first debit or credit."}
+            ? "Try changing the project, tags, or date range."
+            : (emptyDescription ??
+              "Use New expense to add the first debit or credit.")}
         </p>
       </div>
     )
@@ -93,9 +98,14 @@ export function ExpenseList({
                       {label}
                     </p>
                   </div>
-                  <p className="font-mono text-[11px] tracking-wide text-muted-foreground uppercase">
-                    {formatSpentAt(expense.spentAt)}
-                  </p>
+                  <div className="flex flex-wrap items-center gap-x-2 gap-y-1 font-mono text-[11px] tracking-wide text-muted-foreground uppercase">
+                    {projectNames?.[expense.projectId] ? (
+                      <span className="rounded-sm border border-border px-1.5 py-0.5">
+                        {projectNames[expense.projectId]}
+                      </span>
+                    ) : null}
+                    <span>{formatSpentAt(expense.spentAt)}</span>
+                  </div>
                   {expense.tags.length > 0 ? (
                     <div className="flex flex-wrap gap-1.5">
                       {expense.tags.map((tag) => (

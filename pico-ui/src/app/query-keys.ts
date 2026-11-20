@@ -10,6 +10,9 @@ const expenseRoot = (userId: string, orgId: string, projectId: string) =>
 const linksRoot = (userId: string, orgId: string) =>
   ["links", userId, orgId] as const
 
+const orgExpensesRoot = (userId: string, orgId: string) =>
+  ["org-expenses", userId, orgId] as const
+
 function expenseFilterKey(filters: ExpenseFilters) {
   return [filters.tags, filters.from ?? null, filters.to ?? null] as const
 }
@@ -46,6 +49,34 @@ export const queryKeys = {
       "summary",
       ...expenseFilterKey(filters),
     ] as const,
+  healthPing: ["health", "ping"] as const,
+  healthReady: ["health", "ready"] as const,
+  orgExpensesRoot,
+  orgExpenses: (
+    userId: string,
+    orgId: string,
+    projectId: string,
+    filters: ExpenseFilters,
+    offset: number
+  ) =>
+    [
+      ...orgExpensesRoot(userId, orgId),
+      projectId,
+      ...expenseFilterKey(filters),
+      offset,
+    ] as const,
+  orgExpenseSummary: (
+    userId: string,
+    orgId: string,
+    projectId: string,
+    filters: ExpenseFilters
+  ) =>
+    [
+      ...orgExpensesRoot(userId, orgId),
+      "summary",
+      projectId,
+      ...expenseFilterKey(filters),
+    ] as const,
   linksRoot,
   links: (
     userId: string,
@@ -69,4 +100,9 @@ export const queryKeys = {
     resourceType: "org" | "project" | "expense",
     resourceId: string
   ) => ["shares", orgId, resourceType, resourceId] as const,
+  orgShares: (
+    orgId: string,
+    resourceType: "all" | "org" | "project" | "expense",
+    activeOnly: boolean
+  ) => ["org-shares", orgId, resourceType, activeOnly] as const,
 }

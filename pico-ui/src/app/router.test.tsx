@@ -56,47 +56,6 @@ describe("AppRouter", () => {
     expect(await screen.findByText("No organizations yet")).toBeInTheDocument()
   })
 
-  it("renders the organization dashboard route", async () => {
-    const org = {
-      id: "org-1",
-      name: "Acme",
-      userId: "user-1",
-      tags: [],
-      createdAt: "2026-01-01T00:00:00Z",
-      updatedAt: "2026-01-01T00:00:00Z",
-    }
-    vi.stubGlobal(
-      "fetch",
-      vi.fn<typeof fetch>(async (input, init) => {
-        const url = new URL(String(input), "http://localhost")
-        const method = init?.method ?? "GET"
-        if (method === "GET" && url.pathname === "/api/orgs/org-1") {
-          return jsonResponse(org)
-        }
-        if (method === "GET" && url.pathname === "/api/projects") {
-          return jsonResponse({ items: [] })
-        }
-        if (method === "GET" && url.pathname === "/api/expenses/summary") {
-          return jsonResponse({ items: [] })
-        }
-        if (method === "GET" && url.pathname === "/api/expenses") {
-          return jsonResponse({
-            items: [],
-            nextOffset: null,
-          })
-        }
-        return jsonResponse({ error: "not found" }, 404)
-      })
-    )
-
-    renderRouter("/orgs/org-1/dashboard", session)
-
-    expect(
-      await screen.findByRole("heading", { name: "Dashboard" })
-    ).toBeInTheDocument()
-    expect(await screen.findByText("Nothing to summarize")).toBeInTheDocument()
-  })
-
   it("reuses cached org and project data when opening a project", async () => {
     const org = {
       id: "org-1",
@@ -137,7 +96,7 @@ describe("AppRouter", () => {
     })
     vi.stubGlobal("fetch", fetchMock)
 
-    renderRouter("/orgs/org-1", session)
+    renderRouter("/orgs/org-1/projects", session)
 
     const projectLink = await screen.findByRole("link", { name: "General" })
     await projectLink.click()
@@ -152,6 +111,29 @@ describe("AppRouter", () => {
         )
       ).toBe(false)
     })
+  })
+
+  it("renders the API console route", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn<typeof fetch>(async (input) => {
+        const url = new URL(String(input), "http://localhost")
+        if (url.pathname === "/api/ping") {
+          return jsonResponse({ message: "pong" })
+        }
+        if (url.pathname === "/api/ready") {
+          return jsonResponse({ status: "ok" })
+        }
+        return jsonResponse({ error: "not found" }, 404)
+      })
+    )
+
+    renderRouter("/api", session)
+
+    expect(
+      await screen.findByRole("heading", { name: "API console" })
+    ).toBeInTheDocument()
+    expect(await screen.findAllByText("OK")).toHaveLength(2)
   })
 
   it("renders the public API docs route", async () => {
@@ -217,11 +199,9 @@ describe("AppRouter", () => {
       })
     )
 
-    renderRouter("/orgs/org-1", session)
+    renderRouter("/orgs/org-1/projects", session)
 
-    expect(
-      await screen.findByRole("heading", { name: "Acme" })
-    ).toBeInTheDocument()
+    expect(await screen.findByText("Acme")).toBeInTheDocument()
     expect(await screen.findByText("No projects yet")).toBeInTheDocument()
   })
 

@@ -1,25 +1,25 @@
 import { CountUp } from "@/components/count-up"
-import type { CurrencySummary } from "@/features/dashboard/data"
+import type { CurrencyTotals } from "@/features/expenses/summary"
 import { formatMoney } from "@/features/expenses/money"
 import { cn } from "cn"
 
-type DashboardSummaryProps = {
-  summary: CurrencySummary
+type OrgExpenseSummaryProps = {
+  summary: CurrencyTotals
   currencies: string[]
   selectedCurrency: string
   onCurrencyChange: (currency: string) => void
 }
 
-export function DashboardSummary({
+export function OrgExpenseSummary({
   summary,
   currencies,
   selectedCurrency,
   onCurrencyChange,
-}: DashboardSummaryProps) {
-  const projectLabel = summary.projects.length === 1 ? "project" : "projects"
+}: OrgExpenseSummaryProps) {
+  const projectLabel = summary.projectCount === 1 ? "project" : "projects"
   const entryLabel = summary.totalCount === 1 ? "entry" : "entries"
   const summaryText = `${summary.totalCount} ${entryLabel} across ${
-    summary.projects.length
+    summary.projectCount
   } ${projectLabel}. Net ${formatMoney(
     summary.netTotal,
     summary.currency
@@ -30,10 +30,10 @@ export function DashboardSummary({
 
   return (
     <section
-      aria-label="Workspace totals"
+      aria-label="Organization expense totals"
       className="border border-border bg-card"
     >
-      <div className="relative p-6 sm:p-8 lg:p-10">
+      <div className="relative p-6 sm:p-8">
         <span
           className={cn(
             "absolute inset-x-0 top-0 h-1",
@@ -45,7 +45,7 @@ export function DashboardSummary({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <p className="text-label text-muted-foreground uppercase">
-              Net across {summary.projects.length} {projectLabel}
+              Net across {summary.projectCount} {projectLabel}
             </p>
             <p className="mt-1 text-sm text-muted-foreground">
               Credits minus debits, in {summary.currency}.
@@ -118,7 +118,7 @@ export function DashboardSummary({
         />
         <Stat
           label="Projects"
-          value={String(summary.projects.length)}
+          value={String(summary.projectCount)}
           className="bg-accent text-accent-foreground"
         />
       </dl>

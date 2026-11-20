@@ -1,8 +1,9 @@
-import type { ReactNode } from "react"
+import { useState, type ReactNode } from "react"
 import { Link } from "react-router"
 import { ArrowLeftIcon, PlusIcon } from "lucide-react"
 
 import { PageHeader } from "@/components/page-header"
+import { SelectField } from "@/components/select-field"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Field, FieldLabel } from "@/components/ui/field"
@@ -24,6 +25,7 @@ const palette = [
 
 export function StyleTilePage() {
   usePageTitle("Design system · Pico")
+  const [currency, setCurrency] = useState("USD")
 
   return (
     <div className="mx-auto w-full max-w-[1200px] px-4 py-10 sm:px-6 lg:px-10 lg:py-14">
@@ -154,6 +156,24 @@ export function StyleTilePage() {
                   Amount
                 </FieldLabel>
                 <Input id="style-tile-amount" placeholder="12.99" />
+              </Field>
+              <Field>
+                <FieldLabel
+                  htmlFor="style-tile-currency"
+                  className="text-label text-muted-foreground uppercase"
+                >
+                  Currency
+                </FieldLabel>
+                <SelectField
+                  id="style-tile-currency"
+                  value={currency}
+                  onValueChange={setCurrency}
+                  options={[
+                    { value: "USD", label: "USD" },
+                    { value: "INR", label: "INR" },
+                    { value: "EUR", label: "EUR" },
+                  ]}
+                />
               </Field>
               <div className="flex flex-col gap-2">
                 <span className="text-label text-muted-foreground uppercase">

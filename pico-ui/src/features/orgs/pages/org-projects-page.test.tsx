@@ -5,7 +5,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { Session } from "@/features/auth/session"
 import { RequireSession } from "@/features/auth/auth-provider"
-import { OrgDetailPage } from "@/features/orgs/pages/org-detail-page"
+import { OrgWorkspaceLayout } from "@/features/orgs/layouts/org-workspace-layout"
+import { OrgProjectsPage } from "@/features/orgs/pages/org-projects-page"
 import type { Org } from "@/features/orgs/types"
 import type { Project } from "@/features/projects/types"
 import { AuthTestProvider } from "@/test/auth"
@@ -134,13 +135,15 @@ function projectListURLs(fetchMock: ReturnType<typeof stubApi>): URL[] {
     .map(([url]) => new URL(String(url), "http://localhost"))
 }
 
-function renderOrgDetail(initialSession: Session | null = session) {
+function renderOrgProjects(initialSession: Session | null = session) {
   return render(
     <AuthTestProvider session={initialSession}>
-      <MemoryRouter initialEntries={["/orgs/org-1"]}>
+      <MemoryRouter initialEntries={["/orgs/org-1/projects"]}>
         <Routes>
           <Route element={<RequireSession />}>
-            <Route path="/orgs/:orgId" element={<OrgDetailPage />} />
+            <Route path="/orgs/:orgId" element={<OrgWorkspaceLayout />}>
+              <Route path="projects" element={<OrgProjectsPage />} />
+            </Route>
           </Route>
           <Route path="/orgs" element={<div>Organizations destination</div>} />
           <Route path="/login" element={<div>Login destination</div>} />
@@ -154,9 +157,9 @@ afterEach(() => {
   vi.unstubAllGlobals()
 })
 
-describe("OrgDetailPage", () => {
+describe("OrgProjectsPage", () => {
   it("redirects to login without a session", () => {
-    renderOrgDetail(null)
+    renderOrgProjects(null)
 
     expect(screen.getByText("Login destination")).toBeInTheDocument()
   })
@@ -164,19 +167,25 @@ describe("OrgDetailPage", () => {
   it("loads the organization, projects, and project tags", async () => {
     const fetchMock = stubApi({ projects: [general] })
 
-    renderOrgDetail()
+    renderOrgProjects()
 
-    expect(
-      await screen.findByRole("heading", { name: "Acme" })
-    ).toBeInTheDocument()
+    expect(await screen.findByText("Acme")).toBeInTheDocument()
     expect(screen.getByText("ops")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Dashboard" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Projects" })).toHaveAttribute(
       "href",
-      "/orgs/org-1/dashboard"
+      "/orgs/org-1/projects"
+    )
+    expect(screen.getByRole("link", { name: "Expenses" })).toHaveAttribute(
+      "href",
+      "/orgs/org-1/expenses"
     )
     expect(screen.getByRole("link", { name: "Links" })).toHaveAttribute(
       "href",
       "/orgs/org-1/links"
+    )
+    expect(screen.getByRole("link", { name: "Sharing" })).toHaveAttribute(
+      "href",
+      "/orgs/org-1/sharing"
     )
     expect(
       await screen.findByRole("link", { name: "General" })
@@ -194,7 +203,7 @@ describe("OrgDetailPage", () => {
     stubApi({ projects: [] })
     const userEventInstance = userEvent.setup()
 
-    renderOrgDetail()
+    renderOrgProjects()
 
     expect(await screen.findByText("No projects yet")).toBeInTheDocument()
     expect(screen.queryByLabelText("Project name")).not.toBeInTheDocument()
@@ -214,7 +223,7 @@ describe("OrgDetailPage", () => {
     const fetchMock = stubApi({ projects: [] })
     const userEventInstance = userEvent.setup()
 
-    renderOrgDetail()
+    renderOrgProjects()
     await screen.findByText("No projects yet")
 
     await userEventInstance.click(
@@ -237,7 +246,7 @@ describe("OrgDetailPage", () => {
     const fetchMock = stubApi({ projects: [] })
     const userEventInstance = userEvent.setup()
 
-    renderOrgDetail()
+    renderOrgProjects()
     await screen.findByText("No projects yet")
     await userEventInstance.click(
       screen.getByRole("button", { name: "New project" })
@@ -279,7 +288,7 @@ describe("OrgDetailPage", () => {
     })
     const userEventInstance = userEvent.setup()
 
-    renderOrgDetail()
+    renderOrgProjects()
     await screen.findByRole("link", { name: "General" })
 
     const filterForm = screen.getByLabelText("Filter tags (any)")
@@ -321,7 +330,7 @@ describe("OrgDetailPage", () => {
     })
     const userEventInstance = userEvent.setup()
 
-    renderOrgDetail()
+    renderOrgProjects()
     await screen.findByRole("link", { name: "General" })
 
     await userEventInstance.click(
@@ -356,7 +365,7 @@ describe("OrgDetailPage", () => {
     stubApi({ projects: [general] })
     const userEventInstance = userEvent.setup()
 
-    renderOrgDetail()
+    renderOrgProjects()
     await screen.findByRole("link", { name: "General" })
 
     await userEventInstance.type(
@@ -382,7 +391,7 @@ describe("OrgDetailPage", () => {
     const fetchMock = stubApi({ projects: [general] })
     const userEventInstance = userEvent.setup()
 
-    renderOrgDetail()
+    renderOrgProjects()
     await screen.findByRole("link", { name: "General" })
 
     await userEventInstance.click(
@@ -421,7 +430,7 @@ describe("OrgDetailPage", () => {
       projectsResponse: jsonResponse({ error: "list failed" }, 500),
     })
 
-    renderOrgDetail()
+    renderOrgProjects()
 
     expect(
       await screen.findByText("Something went wrong. Please try again.")
@@ -436,13 +445,13 @@ describe("OrgDetailPage", () => {
       orgResponse: jsonResponse({ error: "org not found" }, 404),
     })
 
-    renderOrgDetail()
+    renderOrgProjects()
 
     expect(
       await screen.findByText("Organization not found.")
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Back to organizations" })
+      screen.getByRole("link", { name: "Back to organizations" })
     ).toBeInTheDocument()
   })
 
@@ -451,7 +460,7 @@ describe("OrgDetailPage", () => {
       orgResponse: jsonResponse({ error: "user not found" }, 404),
     })
 
-    renderOrgDetail()
+    renderOrgProjects()
 
     expect(await screen.findByText("Login destination")).toBeInTheDocument()
   })

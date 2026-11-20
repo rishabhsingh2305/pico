@@ -1,6 +1,7 @@
 import { useEffect, useId, useState } from "react"
 import { Link2Icon, Trash2Icon } from "lucide-react"
 
+import { SelectField } from "@/components/select-field"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import {
@@ -12,7 +13,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { Field, FieldLabel } from "@/components/ui/field"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Spinner } from "@/components/ui/spinner"
 import { isSessionInvalidError } from "@/features/auth/session"
 import {
@@ -21,6 +21,7 @@ import {
   listShares,
   revokeShare,
 } from "@/features/sharing/api"
+import { shareErrorMessage } from "@/features/sharing/error-message"
 import type {
   ShareCredential,
   ShareResourceType,
@@ -207,18 +208,13 @@ export function ShareDialog({
         <div className="flex flex-col gap-4">
           <Field>
             <FieldLabel htmlFor={selectId}>Link expiry</FieldLabel>
-            <NativeSelect
+            <SelectField
               id={selectId}
               value={expiry}
-              onChange={(event) => setExpiry(event.target.value)}
+              onValueChange={setExpiry}
+              options={EXPIRY_OPTIONS}
               className="w-full"
-            >
-              {EXPIRY_OPTIONS.map((option) => (
-                <NativeSelectOption key={option.value} value={option.value}>
-                  {option.label}
-                </NativeSelectOption>
-              ))}
-            </NativeSelect>
+            />
           </Field>
 
           <Button type="button" onClick={handleCreate} disabled={submitting}>
@@ -316,11 +312,4 @@ function formatDate(value: string): string {
     month: "short",
     day: "numeric",
   })
-}
-
-function shareErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message) {
-    return error.message
-  }
-  return "Could not update sharing."
 }

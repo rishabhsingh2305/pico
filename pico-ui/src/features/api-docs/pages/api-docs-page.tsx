@@ -15,7 +15,7 @@ import {
 } from "@/features/api-docs/content"
 import { ApiDocsNavigation } from "@/features/api-docs/components/api-docs-navigation"
 import { ApiEndpointCard } from "@/features/api-docs/components/api-endpoint-card"
-import { CodeBlock } from "@/features/api-docs/components/code-block"
+import { CodeBlock } from "@/components/code-snippet"
 import { CopyButton } from "@/components/copy-button"
 import type { ApiEndpoint, ApiSection } from "@/features/api-docs/types"
 import { useAuth } from "@/features/auth/auth-provider"
