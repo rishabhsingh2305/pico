@@ -124,6 +124,32 @@ endpoints:
       path: /orgs/{orgID}/credentials
       scope: org
 
+  links:
+    list:
+      method: GET
+      path: /orgs/{orgID}/links
+      scope: org
+    create:
+      method: POST
+      path: /orgs/{orgID}/links
+      scope: org
+    get:
+      method: GET
+      path: /orgs/{orgID}/links/{linkID}
+      scope: org
+    update:
+      method: PATCH
+      path: /orgs/{orgID}/links/{linkID}
+      scope: org
+    delete:
+      method: DELETE
+      path: /orgs/{orgID}/links/{linkID}
+      scope: org
+    redirect:
+      method: GET
+      path: /s/{slug}
+      scope: public
+
   projects:
     list:
       method: GET

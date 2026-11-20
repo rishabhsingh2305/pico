@@ -13,6 +13,7 @@ import { OrgDashboardPage } from "@/features/dashboard/pages/dashboard-page"
 import { StyleTilePage } from "@/features/design-system/pages/style-tile-page"
 import { OrgDetailPage } from "@/features/orgs/pages/org-detail-page"
 import { OrgsPage } from "@/features/orgs/pages/orgs-page"
+import { LinksPage } from "@/features/links/pages/links-page"
 import { ProjectDetailPage } from "@/features/orgs/pages/project-detail-page"
 import { SharedPage } from "@/features/sharing/pages/shared-page"
 
@@ -37,6 +38,7 @@ export function AppRouter() {
       <Route element={<RequireSession />}>
         <Route path="/orgs" element={<OrgsPage />} />
         <Route path="/orgs/:orgId/dashboard" element={<OrgDashboardPage />} />
+        <Route path="/orgs/:orgId/links" element={<LinksPage />} />
         <Route path="/orgs/:orgId" element={<OrgDetailPage />} />
         <Route
           path="/orgs/:orgId/projects/:projectId"

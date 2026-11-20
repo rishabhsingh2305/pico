@@ -76,6 +76,27 @@ func (c *Client) EnsureIndexes(ctx context.Context) error {
 			},
 		},
 		{
+			collection: linksCollection,
+			models: []mongo.IndexModel{
+				{
+					Keys:    bson.D{{Key: "slug", Value: 1}},
+					Options: options.Index().SetName("links_slug_unique").SetUnique(true),
+				},
+				{
+					Keys:    bson.D{{Key: "orgId", Value: 1}, {Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}},
+					Options: options.Index().SetName("links_org_created"),
+				},
+				{
+					Keys:    bson.D{{Key: "orgId", Value: 1}, {Key: "tags", Value: 1}},
+					Options: options.Index().SetName("links_org_tags"),
+				},
+				{
+					Keys:    bson.D{{Key: "orgId", Value: 1}, {Key: "slug", Value: 1}},
+					Options: options.Index().SetName("links_org_slug"),
+				},
+			},
+		},
+		{
 			collection: projectsCollection,
 			models: []mongo.IndexModel{
 				{

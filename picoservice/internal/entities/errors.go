@@ -46,4 +46,9 @@ var (
 	// ErrExpenseNotFound is returned when an expense does not exist in the
 	// caller's organization.
 	ErrExpenseNotFound = errors.New("expense not found")
+	// ErrLinkNotFound is returned when a link does not exist, is disabled, or
+	// was deleted.
+	ErrLinkNotFound = errors.New("link not found")
+	// ErrSlugTaken is returned when a custom link alias is already in use.
+	ErrSlugTaken = errors.New("slug already in use")
 )

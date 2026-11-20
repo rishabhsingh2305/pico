@@ -34,6 +34,7 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 	membershipStore := mongodb.NewMembershipStore(db)
 	projectStore := mongodb.NewProjectStore(db)
 	expenseStore := mongodb.NewExpenseStore(db)
+	linkStore := mongodb.NewLinkStore(db)
 	credentialStore := mongodb.NewCredentialStore(db)
 
 	tokens, err := services.NewVerificationTokens(cfg.JWTSecret)
@@ -67,6 +68,7 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 	}
 	projectService := services.NewProjectService(projectStore)
 	expenseService := services.NewExpenseService(expenseStore, projectStore)
+	linkService := services.NewLinkService(linkStore)
 	credentialService := services.NewCredentialService(credentialStore, orgStore, projectStore, expenseStore)
 
 	return routes.New(routes.Deps{
@@ -78,6 +80,7 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 		Memberships:    membershipService,
 		Projects:       projectService,
 		Expenses:       expenseService,
+		Links:          linkService,
 		Credentials:    credentialService,
 		Policy:         policy,
 		SecureCookies:  strings.HasPrefix(cfg.PublicBaseURL, "https://"),

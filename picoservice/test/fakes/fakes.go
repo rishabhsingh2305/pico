@@ -21,6 +21,7 @@ type Services struct {
 	Memberships *MembershipService
 	Projects    *ProjectService
 	Expenses    *ExpenseService
+	Links       *LinkService
 	Credentials *CredentialService
 }
 
@@ -34,6 +35,7 @@ func NewServices() Services {
 		Memberships: &MembershipService{},
 		Projects:    &ProjectService{},
 		Expenses:    &ExpenseService{},
+		Links:       &LinkService{},
 		Credentials: &CredentialService{},
 	}
 }
@@ -53,6 +55,7 @@ func (s Services) Deps(logger *slog.Logger, pinger controllers.Pinger) routes.De
 		Memberships:    s.Memberships,
 		Projects:       s.Projects,
 		Expenses:       s.Expenses,
+		Links:          s.Links,
 		Credentials:    s.Credentials,
 		Policy:         policy,
 		SecureCookies:  false,

@@ -1,4 +1,4 @@
-import { CopyButton } from "@/features/api-docs/components/copy-button"
+import { CopyButton } from "@/components/copy-button"
 
 type CodeBlockProps = {
   code: string

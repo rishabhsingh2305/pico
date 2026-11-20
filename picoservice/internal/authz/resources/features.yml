@@ -3,7 +3,7 @@
 # example "expense.editor".
 #
 # Rules validated at startup:
-#   - only the org, member, project, and expense features are allowed
+#   - only the org, member, project, expense, link, and share features are allowed
 #   - viewer is required; editor and admin are optional
 #   - viewer permissions must be a subset of editor and admin
 #   - editor permissions must be a subset of admin
@@ -23,6 +23,11 @@ features:
   share:
     viewer: [shares.list, shares.status, shares.credentials]
     admin: [shares.list, shares.status, shares.credentials, shares.create, shares.revoke]
+
+  link:
+    viewer: [links.list, links.get]
+    editor: [links.list, links.get, links.create, links.update]
+    admin: [links.list, links.get, links.create, links.update, links.delete]
 
   project:
     viewer: [projects.list, projects.get]

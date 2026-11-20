@@ -174,6 +174,10 @@ describe("OrgDetailPage", () => {
       "href",
       "/orgs/org-1/dashboard"
     )
+    expect(screen.getByRole("link", { name: "Links" })).toHaveAttribute(
+      "href",
+      "/orgs/org-1/links"
+    )
     expect(
       await screen.findByRole("link", { name: "General" })
     ).toHaveAttribute("href", "/orgs/org-1/projects/project-1")

@@ -57,6 +57,7 @@ func TestProtectedRoutesRequireAuthentication(t *testing.T) {
 		"{projectID}":    "project-1",
 		"{expenseID}":    "expense-1",
 		"{memberUserID}": "user-2",
+		"{linkID}":       "link-1",
 	}
 
 	for _, endpoint := range policy.Endpoints() {

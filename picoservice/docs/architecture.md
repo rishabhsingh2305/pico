@@ -5,8 +5,10 @@
 picoservice is a single Go AWS Lambda function exposed through a public Lambda
 Function URL. There is no API Gateway. The same chi router is used by the Lambda
 handler and by the local development server. MongoDB Atlas stores users,
-organizations, memberships, projects, and expenses. Expenses are debit or credit
-entries; amounts stay positive and the type carries the direction.
+organizations, memberships, projects, expenses, and short links. Expenses are
+debit or credit entries; amounts stay positive and the type carries the
+direction. Short links redirect publicly; their management is organization
+scoped.
 
 ```text
 client
@@ -135,6 +137,19 @@ projects
   createdAt    time
   updatedAt    time
 
+links
+  _id          ObjectID
+  orgId        string
+  userId       string
+  slug         string (lowercase, globally unique)
+  url          string
+  title        string
+  tags         []string
+  disabledAt   time | null
+  deletedAt    time | null
+  createdAt    time
+  updatedAt    time
+
 expenses
   _id          ObjectID
   orgId        string
@@ -157,15 +172,17 @@ with API identifiers.
 Organization ownership is `orgs.userId`. The owner is implicit: it is not stored
 as a membership role and token issuance writes `["*"]` for owned organizations.
 Every other membership stores a feature-to-role map such as
-`{"org":"viewer","project":"editor","expense":"viewer"}`. Memberships created
+`{"org":"viewer","project":"editor","expense":"viewer","link":"viewer"}`.
+Memberships created
 before feature roles existed decode the legacy `role` field: `org.editor` maps to
 the default member roles and `org.viewer` maps to read-only roles.
 
 ## API contract
 
-All responses are JSON unless the status is `204`. Error responses use
-`{"error":"message"}`. Read endpoints support `GET` and `HEAD`. List endpoints
-accept `limit` and `offset` (default 20, maximum 100).
+All responses are JSON unless the status is `204` or the route is the public
+short-link redirect (`302`). Error responses use `{"error":"message"}`. Read
+endpoints support `GET` and `HEAD`. List endpoints accept `limit` and `offset`
+(default 20, maximum 100).
 
 ### Health
 
@@ -283,6 +300,40 @@ Object scope is enforced in controllers:
 - expense share rejects any expense ID other than its own;
 - project and expense shares reject other projects;
 - share responses omit `userId`.
+
+### Links
+
+| Method | Path | Success | Notes |
+| --- | --- | --- | --- |
+| POST | `/orgs/{orgID}/links?orgId={orgID}` | 201 | `links.create`; `{"url","slug","title","tags"}` |
+| GET | `/orgs/{orgID}/links?orgId={orgID}` | 200 | `links.list`; paginated; `q` alias prefix, `tags` any match |
+| GET | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | 200 | `links.get` |
+| PATCH | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | 200 | `links.update`; `url`, `title`, `tags`, `disabled` |
+| DELETE | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | 204 | `links.delete`; tombstone |
+| GET | `/s/{slug}` | 302 | Public redirect; no identity |
+
+Links are publicly readable by slug, so the alias namespace is global rather
+than per organization. An omitted alias is generated from a 32-character
+lowercase alphabet with seven characters. Custom aliases are 3–32 characters,
+lowercase, and immutable. Only `http` and `https` destinations are accepted.
+
+The redirect response sets `Cache-Control: no-store` so edits and disables take
+effect immediately, and `X-Robots-Tag: noindex`. Missing, disabled, and deleted
+links return `404 {"error":"link not found"}`. There is no click tracking and no
+write on redirect.
+
+Delete is a tombstone (`deletedAt`) rather than a hard delete. The slug remains
+reserved, which prevents a deleted alias from being recreated for a different
+destination. Disable (`disabledAt`) is the reversible action.
+
+The `link` feature owns management:
+
+```yaml
+link:
+  viewer: [links.list, links.get]
+  editor: [links.list, links.get, links.create, links.update]
+  admin: [links.list, links.get, links.create, links.update, links.delete]
+```
 
 ### Projects
 
@@ -489,6 +540,10 @@ memberships:  {orgId:1, userId:1} unique
               {orgId:1, createdAt:-1, _id:-1}
 projects:     {orgId:1, createdAt:-1, _id:-1}
               {orgId:1, tags:1}
+links:        {slug:1} unique
+              {orgId:1, createdAt:-1, _id:-1}
+              {orgId:1, tags:1}
+              {orgId:1, slug:1}
 credentials:  {tokenHash:1} unique
               {orgId:1, kind:1, resourceType:1, resourceId:1, revokedAt:1, expiresAt:1}
               {orgId:1, createdAt:-1, _id:-1}
@@ -731,6 +786,9 @@ A legacy document with no `type` is counted as debit through `$ifNull`.
   access tokens. There is no last-used update on every request yet.
 - **Share status is direct-only.** A project or org share does not mark its
   children as shared in `/shares/status`.
+- **Short links are open redirects.** Creation requires an organization role,
+  but there is no destination denylist, abuse reporting, or per-user creation
+  rate limit. Add those before exposing creation to untrusted users at scale.
 - **Access tokens carry at most 20 organization role lists.** `RolesForUser`
   caps the `orgs` map so the token stays small. A user with more memberships
   loses access to the oldest organizations until the cap is raised.

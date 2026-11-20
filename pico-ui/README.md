@@ -4,8 +4,8 @@ The browser client for picoservice. Built with React 19, TypeScript, Vite,
 Tailwind CSS 4, shadcn/ui, React Router, and TanStack Query.
 
 Current scope: signup, login, email verification, an organization dashboard,
-organization list/create, project list/create, project expenses, and read-only
-public share pages.
+organization list/create, project list/create, project expenses, organization
+short links, and read-only public share pages.
 Organizations carry tags and can be filtered by any matching tag. Each
 organization’s project list links to its dashboard, which summarizes that
 organization with currency-grouped net, credit, and debit totals, a project flow
@@ -94,8 +94,14 @@ the net total visible.
 Open `http://localhost:5173/api-docs` for the public, in-app API reference. It
 includes searchable endpoint cards, request/response examples, and copy buttons.
 
+Owners and members with a `link.*` role can manage organization short links at
+`/orgs/:orgId/links`. A link can use a custom alias or a generated one, carries
+optional tags, and can be edited, disabled, re-enabled, deleted, copied, opened,
+or shown as a QR code. The redirect itself is public at the API origin under
+`/s/{slug}`; only management requires an account.
+
 Owners and members with `share.admin` can create organization or project links
-from the share buttons on those screens. Links expire after 7, 30, or 365 days,
+from the share buttons on those screens. Share links expire after 7, 30, or 365 days,
 are read-only, and can be revoked from the same dialog. A link opens
 `/shared` with an opaque token in the URL fragment (`#share=...`). The page reads
 the token, stores it in `sessionStorage`, removes it from the URL, and sends it
@@ -124,6 +130,7 @@ token in the `Authorization` header. The API allows the UI origin through CORS.
 | `/orgs`                            | Organization list + create  |
 | `/orgs/:orgId`                     | Project list + create       |
 | `/orgs/:orgId/dashboard`           | Organization dashboard      |
+| `/orgs/:orgId/links`               | Organization short links    |
 | `/orgs/:orgId/projects/:projectId` | Project expenses            |
 | `/shared`                          | Public read-only share view |
 | `/`                                | Session-aware redirect      |
@@ -142,6 +149,9 @@ token in the `Authorization` header. The API allows the UI origin through CORS.
   `PATCH /orgs/{id}` for owner tag edits. `GET /orgs` sends `tags` for
   any-match filtering. Organization creation includes tags. Tags are normalized
   with the shared 20-tag/32-byte limits.
+- `src/features/links/api.ts` calls the organization link management routes and
+  paginates with `nextOffset`. The page treats `shortUrl` from the API as
+  authoritative.
 - `src/features/projects/api.ts` calls `GET/POST /projects`,
   `GET /projects/{id}`, and `PATCH /projects/{id}` for tag edits. Project
   creation includes the currency and tags. The project list sends `tags` to the

@@ -11,6 +11,8 @@ const (
 	FeatureProject = "project"
 	// FeatureExpense covers expenses.
 	FeatureExpense = "expense"
+	// FeatureLink covers short links.
+	FeatureLink = "link"
 
 	// FeatureRoleViewer can read a feature.
 	FeatureRoleViewer = "viewer"
@@ -27,7 +29,7 @@ const (
 // ValidFeature reports whether feature is a known feature name.
 func ValidFeature(feature string) bool {
 	switch feature {
-	case FeatureOrg, FeatureMember, FeatureProject, FeatureExpense, FeatureShare:
+	case FeatureOrg, FeatureMember, FeatureProject, FeatureExpense, FeatureLink, FeatureShare:
 		return true
 	default:
 		return false
@@ -52,6 +54,7 @@ func DefaultMemberRoles() map[string]string {
 		FeatureMember:  FeatureRoleViewer,
 		FeatureProject: FeatureRoleEditor,
 		FeatureExpense: FeatureRoleEditor,
+		FeatureLink:    FeatureRoleViewer,
 	}
 }
 
@@ -62,6 +65,7 @@ func ViewerRoles() map[string]string {
 		FeatureOrg:     FeatureRoleViewer,
 		FeatureProject: FeatureRoleViewer,
 		FeatureExpense: FeatureRoleViewer,
+		FeatureLink:    FeatureRoleViewer,
 	}
 }
 

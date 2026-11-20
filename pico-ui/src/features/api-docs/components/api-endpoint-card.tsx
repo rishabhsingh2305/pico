@@ -1,6 +1,6 @@
 import { Badge } from "@/components/ui/badge"
 import { CodeBlock } from "@/features/api-docs/components/code-block"
-import { CopyButton } from "@/features/api-docs/components/copy-button"
+import { CopyButton } from "@/components/copy-button"
 import type {
   ApiEndpoint,
   ApiMethod,

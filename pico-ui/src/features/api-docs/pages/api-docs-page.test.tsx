@@ -42,6 +42,7 @@ describe("ApiDocsPage", () => {
       "Email verification",
       "Organizations",
       "Memberships",
+      "Links",
       "Projects",
       "Expenses",
     ]) {

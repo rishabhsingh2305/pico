@@ -11,7 +11,8 @@
 - Vitest 5 and React Testing Library for UI tests.
 - The backend is the Go service in `../picoservice`.
 - Current scope is signup, login, email verification, an organization dashboard,
-  organization list/create, project list/create, and project debits and credits.
+  organization list/create, project list/create, project debits and credits, and
+  organization short links.
   An organization shows project names, currencies, and tags; opening a project
   shows that project's debits and credits. Projects are created in a dialog from
   the organization page, own the currency used by their expenses, and own tags
@@ -37,6 +38,12 @@
   tag toggles it in the compact filter toolbar.
 - `/api-docs` is a public, searchable, in-app API reference covering every
   backend endpoint. Content lives in typed data under `src/features/api-docs`.
+- Organization short links live at `/orgs/:orgId/links` and are managed by
+  `link.viewer`, `link.editor`, and `link.admin` (owners use the wildcard). The
+  short URL is public at the API origin under `/s/{slug}`; the UI never builds
+  it from the UI origin. The list filters by alias prefix and any-match tags.
+  Link aliases are immutable. Delete is a tombstone, so the alias is not reused.
+  QR codes are rendered client-side from `shortUrl`.
 - Verification emails contain a link and a 6-digit code. The UI verifies via
   the link only; `POST /auth/verify-email/otp` is API-only for now. Resend
   rotates the code and returns `Retry-After: 60`.
@@ -87,6 +94,7 @@ src/
 │   ├── dashboard/          # Workspace totals, project flow, recent activity
 │   ├── design-system/      # Public palette/type/pattern style tile
 │   ├── expenses/           # Expenses, debit/credit, filters, totals, money
+│   ├── links/              # Organization short links, filters, QR codes
 │   ├── orgs/               # Organization list/detail, tags, filtering
 │   └── projects/           # Inline project list/create, tags, filters
 ├── hooks/                  # Shared hooks and page title

@@ -4,13 +4,14 @@ A small Go REST API running as a single AWS Lambda function behind a public
 Lambda Function URL. Routing is handled by
 [chi](https://github.com/go-chi/chi), with a small adapter that translates
 Function URL events into standard `net/http` requests. MongoDB Atlas stores
-users, organizations, memberships, projects, and expenses.
+users, organizations, memberships, projects, expenses, and short links.
 
 ## Endpoints
 
-All request and response bodies are JSON. List responses accept `limit` and
-`offset` query parameters (default `20`, maximum `100`). Expense lists use
-`{"items":[...],"nextOffset":...}`; expense totals come from
+All request and response bodies are JSON, except the public short-link
+redirect, which returns `302` with no body. List responses accept `limit` and
+`offset` query parameters (default `20`, maximum `100`). Expense and link lists
+use `{"items":[...],"nextOffset":...}`; expense totals come from
 `GET /expenses/summary`. Read endpoints also support `HEAD`, except the email
 verification action, which is `POST` only.
 
@@ -106,7 +107,7 @@ There is no `DELETE /orgs`.
 | `PATCH` | `/orgs/{orgID}/members/{memberUserID}?orgId={orgID}` | Replace `{"roles":{"project":"viewer","expense":"editor"}}`; requires `member.admin`; the owner cannot change |
 | `DELETE` | `/orgs/{orgID}/members/{memberUserID}?orgId={orgID}` | Remove a member; requires `member.admin`; the owner cannot be removed |
 
-Membership roles are feature-scoped: `{"org":"viewer","member":"admin","project":"editor","expense":"viewer"}`. The org's `userId` is the `owner`, which is implicit, has every feature role, is never stored as a membership role, and is written as `"*"` in access tokens. The member response uses `owner: true` for the owner and `roles` for everyone else.
+Membership roles are feature-scoped: `{"org":"viewer","member":"admin","project":"editor","expense":"viewer","link":"viewer"}`. The org's `userId` is the `owner`, which is implicit, has every feature role, is never stored as a membership role, and is written as `"*"` in access tokens. The member response uses `owner: true` for the owner and `roles` for everyone else.
 
 `member.admin` is a high-trust role: it can add and remove members and assign their feature roles, so grant it only to trusted administrators. The owner cannot be added, removed, or have their roles changed.
 
@@ -168,6 +169,69 @@ share:
 ```
 
 The owner wildcard covers everything.
+
+### Short links
+
+Short links are public redirects managed by an organization. Anyone with the
+URL can open it without authentication. Creating, listing, editing, disabling,
+and deleting require a `link.*` role.
+
+| Method | Path | Permission | Description |
+| --- | --- | --- | --- |
+| `POST` | `/orgs/{orgID}/links?orgId={orgID}` | `links.create` | Create `{"url","slug","title","tags"}` |
+| `GET` | `/orgs/{orgID}/links?orgId={orgID}` | `links.list` | List links; filters: `q` (alias prefix), `tags` (any match) |
+| `GET` | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | `links.get` | Get one link |
+| `PATCH` | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | `links.update` | Update `url`, `title`, `tags`, or `disabled` |
+| `DELETE` | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | `links.delete` | Tombstone a link |
+| `GET` | `/s/{slug}` | public | Redirect to the destination |
+
+Create body:
+
+```json
+{
+  "url": "https://example.com/page",
+  "slug": "launch",
+  "title": "Launch page",
+  "tags": ["marketing"]
+}
+```
+
+`url` must be `http` or `https` and at most 2048 bytes. An omitted `slug`
+generates a random 7-character alias. Custom aliases are 3–32 lowercase
+letters, digits, or hyphens, start and end alphanumeric, are globally unique,
+and cannot be changed after creation. `title` is optional and capped at 120
+bytes. Tags use the shared 20-item, 32-byte limits. Duplicate aliases return
+`409`.
+
+List responses use `{"items":[],"nextOffset":20}`. `q` matches the start of the
+alias; `tags` matches any listed tag. `nextOffset` is `null` on the last page.
+
+`PATCH` accepts any subset of `url`, `title`, `tags`, and `disabled`; at least
+one field is required, and `slug` is rejected. `disabled: true` stops the
+redirect and `false` re-enables it. `DELETE` tombstones the record: it is
+hidden from lists, returns `404` on redirect, and its alias stays reserved.
+
+The redirect is public and returns:
+
+```http
+HTTP/1.1 302 Found
+Location: https://example.com/page
+Cache-Control: no-store
+X-Robots-Tag: noindex
+```
+
+Missing, disabled, and deleted aliases return `404 {"error":"link not found"}`.
+`shortUrl` in management responses is built from the API request origin, so it
+uses the Function URL until a custom domain is placed in front of the API.
+
+The `link` feature governs management:
+
+```yaml
+link:
+  viewer: [links.list, links.get]
+  editor: [links.list, links.get, links.create, links.update]
+  admin: [links.list, links.get, links.create, links.update, links.delete]
+```
 
 ### Projects
 
@@ -295,6 +359,7 @@ Feature role semantics:
 | `member` | list | — | list + add + update + remove |
 | `project` | list + get | + create + update | + create + update |
 | `expense` | list + summary + get | + create + update | + delete |
+| `link` | list + get | + create + update | + delete |
 
 A user may have different roles per feature in the same organization.
 
@@ -319,6 +384,10 @@ credentials
 
 projects
   _id, orgId, userId, name, currency, tags, createdAt, updatedAt
+
+links
+  _id, orgId, userId, slug (unique), url, title, tags,
+  disabledAt, deletedAt, createdAt, updatedAt
 
 expenses
   _id, orgId, userId, projectId, amount, currency, description,

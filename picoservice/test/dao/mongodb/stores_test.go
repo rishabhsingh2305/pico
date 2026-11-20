@@ -16,7 +16,7 @@ import (
 	"picoservice/internal/entities"
 )
 
-var integrationCollections = []string{"users", "orgs", "memberships", "projects", "expenses", "credentials"}
+var integrationCollections = []string{"users", "orgs", "memberships", "projects", "expenses", "links", "credentials"}
 
 func TestStoresIntegration(t *testing.T) {
 	uri := os.Getenv("MONGODB_TEST_URI")
@@ -336,6 +336,111 @@ func TestStoresIntegration(t *testing.T) {
 	})
 	if err != nil {
 		t.Fatalf("insert second project: %v", err)
+	}
+
+	linkStore := mongodb.NewLinkStore(client)
+	link, err := linkStore.Insert(ctx, entities.Link{
+		OrgID:     org.ID,
+		UserID:    user.ID,
+		Slug:      "docs",
+		URL:       "https://example.com/docs",
+		Title:     "Docs",
+		Tags:      []string{"docs", "team"},
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	if err != nil {
+		t.Fatalf("insert link: %v", err)
+	}
+	if link.ID == "" || link.Slug != "docs" {
+		t.Fatalf("unexpected link: %+v", link)
+	}
+
+	if _, err := linkStore.Insert(ctx, entities.Link{
+		OrgID:     org.ID,
+		UserID:    user.ID,
+		Slug:      "docs",
+		URL:       "https://example.com/duplicate",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); !errors.Is(err, entities.ErrSlugTaken) {
+		t.Fatalf("expected ErrSlugTaken, got %v", err)
+	}
+
+	foundLink, err := linkStore.FindBySlug(ctx, "docs")
+	if err != nil {
+		t.Fatalf("find link by slug: %v", err)
+	}
+	if foundLink.ID != link.ID || foundLink.URL != "https://example.com/docs" {
+		t.Fatalf("unexpected link: %+v", foundLink)
+	}
+
+	linkList, err := linkStore.List(ctx, dao.LinkFilter{
+		OrgID: org.ID,
+		Query: "do",
+		Tags:  []string{"team"},
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("list links: %v", err)
+	}
+	if len(linkList) != 1 || linkList[0].ID != link.ID {
+		t.Fatalf("expected one link, got %+v", linkList)
+	}
+
+	newURL := "https://example.com/new-docs"
+	newTitle := "New docs"
+	newLinkTags := []string{"docs"}
+	disabled := true
+	updatedLink, err := linkStore.Update(ctx, org.ID, link.ID, dao.LinkUpdate{
+		URL:       &newURL,
+		Title:     &newTitle,
+		Tags:      &newLinkTags,
+		Disabled:  &disabled,
+		UpdatedAt: now.Add(time.Minute),
+	})
+	if err != nil {
+		t.Fatalf("update link: %v", err)
+	}
+	if updatedLink.URL != newURL || updatedLink.Title != newTitle || !updatedLink.Disabled() {
+		t.Fatalf("unexpected updated link: %+v", updatedLink)
+	}
+	if _, err := linkStore.FindBySlug(ctx, "docs"); !errors.Is(err, entities.ErrLinkNotFound) {
+		t.Fatalf("expected disabled link to be hidden, got %v", err)
+	}
+	if _, err := linkStore.FindByID(ctx, org.ID, link.ID); err != nil {
+		t.Fatalf("expected management read of disabled link: %v", err)
+	}
+
+	enabled := false
+	if _, err := linkStore.Update(ctx, org.ID, link.ID, dao.LinkUpdate{
+		Disabled:  &enabled,
+		UpdatedAt: now.Add(2 * time.Minute),
+	}); err != nil {
+		t.Fatalf("enable link: %v", err)
+	}
+	if _, err := linkStore.FindBySlug(ctx, "docs"); err != nil {
+		t.Fatalf("expected enabled link to resolve: %v", err)
+	}
+
+	if err := linkStore.Delete(ctx, org.ID, link.ID, now.Add(3*time.Minute)); err != nil {
+		t.Fatalf("delete link: %v", err)
+	}
+	if _, err := linkStore.FindBySlug(ctx, "docs"); !errors.Is(err, entities.ErrLinkNotFound) {
+		t.Fatalf("expected deleted link to be hidden, got %v", err)
+	}
+	if _, err := linkStore.FindByID(ctx, org.ID, link.ID); !errors.Is(err, entities.ErrLinkNotFound) {
+		t.Fatalf("expected deleted link to be unavailable, got %v", err)
+	}
+	if _, err := linkStore.Insert(ctx, entities.Link{
+		OrgID:     org.ID,
+		UserID:    user.ID,
+		Slug:      "docs",
+		URL:       "https://example.com/reused",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); !errors.Is(err, entities.ErrSlugTaken) {
+		t.Fatalf("expected deleted slug to stay reserved, got %v", err)
 	}
 
 	expenseStore := mongodb.NewExpenseStore(client)

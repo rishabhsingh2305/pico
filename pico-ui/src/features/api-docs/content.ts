@@ -76,6 +76,21 @@ const memberExample = `{
   "createdAt": "2026-01-02T12:30:00Z"
 }`
 
+const linkExample = `{
+  "id": "64f1a2b3c4d5e6f7890a1234",
+  "orgId": "64f1a2b3c4d5e6f7890a5678",
+  "userId": "64f1a2b3c4d5e6f7890a9012",
+  "slug": "launch",
+  "url": "https://example.com/page",
+  "title": "Launch page",
+  "tags": ["marketing"],
+  "shortPath": "/s/launch",
+  "shortUrl": "https://api-host/s/launch",
+  "disabled": false,
+  "createdAt": "2026-11-20T10:00:00Z",
+  "updatedAt": "2026-11-20T10:00:00Z"
+}`
+
 const errorsNote =
   'Errors use the shape {"error":"message"}. Internal details are never returned.'
 
@@ -861,6 +876,219 @@ export const API_SECTIONS: ApiSection[] = [
           description: "Revoked. No response body.",
         },
         errors: ["403 — missing shares.revoke", "404 — share not found"],
+      },
+    ],
+  },
+  {
+    id: "links",
+    title: "Links",
+    description:
+      "Short links redirect publicly at /s/{slug}. Management is organization-scoped; creating, editing, disabling, and deleting require link.* roles.",
+    endpoints: [
+      {
+        id: "links-create",
+        method: "POST",
+        path: "/orgs/{orgID}/links?orgId=...",
+        title: "Create a short link",
+        summary:
+          "Creates a public redirect. An omitted slug generates a random 7-character alias. Requires links.create.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam],
+        requestBody: `{
+  "url": "https://example.com/page",
+  "slug": "launch",
+  "title": "Launch page",
+  "tags": ["marketing"]
+}`,
+        response: {
+          status: 201,
+          description:
+            "Link created. shortUrl is built from the API request origin.",
+          body: linkExample,
+        },
+        errors: [
+          "400 — invalid URL, alias, title, or tags",
+          "403 — missing links.create",
+          "409 — alias already in use",
+        ],
+        notes: [
+          "Only http and https destinations are accepted.",
+          "Aliases are lowercase, 3–32 characters, and cannot be changed later.",
+          "The alias is globally unique because /s/{slug} has no organization context.",
+        ],
+      },
+      {
+        id: "links-list",
+        method: "GET",
+        path: "/orgs/{orgID}/links?orgId=...&q=...&tags=...&limit=20&offset=0",
+        title: "List short links",
+        summary:
+          "Lists one page of links. q is an alias prefix; tags use any-match semantics. Requires links.list.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [
+          orgIdParam,
+          {
+            name: "q",
+            required: false,
+            description:
+              "Alias prefix, case-insensitive, maximum 64 characters.",
+          },
+          {
+            name: "tags",
+            required: false,
+            description: "Comma-separated tags; any tag may match.",
+          },
+          limitParam,
+          offsetParam,
+        ],
+        response: {
+          status: 200,
+          description:
+            "One page of links. nextOffset is null on the last page.",
+          body: `{\n  "items": [],\n  "nextOffset": 20\n}`,
+        },
+        errors: [
+          "400 — invalid pagination or query",
+          "403 — missing links.list",
+        ],
+      },
+      {
+        id: "links-get",
+        method: "GET",
+        path: "/orgs/{orgID}/links/{linkID}?orgId=...",
+        title: "Get a short link",
+        summary:
+          "Returns one link, including disabled links. Requires links.get.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+          {
+            name: "linkID",
+            required: true,
+            description: "Link MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam],
+        response: {
+          status: 200,
+          description: "The link record.",
+          body: linkExample,
+        },
+        errors: ["403 — missing links.get", "404 — link not found"],
+      },
+      {
+        id: "links-update",
+        method: "PATCH",
+        path: "/orgs/{orgID}/links/{linkID}?orgId=...",
+        title: "Update a short link",
+        summary:
+          "Updates the destination, title, tags, or disabled state. The slug cannot change. Requires links.update.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+          {
+            name: "linkID",
+            required: true,
+            description: "Link MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam],
+        requestBody: `{
+  "url": "https://example.com/new-page",
+  "title": "New title",
+  "tags": ["marketing", "launch"],
+  "disabled": true
+}`,
+        response: {
+          status: 200,
+          description: "The updated link record.",
+          body: linkExample,
+        },
+        errors: [
+          "400 — invalid or missing fields",
+          "403 — missing links.update",
+          "404 — link not found",
+        ],
+        notes: [
+          "At least one field is required.",
+          "disabled: true stops the redirect; disabled: false re-enables it.",
+          "Sending slug is rejected.",
+        ],
+      },
+      {
+        id: "links-delete",
+        method: "DELETE",
+        path: "/orgs/{orgID}/links/{linkID}?orgId=...",
+        title: "Delete a short link",
+        summary:
+          "Tombstones the link. It disappears from lists and the alias stays reserved. Requires links.delete.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+          {
+            name: "linkID",
+            required: true,
+            description: "Link MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam],
+        response: {
+          status: 204,
+          description: "Link deleted; empty body.",
+        },
+        errors: ["403 — missing links.delete", "404 — link not found"],
+      },
+      {
+        id: "links-redirect",
+        method: "GET",
+        path: "/s/{slug}",
+        title: "Follow a short link",
+        summary:
+          "Public redirect. No authentication, organization membership, or token is required.",
+        access: "Public",
+        pathParams: [
+          {
+            name: "slug",
+            required: true,
+            description: "Link alias.",
+          },
+        ],
+        response: {
+          status: 302,
+          description:
+            "Redirects to the destination. Cache-Control: no-store and X-Robots-Tag: noindex are set.",
+        },
+        errors: ["404 — link is missing, disabled, or deleted"],
+        notes: [
+          "HEAD follows the same behavior with an empty body.",
+          "The destination can be changed or the link disabled at any time.",
+        ],
       },
     ],
   },

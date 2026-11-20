@@ -52,6 +52,11 @@ type ExpenseService interface {
 	controllers.ExpenseService
 }
 
+// LinkService is the short-link behavior required by the router.
+type LinkService interface {
+	controllers.LinkService
+}
+
 // Deps contains the dependencies required to build the application router.
 type Deps struct {
 	Logger         *slog.Logger
@@ -62,6 +67,7 @@ type Deps struct {
 	Memberships    MembershipService
 	Projects       ProjectService
 	Expenses       ExpenseService
+	Links          LinkService
 	Credentials    CredentialService
 	Policy         *authz.Policy
 	SecureCookies  bool
@@ -85,6 +91,7 @@ func New(deps Deps) (*chi.Mux, error) {
 	membershipController := controllers.NewMembershipController(logger, deps.Memberships)
 	projectController := controllers.NewProjectController(logger, deps.Projects)
 	expenseController := controllers.NewExpenseController(logger, deps.Expenses)
+	linkController := controllers.NewLinkController(logger, deps.Links)
 	credentialController := controllers.NewCredentialController(logger, deps.Credentials)
 
 	requireAuth := middleware.RequireAuth(deps.Auth)
@@ -104,9 +111,10 @@ func New(deps Deps) (*chi.Mux, error) {
 	healthRoutes(r, logger, deps.Pinger)
 	r.Mount("/auth", authRoutes(userController, authController))
 	r.Mount("/users", userRoutes(userController, requireAuth))
-	r.Mount("/orgs", orgRoutes(orgController, membershipController, credentialController, requireAuth, requireOrg))
+	r.Mount("/orgs", orgRoutes(orgController, membershipController, credentialController, linkController, requireAuth, requireOrg))
 	r.Mount("/projects", projectRoutes(projectController, requireOrg))
 	r.Mount("/expenses", expenseRoutes(expenseController, requireOrg))
+	r.Mount("/s", redirectRoutes(linkController))
 
 	probe, err := newMethodProbe(r)
 	if err != nil {
@@ -137,6 +145,8 @@ func (d Deps) validate() error {
 		return errors.New("routes: project service is required")
 	case d.Expenses == nil:
 		return errors.New("routes: expense service is required")
+	case d.Links == nil:
+		return errors.New("routes: link service is required")
 	case d.Credentials == nil:
 		return errors.New("routes: credential service is required")
 	case d.Policy == nil:

@@ -52,6 +52,7 @@ func TestAuthFlowWithFeatureRoles(t *testing.T) {
 		Memberships:    membershipService,
 		Projects:       fakeServices.Projects,
 		Expenses:       fakeServices.Expenses,
+		Links:          fakeServices.Links,
 		Credentials:    fakeServices.Credentials,
 		Policy:         policy,
 		AllowedOrigins: []string{"http://localhost:5173"},

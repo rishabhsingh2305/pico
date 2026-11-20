@@ -1,10 +1,14 @@
 import type { ExpenseFilters } from "@/features/expenses/filters"
+import type { LinkFilters } from "@/features/links/types"
 
 const projectsRoot = (userId: string, orgId: string) =>
   ["projects", userId, orgId] as const
 
 const expenseRoot = (userId: string, orgId: string, projectId: string) =>
   ["expenses", userId, orgId, projectId] as const
+
+const linksRoot = (userId: string, orgId: string) =>
+  ["links", userId, orgId] as const
 
 function expenseFilterKey(filters: ExpenseFilters) {
   return [filters.tags, filters.from ?? null, filters.to ?? null] as const
@@ -41,6 +45,19 @@ export const queryKeys = {
       ...expenseRoot(userId, orgId, projectId),
       "summary",
       ...expenseFilterKey(filters),
+    ] as const,
+  linksRoot,
+  links: (
+    userId: string,
+    orgId: string,
+    filters: LinkFilters,
+    offset: number
+  ) =>
+    [
+      ...linksRoot(userId, orgId),
+      filters.q,
+      [...filters.tags].sort(),
+      offset,
     ] as const,
   shareStatus: (
     orgId: string,

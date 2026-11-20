@@ -300,7 +300,7 @@ func (fakeFeatures) ValidRole(feature, role string) bool {
 	switch feature {
 	case entities.FeatureOrg, entities.FeatureMember:
 		return role == entities.FeatureRoleViewer || role == entities.FeatureRoleAdmin
-	case entities.FeatureProject, entities.FeatureExpense:
+	case entities.FeatureProject, entities.FeatureExpense, entities.FeatureLink:
 		return entities.ValidFeatureRole(role)
 	default:
 		return false

@@ -5,7 +5,8 @@
 pico-ui is the browser client for the picoservice Go API. It is a React single
 page application built with Vite. The current features are account signup,
 login, email verification, an organization dashboard, organizations, projects,
-project debits and credits, and read-only public shares.
+project debits and credits, organization short links, and read-only public
+shares.
 
 ```text
 browser
@@ -16,8 +17,10 @@ browser
   -> picoservice Lambda Function URL
   -> POST /users, POST /auth/login, POST /auth/logout, GET /auth/session,
      POST /auth/verify-email, GET/POST /orgs, GET/POST /projects,
-     GET/POST/DELETE /expenses, GET /expenses/summary, share management routes
+     GET/POST/DELETE /expenses, GET /expenses/summary, share management routes,
+     organization link management routes
   -> JSON response
+  (public recipients open the API redirect at /s/{slug} directly)
 ```
 
 The backend sends a verification email as part of `POST /users`. The email
@@ -92,6 +95,19 @@ src/
 │   │       ├── create-expense-form.tsx
 │   │       ├── expense-filter-form.tsx
 │   │       └── expense-list.tsx
+│   ├── links/
+│   │   ├── api.ts                   # Organization link management
+│   │   ├── error-message.ts         # Safe link error mapping
+│   │   ├── types.ts                 # ShortLink, LinkPage, filters, inputs
+│   │   ├── validation.ts            # URL, alias, title, tag validation
+│   │   ├── components/
+│   │   │   ├── create-link-form.tsx
+│   │   │   ├── edit-link-dialog.tsx
+│   │   │   ├── link-filter-form.tsx
+│   │   │   ├── link-list.tsx
+│   │   │   └── qr-code-dialog.tsx
+│   │   └── pages/
+│   │       └── links-page.tsx
 │   ├── orgs/
 │   │   ├── api.ts                   # GET/POST/PATCH orgs, GET org detail
 │   │   ├── error-message.ts         # Safe org error mapping
@@ -240,6 +256,30 @@ global dashboard or organization switcher.
   returned page and never issues one totals request per project.
 - Empty states cover an organization with no projects and no recent activity.
   Network and access errors offer a retry.
+
+## Organization links
+
+`/orgs/:orgId/links` is the organization short-link manager. It is protected by
+`RequireSession`; the page hides the New link and edit/delete actions when the
+token lacks the matching `link.*` role.
+
+- The page loads `GET /orgs/{orgID}/links` with `q`, `tags`, `limit`, and
+  `offset`. Search is an alias prefix; tags use any-match semantics. The search
+  input is debounced by 300ms and applying either filter resets the page to
+  offset 0.
+- The response is `{items,nextOffset}`. Pagination uses Previous/Next because
+  there is no total count endpoint.
+- Create uses `POST /orgs/{orgID}/links`; the form mirrors the server rules for
+  `http`/`https` URLs, 3–32 character lowercase aliases, a 120-byte title, and
+  the shared 20-tag/32-byte tag limits.
+- Edit uses `PATCH` for the destination, title, tags, and disabled state. The
+  alias is immutable; it is displayed read-only in the edit dialog.
+- Disable/enable is reversible. Delete is a tombstone and the confirmation says
+  the alias cannot be reused. Deleted links disappear from the list.
+- The copy action and QR dialog use `shortUrl` from the API, not a URL built
+  from the UI origin. The redirect itself is public at the API origin.
+- Query keys derive from the user ID, organization ID, filters, and offset.
+  Mutations invalidate the organization's link root.
 
 ## Organization and project workspace
 
@@ -515,6 +555,23 @@ Request with either or both fields:
 Success: `200` with the updated organization. At least one field is required.
 Only the owner may update. `tags: []` clears all organization tags.
 
+### `GET /orgs/{orgID}/links?orgId=...&q=...&tags=...&limit=20&offset=0`
+
+Returns one page of organization short links as `{items,nextOffset}`. `q` is an
+alias prefix; `tags` uses any-match semantics. Disabled links are included.
+Deleted links are excluded. `shortUrl` is an absolute URL on the API origin.
+
+### `POST /orgs/{orgID}/links?orgId=...`
+
+Creates a short link from `{url,slug?,title?,tags?}`. An omitted alias is
+generated. The response is `201` with the link record.
+
+### `PATCH /orgs/{orgID}/links/{linkID}?orgId=...`
+
+Updates `url`, `title`, `tags`, and/or `disabled`. The alias is immutable.
+`DELETE` tombstones the link, and `GET /s/{slug}` is the public `302` redirect;
+neither is called through `requestJSON` from the UI.
+
 ### `GET /projects?orgId=...&tags=food,travel&limit=100`
 
 Success: `200` with `{"items":[...]}`. Projects belong to the organization.
@@ -679,6 +736,7 @@ Organization errors:
 - `/orgs` — organization list and creation
 - `/orgs/:orgId` — project list for an organization
 - `/orgs/:orgId/dashboard` — organization dashboard
+- `/orgs/:orgId/links` — organization short links
 - `/orgs/:orgId/projects/:projectId` — project expenses
 - `/shared` — public read-only view opened by a share link
 - `/` — redirects to `/orgs` when authenticated, otherwise `/login`

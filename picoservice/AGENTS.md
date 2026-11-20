@@ -6,8 +6,8 @@
 - No API Gateway. CORS is handled by the shared `middleware.CORS` layer in the
   chi router; the Function URL has no CORS configuration.
 - MongoDB Atlas via the official `go.mongodb.org/mongo-driver/v2` driver.
-- MongoDB-backed APIs for users, organizations, memberships, projects, and
-  expenses.
+- MongoDB-backed APIs for users, organizations, memberships, projects,
+  expenses, and short links.
 - Projects own a currency; expenses inherit it at creation. Projects also carry
   up to 20 tags (32 bytes each) and can be filtered by any matching tag.
 - Organizations carry up to 20 tags (32 bytes each), filter with any-match
@@ -21,6 +21,12 @@
   `GET /expenses/summary` accepts the same filters and returns totals grouped by
   project and currency over the full filtered set. `netTotal` is
   `totalCredit - totalDebit`, and amounts are never added across currencies.
+- Short links are organization-scoped records in `links`. Management uses the
+  `link` feature (`link.viewer`/`link.editor`/`link.admin`); `GET /s/{slug}` is
+  public, returns a `302` redirect with `Cache-Control: no-store`, and has no
+  click tracking. Aliases are globally unique and immutable; delete is a
+  tombstone that keeps the alias reserved. The redirect is resolved without
+  organization context.
 - pico-ui serves a public `/api-docs` guide mirroring this API contract. Keep
   API changes reflected in `../pico-ui/src/features/api-docs/content.ts`.
 - Health API: `GET /ping` returns `200 {"message":"pong"}`; `HEAD /ping`

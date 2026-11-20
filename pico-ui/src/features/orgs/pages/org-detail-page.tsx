@@ -6,6 +6,7 @@ import {
   CircleAlertIcon,
   FolderIcon,
   LayoutDashboardIcon,
+  LinkIcon,
   PlusIcon,
   TagsIcon,
 } from "lucide-react"
@@ -39,6 +40,7 @@ import { ShareDialog } from "@/features/sharing/components/share-dialog"
 import { getShareStatus } from "@/features/sharing/api"
 import { usePageTitle } from "@/hooks/use-page-title"
 import { ApiError } from "@/lib/api-client"
+import { hasFeatureRole } from "@/lib/roles"
 
 type LoadStatus = "loading" | "ready" | "error"
 
@@ -71,8 +73,8 @@ function OrgDetailView({ session }: { session: Session }) {
   const roles = session.orgs?.[orgId] ?? []
   const isOwner = org?.userId === session.userId
   const canShare = isOwner || roles.includes("share.admin")
-  const canViewShares =
-    isOwner || roles.includes("share.viewer") || roles.includes("share.admin")
+  const canViewShares = isOwner || hasFeatureRole(roles, "share")
+  const canViewLinks = isOwner || hasFeatureRole(roles, "link")
   const projectIDs = projects.map((project) => project.id)
   const shareStatusQuery = useQuery({
     queryKey: queryKeys.shareStatus(orgId, "project", projectIDs),
@@ -273,6 +275,19 @@ function OrgDetailView({ session }: { session: Session }) {
                   </div>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
+                  {canViewLinks ? (
+                    <Link
+                      to={`/orgs/${orgId}/links`}
+                      className={buttonVariants({
+                        variant: "outline",
+                        className:
+                          "h-10 px-4 text-xs font-semibold tracking-[0.14em] uppercase",
+                      })}
+                    >
+                      <LinkIcon data-icon="inline-start" />
+                      Links
+                    </Link>
+                  ) : null}
                   <Link
                     to={`/orgs/${orgId}/dashboard`}
                     className={buttonVariants({
