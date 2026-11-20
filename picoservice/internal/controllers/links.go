@@ -180,8 +180,8 @@ func (c *LinkController) Delete(w http.ResponseWriter, r *http.Request) {
 
 // Redirect handles the public GET /s/{slug} redirect.
 func (c *LinkController) Redirect(w http.ResponseWriter, r *http.Request) {
-	// Browsers must not cache redirects. Bunny caches at the edge with its own
-	// TTL and the controller purges the exact URL after every mutation.
+	// Errors must never be cached. A successful redirect overrides this header
+	// with the edge-cacheable policy below.
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Robots-Tag", "noindex")
 
@@ -195,6 +195,7 @@ func (c *LinkController) Redirect(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	w.Header().Set("Cache-Control", shortLinkCacheControl)
 	w.Header().Set(httpx.HeaderLocation, link.URL)
 	w.WriteHeader(http.StatusFound)
 }
@@ -249,7 +250,10 @@ type linkListResponse struct {
 
 const (
 	shortLinkPathPrefix = "/s/"
-	purgeTimeout        = 2 * time.Second
+	// Browsers revalidate immediately; shared caches such as Bunny may keep
+	// the redirect for 10 minutes. Mutations purge the exact URL.
+	shortLinkCacheControl = "public, max-age=0, s-maxage=600"
+	purgeTimeout          = 2 * time.Second
 )
 
 func (c *LinkController) linkResponse(r *http.Request, link entities.Link) linkResponse {

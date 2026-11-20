@@ -320,10 +320,11 @@ than per organization. An omitted alias is generated from a 32-character
 lowercase alphabet with seven characters. Custom aliases are 3–32 characters,
 lowercase, and immutable. Only `http` and `https` destinations are accepted.
 
-The redirect response sets `Cache-Control: no-store` for browsers and
-`X-Robots-Tag: noindex`. Missing, disabled, and deleted links return
-`404 {"error":"link not found"}`. There is no click tracking and no write on
-redirect.
+The redirect response sets `Cache-Control: public, max-age=0, s-maxage=600`
+and `X-Robots-Tag: noindex`. Browsers revalidate immediately; Bunny caches the
+edge response for 10 minutes when it follows origin cache headers. Missing,
+disabled, and deleted links return `404 {"error":"link not found"}` with
+`Cache-Control: no-store`. There is no click tracking and no write on redirect.
 
 `SHORT_BASE_URL` supplies the public origin used in `shortUrl`; if unset, the
 request origin is used for local development. `BUNNY_API_KEY` enables a
@@ -658,10 +659,11 @@ small adapter in `internal/lambdahttp` keeps buffered mode, supports
 ### Bunny CDN in front of public short links
 
 `https://link.uppixl.com/s/{slug}` is a Bunny pull zone whose origin is the
-Lambda Function URL. The application keeps `Cache-Control: no-store` so
-browsers never cache a redirect; Bunny caches at the edge with a 10-minute TTL.
-After create, update, disable/enable, and delete, the controller purges the exact
-URL through `internal/cdn` with `async=false`. Purge failures are logged and do
+Lambda Function URL. The redirect sends
+`Cache-Control: public, max-age=0, s-maxage=600`: browsers revalidate
+immediately, and Bunny follows origin headers to cache the edge response for
+10 minutes. After create, update, disable/enable, and delete, the controller
+purges the exact URL through `internal/cdn` with `async=false`. Purge failures are logged and do
 not fail the mutation, so a failed purge can leave a stale redirect until the
 edge TTL expires. `SHORT_BASE_URL` and `BUNNY_API_KEY` are set together or not
 at all.

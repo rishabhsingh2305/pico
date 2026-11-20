@@ -216,7 +216,7 @@ The redirect is public and returns:
 ```http
 HTTP/1.1 302 Found
 Location: https://example.com/page
-Cache-Control: no-store
+Cache-Control: public, max-age=0, s-maxage=600
 X-Robots-Tag: noindex
 ```
 
@@ -228,10 +228,11 @@ used, which is convenient for local development.
 When `SHORT_BASE_URL` and `BUNNY_API_KEY` are set, successful create, update,
 disable/enable, and delete requests purge the exact public URL through the
 Bunny.net API. The purge is best-effort: a Bunny failure is logged and the link
-mutation still succeeds. The redirect itself sends `Cache-Control: no-store`
-for browsers, while Bunny caches the edge response for the TTL configured in the
-pull zone (10 minutes in the current deployment). Disable Bunny error caching so
-a `404` is not cached before a link exists.
+mutation still succeeds. The redirect sends
+`Cache-Control: public, max-age=0, s-maxage=600`: browsers revalidate
+immediately, while Bunny caches the edge response for 10 minutes when it follows
+origin headers. Disable Bunny error caching so a `404` is not cached before a
+link exists.
 
 The `link` feature governs management:
 

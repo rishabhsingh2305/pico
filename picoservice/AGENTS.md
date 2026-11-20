@@ -23,8 +23,10 @@
   `totalCredit - totalDebit`, and amounts are never added across currencies.
 - Short links are organization-scoped records in `links`. Management uses the
   `link` feature (`link.viewer`/`link.editor`/`link.admin`); `GET /s/{slug}` is
-  public, returns a `302` redirect with `Cache-Control: no-store`, and has no
-  click tracking. Aliases are globally unique and immutable; delete is a
+  public, returns a `302` redirect with
+  `Cache-Control: public, max-age=0, s-maxage=600`, and has no click tracking.
+  Browsers revalidate immediately; Bunny caches for 10 minutes and the exact URL
+  is purged after mutations. Aliases are globally unique and immutable; delete is a
   tombstone that keeps the alias reserved. The redirect is resolved without
   organization context.
 - `SHORT_BASE_URL` builds public `shortUrl` values. `BUNNY_API_KEY` enables

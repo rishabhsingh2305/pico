@@ -27,7 +27,7 @@ func TestPublicShortLinkRedirect(t *testing.T) {
 	if got, want := rec.Header().Get("Location"), "https://example.com/page"; got != want {
 		t.Fatalf("expected Location %q, got %q", want, got)
 	}
-	if got, want := rec.Header().Get("Cache-Control"), "no-store"; got != want {
+	if got, want := rec.Header().Get("Cache-Control"), "public, max-age=0, s-maxage=600"; got != want {
 		t.Fatalf("expected Cache-Control %q, got %q", want, got)
 	}
 	if got, want := rec.Header().Get("X-Robots-Tag"), "noindex"; got != want {

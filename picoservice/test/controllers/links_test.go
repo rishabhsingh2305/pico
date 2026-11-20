@@ -316,7 +316,7 @@ func TestLinkRedirect(t *testing.T) {
 	if got, want := rec.Header().Get(httpx.HeaderLocation), "https://example.com/page?q=1"; got != want {
 		t.Fatalf("expected Location %q, got %q", want, got)
 	}
-	if got, want := rec.Header().Get("Cache-Control"), "no-store"; got != want {
+	if got, want := rec.Header().Get("Cache-Control"), "public, max-age=0, s-maxage=600"; got != want {
 		t.Fatalf("expected Cache-Control %q, got %q", want, got)
 	}
 	if got, want := rec.Header().Get("X-Robots-Tag"), "noindex"; got != want {
@@ -359,6 +359,9 @@ func TestLinkRedirectInternalError(t *testing.T) {
 
 	newLinkController(service).Redirect(rec, req)
 
+	if got, want := rec.Header().Get("Cache-Control"), "no-store"; got != want {
+		t.Fatalf("expected Cache-Control %q, got %q", want, got)
+	}
 	assertJSONError(t, rec, http.StatusInternalServerError, "internal server error")
 }
 

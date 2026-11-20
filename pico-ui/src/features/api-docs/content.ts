@@ -1082,7 +1082,7 @@ export const API_SECTIONS: ApiSection[] = [
         response: {
           status: 302,
           description:
-            "Redirects to the destination. Cache-Control: no-store and X-Robots-Tag: noindex are set.",
+            "Redirects to the destination. Cache-Control: public, max-age=0, s-maxage=600 and X-Robots-Tag: noindex are set.",
         },
         errors: ["404 — link is missing, disabled, or deleted"],
         notes: [
