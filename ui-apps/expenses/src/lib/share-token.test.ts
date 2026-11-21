@@ -6,7 +6,6 @@ import {
   getShareToken,
   parseShareLink,
   setShareToken,
-  stripShareFromURL,
 } from "@/lib/share-token"
 
 afterEach(() => {
@@ -31,7 +30,7 @@ describe("share token", () => {
     })
   })
 
-  it("acquires the link, stores the token, and strips the fragment", () => {
+  it("acquires the link, stores the token, and keeps the fragment", () => {
     window.history.replaceState(
       null,
       "",
@@ -42,10 +41,10 @@ describe("share token", () => {
 
     expect(link?.token).toBe("raw-token")
     expect(getShareToken()).toBe("raw-token")
-    expect(window.location.hash).toBe("")
+    expect(window.location.hash).toBe("#share=raw-token")
   })
 
-  it("falls back to session storage after the fragment is removed", () => {
+  it("falls back to session storage when the fragment is missing", () => {
     window.history.replaceState(
       null,
       "",
@@ -60,15 +59,6 @@ describe("share token", () => {
       resourceId: "project-1",
       projectId: undefined,
     })
-  })
-
-  it("strips only the share value from the fragment", () => {
-    window.history.replaceState(null, "", "/shared?orgId=org-1#share=raw-token")
-
-    stripShareFromURL()
-
-    expect(window.location.hash).toBe("")
-    expect(window.location.search).toBe("?orgId=org-1")
   })
 
   it("returns null when there is no token", () => {

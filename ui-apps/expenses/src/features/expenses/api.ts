@@ -44,6 +44,7 @@ export type ListExpensesOptions = {
   to?: string
   tags?: string[]
   limit?: number
+  offset?: number
   projectIds?: string[]
 }
 
@@ -84,6 +85,9 @@ export function listExpenses(
 ): Promise<ExpenseListResponse> {
   const query = expenseQuery(orgId, projectId, options)
   query.set("limit", String(options.limit ?? EXPENSE_LIST_LIMIT))
+  if (options.offset !== undefined) {
+    query.set("offset", String(options.offset))
+  }
   return requestJSON<ExpenseListResponse>(`/expenses?${query}`, {
     method: "GET",
   })

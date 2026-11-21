@@ -36,23 +36,8 @@ export function acquireShareLink(): ShareLink | null {
   const link = parseShareLink()
   if (link) {
     setShareToken(link.token)
-    stripShareFromURL()
   }
   return link
-}
-
-export function stripShareFromURL(): void {
-  if (!window.location.hash) {
-    return
-  }
-  const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""))
-  hash.delete("share")
-  const nextHash = hash.toString()
-  window.history.replaceState(
-    null,
-    "",
-    `${window.location.pathname}${window.location.search}${nextHash ? `#${nextHash}` : ""}`
-  )
 }
 
 export function getShareToken(): string | null {

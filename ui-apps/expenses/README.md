@@ -50,8 +50,18 @@ the target with `VITE_API_PROXY_TARGET`.
 - Links use 7, 30, or 365-day expiry presets and can be revoked from the same
   dialog. Public badges appear on shared categories.
 - A link opens `/shared` with an opaque token in the URL fragment
-  (`#share=...`). The page stores the token in `sessionStorage`, strips it from
-  the URL, and sends `Authorization: Share` on the existing read routes.
+  (`#share=...`). The page keeps the token in the URL, stores a copy in
+  `sessionStorage`, and sends `Authorization: Share` on the existing read
+  routes. Refreshing or copying the URL keeps the link usable.
+- The shared summary shows net balance, credit (money in), and debit (money out)
+  per currency. Rows from categories that share a currency are combined, and
+  negative balances keep their sign instead of being displayed as absolute
+  values.
+- Single-expense links show the expense's credit or debit amount in the same
+  summary layout.
+- Multi-expense links load 20 expenses at a time. Scrolling near the bottom, or
+  pressing **Load more**, appends the next page. The summary stays based on the
+  full filtered set rather than the visible page.
 - `/shared` sits outside the session guard and the personal Expenses org
   provider, so recipients do not need an account.
 
