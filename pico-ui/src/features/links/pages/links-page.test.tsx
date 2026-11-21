@@ -71,6 +71,21 @@ function stubApi(initial: ShortLink[] = []) {
       return jsonResponse(org)
     }
 
+    if (
+      method === "GET" &&
+      url.pathname === "/api/orgs/org-1/analytics/links"
+    ) {
+      const ids = (url.searchParams.get("ids") ?? "")
+        .split(",")
+        .filter((id) => id !== "")
+      return jsonResponse({
+        items: ids.map((id) => ({
+          linkId: id,
+          clicks: id === "link-1" ? 42 : 0,
+        })),
+      })
+    }
+
     if (method === "GET" && url.pathname === "/api/orgs/org-1/links") {
       const query = (url.searchParams.get("q") ?? "").toLowerCase()
       const tags = (url.searchParams.get("tags") ?? "")
@@ -195,6 +210,23 @@ describe("LinksPage", () => {
     expect(screen.getByText("Active")).toBeInTheDocument()
     expect(screen.getByText("Disabled")).toBeInTheDocument()
     expect(screen.getByText("marketing")).toBeInTheDocument()
+  })
+
+  it("shows clicks for the visible links in one request", async () => {
+    const { fetchMock } = stubApi([launch, docs])
+
+    renderLinksPage()
+
+    await screen.findByText("Launch page")
+    expect(await screen.findByText("42")).toBeInTheDocument()
+    expect(screen.getByText("Clicks (30d)")).toBeInTheDocument()
+    expect(
+      fetchMock.mock.calls.filter(([url]) =>
+        String(url).includes("/api/orgs/org-1/analytics/links")
+      )
+    ).toHaveLength(1)
+    const docsRow = screen.getByRole("row", { name: /Docs/ })
+    expect(within(docsRow).getByText("0")).toBeInTheDocument()
   })
 
   it("creates a link with a custom alias", async () => {

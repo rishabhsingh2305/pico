@@ -1,4 +1,4 @@
-.PHONY: build test test-integration fmt fmt-check vet check tidy run invoke deploy ship url indexes clean
+.PHONY: build test test-integration fmt fmt-check vet check tidy run analytics invoke deploy ship url indexes clean
 
 # Load local development configuration for selected commands. Deployment stays
 # explicit so local .env values cannot be deployed accidentally.
@@ -51,6 +51,9 @@ tidy:
 run:
 	@$(LOAD_ENV) go run ./cmd/server
 
+analytics:
+	@$(LOAD_ENV) go run ./cmd/analytics
+
 invoke:
 	@$(LOAD_ENV) \
 	test -n "$$MONGODB_URI" || (echo "MONGODB_URI is required"; exit 1); \
@@ -62,7 +65,7 @@ invoke:
 		test -n "$$SHORT_BASE_URL" || (echo "SHORT_BASE_URL is required when BUNNY_API_KEY is set"; exit 1); \
 		test -n "$$BUNNY_API_KEY" || (echo "BUNNY_API_KEY is required when SHORT_BASE_URL is set"; exit 1); \
 	fi; \
-	params="MongoDBURI=$$MONGODB_URI JwtSecret=$$JWT_SECRET PublicBaseURL=$$PUBLIC_BASE_URL EmailFrom=$$EMAIL_FROM SmtpAddr=$$SMTP_ADDR"; \
+	params="MongoDBURI=$$MONGODB_URI MongoDBDatabase=$$MONGODB_DATABASE JwtSecret=$$JWT_SECRET PublicBaseURL=$$PUBLIC_BASE_URL EmailFrom=$$EMAIL_FROM SmtpAddr=$$SMTP_ADDR"; \
 	if [ -n "$$CORS_ALLOWED_ORIGINS" ]; then params="$$params CorsAllowedOrigins=$$CORS_ALLOWED_ORIGINS"; fi; \
 	if [ -n "$$SMTP_USERNAME" ]; then params="$$params SmtpUsername=$$SMTP_USERNAME SmtpPassword=$$SMTP_PASSWORD"; fi; \
 	if [ -n "$$SHORT_BASE_URL" ]; then params="$$params ShortBaseURL=$$SHORT_BASE_URL BunnyApiKey=$$BUNNY_API_KEY"; fi; \
@@ -70,18 +73,19 @@ invoke:
 
 deploy:
 	@test -n "$$MONGODB_URI" || (echo "MONGODB_URI is required"; exit 1)
+	@test -n "$$MONGODB_DATABASE" || (echo "MONGODB_DATABASE is required"; exit 1)
 	@test -n "$$JWT_SECRET" || (echo "JWT_SECRET is required"; exit 1)
 	@test -n "$$PUBLIC_BASE_URL" || (echo "PUBLIC_BASE_URL is required"; exit 1)
 	@test -n "$$EMAIL_FROM" || (echo "EMAIL_FROM is required"; exit 1)
 	@test -n "$$SMTP_ADDR" || (echo "SMTP_ADDR is required"; exit 1)
+	@if [ -n "$$SMTP_USERNAME" ] && [ -z "$$SMTP_PASSWORD" ] || [ -z "$$SMTP_USERNAME" ] && [ -n "$$SMTP_PASSWORD" ]; then \
+		echo "Set both SMTP_USERNAME and SMTP_PASSWORD, or neither."; exit 1; \
+	fi
 	@if [ -n "$$SHORT_BASE_URL" ] || [ -n "$$BUNNY_API_KEY" ]; then \
 		test -n "$$SHORT_BASE_URL" || (echo "SHORT_BASE_URL is required when BUNNY_API_KEY is set"; exit 1); \
 		test -n "$$BUNNY_API_KEY" || (echo "BUNNY_API_KEY is required when SHORT_BASE_URL is set"; exit 1); \
 	fi
-	@params="MongoDBURI=$$MONGODB_URI JwtSecret=$$JWT_SECRET PublicBaseURL=$$PUBLIC_BASE_URL EmailFrom=$$EMAIL_FROM SmtpAddr=$$SMTP_ADDR"; \
-	if [ -n "$$CORS_ALLOWED_ORIGINS" ]; then params="$$params CorsAllowedOrigins=$$CORS_ALLOWED_ORIGINS"; fi; \
-	if [ -n "$$SMTP_USERNAME" ]; then params="$$params SmtpUsername=$$SMTP_USERNAME SmtpPassword=$$SMTP_PASSWORD"; fi; \
-	if [ -n "$$SHORT_BASE_URL" ]; then params="$$params ShortBaseURL=$$SHORT_BASE_URL BunnyApiKey=$$BUNNY_API_KEY"; fi; \
+	@params="MongoDBURI=$$MONGODB_URI MongoDBDatabase=$$MONGODB_DATABASE JwtSecret=$$JWT_SECRET PublicBaseURL=$$PUBLIC_BASE_URL EmailFrom=$$EMAIL_FROM SmtpAddr=$$SMTP_ADDR SmtpUsername=$$SMTP_USERNAME SmtpPassword=$$SMTP_PASSWORD CorsAllowedOrigins=$$CORS_ALLOWED_ORIGINS ShortBaseURL=$$SHORT_BASE_URL BunnyApiKey=$$BUNNY_API_KEY BunnyPullZoneId=$$BUNNY_PULL_ZONE_ID"; \
 	sam deploy --parameter-overrides "$$params"
 
 ship:

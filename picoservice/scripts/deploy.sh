@@ -117,6 +117,11 @@ if [[ -n "${SHORT_BASE_URL:-}" || -n "${BUNNY_API_KEY:-}" ]]; then
   require_var BUNNY_API_KEY "$APP_ENV_FILE"
 fi
 
+if [[ -n "${BUNNY_PULL_ZONE_ID:-}" ]]; then
+  require_var BUNNY_API_KEY "$APP_ENV_FILE"
+  require_var SHORT_BASE_URL "$APP_ENV_FILE"
+fi
+
 require_var AWS_REGION "$AWS_ENV_FILE"
 STACK_NAME="${STACK_NAME:-picoservice}"
 
@@ -168,6 +173,25 @@ if ! identity="$(aws sts get-caller-identity --query 'Arn' --output text 2>/dev/
   exit 1
 fi
 echo "Deploying as: $identity"
+echo "Application env: $APP_ENV_FILE"
+echo "Deployment env: $AWS_ENV_FILE"
+echo "Stack: $STACK_NAME"
+echo "MongoDB database: $MONGODB_DATABASE"
+if [[ -n "${SMTP_USERNAME:-}" ]]; then
+  echo "SMTP auth: configured"
+else
+  echo "SMTP auth: disabled"
+fi
+if [[ -n "${EMAIL_FROM:-}" ]]; then
+  echo "Email sender: configured"
+else
+  echo "Email sender: missing"
+fi
+if [[ -n "${BUNNY_PULL_ZONE_ID:-}" ]]; then
+  echo "Link analytics: enabled"
+else
+  echo "Link analytics: disabled"
+fi
 
 if [[ -n "${S3_BUCKET:-}" ]]; then
   if ! aws s3api head-bucket --bucket "$S3_BUCKET" --region "$AWS_REGION" >/dev/null 2>&1; then
@@ -207,31 +231,68 @@ fi
 echo "Building Lambda..."
 sam build
 
+lambda_env_value() {
+  local function_arn="$1"
+  local key="$2"
+  aws lambda get-function-configuration \
+    --function-name "$function_arn" \
+    --region "$AWS_REGION" \
+    --query "Environment.Variables.$key" \
+    --output text
+}
+
+verify_lambda_env() {
+  local function_arn="$1"
+  local key="$2"
+  local expected="${3:-}"
+  local value
+
+  if ! value="$(lambda_env_value "$function_arn" "$key" 2>/dev/null)"; then
+    echo "Could not read Lambda env $key." >&2
+    return 1
+  fi
+  if [[ -z "$value" || "$value" == "None" ]]; then
+    echo "Lambda env $key is empty." >&2
+    return 1
+  fi
+  if [[ -n "$expected" && "$value" != "$expected" ]]; then
+    echo "Lambda env $key does not match the selected application env." >&2
+    return 1
+  fi
+}
+
+verify_lambda_env_present() {
+  verify_lambda_env "$1" "$2"
+}
+
+stack_output() {
+  aws cloudformation describe-stacks \
+    --stack-name "$STACK_NAME" \
+    --region "$AWS_REGION" \
+    --query "Stacks[0].Outputs[?OutputKey=='$1'].OutputValue" \
+    --output text
+}
+
 deploy_args=(
   --stack-name "$STACK_NAME"
   --region "$AWS_REGION"
   --parameter-overrides
   "MongoDBURI=$MONGODB_URI"
+  "MongoDBDatabase=$MONGODB_DATABASE"
   "JwtSecret=$JWT_SECRET"
   "PublicBaseURL=$PUBLIC_BASE_URL"
   "EmailFrom=$EMAIL_FROM"
   "SmtpAddr=$SMTP_ADDR"
+  "SmtpUsername=${SMTP_USERNAME:-}"
+  "SmtpPassword=${SMTP_PASSWORD:-}"
+  "CorsAllowedOrigins=${CORS_ALLOWED_ORIGINS:-}"
+  "ShortBaseURL=${SHORT_BASE_URL:-}"
+  "BunnyApiKey=${BUNNY_API_KEY:-}"
+  "BunnyPullZoneId=${BUNNY_PULL_ZONE_ID:-}"
 )
 
 if [[ -n "${S3_BUCKET:-}" ]]; then
   deploy_args+=(--s3-bucket "$S3_BUCKET" --no-resolve-s3)
-fi
-
-if [[ -n "${SMTP_USERNAME:-}" ]]; then
-  deploy_args+=("SmtpUsername=$SMTP_USERNAME" "SmtpPassword=$SMTP_PASSWORD")
-fi
-
-if [[ -n "${CORS_ALLOWED_ORIGINS:-}" ]]; then
-  deploy_args+=("CorsAllowedOrigins=$CORS_ALLOWED_ORIGINS")
-fi
-
-if [[ -n "${SHORT_BASE_URL:-}" ]]; then
-  deploy_args+=("ShortBaseURL=$SHORT_BASE_URL" "BunnyApiKey=$BUNNY_API_KEY")
 fi
 
 if ((ASSUME_YES)); then
@@ -241,6 +302,35 @@ deploy_args+=(--no-fail-on-empty-changeset)
 
 echo "Deploying stack $STACK_NAME..."
 sam deploy "${deploy_args[@]}"
+
+echo "Verifying Lambda environment..."
+API_FUNCTION_ARN="$(stack_output ApiFunction)"
+if [[ -z "$API_FUNCTION_ARN" || "$API_FUNCTION_ARN" == "None" ]]; then
+  echo "ApiFunction output is missing from stack $STACK_NAME." >&2
+  exit 1
+fi
+verify_lambda_env "$API_FUNCTION_ARN" "MONGODB_DATABASE" "$MONGODB_DATABASE"
+verify_lambda_env_present "$API_FUNCTION_ARN" "EMAIL_FROM"
+verify_lambda_env_present "$API_FUNCTION_ARN" "SMTP_ADDR"
+if [[ -n "${SMTP_USERNAME:-}" ]]; then
+  verify_lambda_env_present "$API_FUNCTION_ARN" "SMTP_USERNAME"
+  verify_lambda_env_present "$API_FUNCTION_ARN" "SMTP_PASSWORD"
+fi
+if [[ -n "${SHORT_BASE_URL:-}" ]]; then
+  verify_lambda_env_present "$API_FUNCTION_ARN" "SHORT_BASE_URL"
+  verify_lambda_env_present "$API_FUNCTION_ARN" "BUNNY_API_KEY"
+fi
+
+if [[ -n "${BUNNY_PULL_ZONE_ID:-}" ]]; then
+  ANALYTICS_FUNCTION_ARN="$(stack_output AnalyticsFunction)"
+  if [[ -z "$ANALYTICS_FUNCTION_ARN" || "$ANALYTICS_FUNCTION_ARN" == "None" ]]; then
+    echo "AnalyticsFunction output is missing from stack $STACK_NAME." >&2
+    exit 1
+  fi
+  verify_lambda_env "$ANALYTICS_FUNCTION_ARN" "MONGODB_DATABASE" "$MONGODB_DATABASE"
+  verify_lambda_env "$ANALYTICS_FUNCTION_ARN" "BUNNY_PULL_ZONE_ID" "$BUNNY_PULL_ZONE_ID"
+  verify_lambda_env_present "$ANALYTICS_FUNCTION_ARN" "SHORT_BASE_URL"
+fi
 
 if ((SKIP_INDEXES)); then
   echo "Skipping MongoDB indexes."

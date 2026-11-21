@@ -967,6 +967,56 @@ export const API_SECTIONS: ApiSection[] = [
         ],
       },
       {
+        id: "links-stats",
+        method: "GET",
+        path: "/orgs/{orgID}/analytics/links?orgId=...&ids=...&from=...&to=...",
+        title: "Get link click stats",
+        summary:
+          "Returns click totals for up to 100 links. from and to default to the last 30 days. Requires links.stats, granted to link.viewer, link.editor, and link.admin.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [
+          orgIdParam,
+          {
+            name: "ids",
+            required: true,
+            description:
+              "Comma-separated link IDs, maximum 100. Duplicate IDs are ignored.",
+          },
+          {
+            name: "from",
+            required: false,
+            description:
+              "Inclusive RFC 3339 start timestamp. Defaults to 30 days ago. Maximum range is 365 days.",
+          },
+          {
+            name: "to",
+            required: false,
+            description: "Exclusive RFC 3339 end timestamp. Defaults to now.",
+          },
+        ],
+        response: {
+          status: 200,
+          description:
+            "Click totals for links with data. Links with no rows are zero.",
+          body: `{\n  "items": [\n    {\n      "linkId": "64f1a2b3c4d5e6f7890a1234",\n      "clicks": 42\n    }\n  ]\n}`,
+        },
+        errors: [
+          "400 — missing ids, too many ids, or invalid range",
+          "403 — missing links.stats",
+        ],
+        notes: [
+          "The API sums hourly counts; it does not return raw request logs.",
+          "Clients should render missing link IDs as 0.",
+        ],
+      },
+      {
         id: "links-get",
         method: "GET",
         path: "/orgs/{orgID}/links/{linkID}?orgId=...",

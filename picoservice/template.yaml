@@ -3,13 +3,18 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   picoservice
 
-  A single Go Lambda behind a public Function URL, routed with chi.
+  A Go API Lambda behind a public Function URL, plus a scheduled link analytics
+  Lambda, both built from the same binary.
 
 Parameters:
   MongoDBURI:
     Type: String
     NoEcho: true
     Description: MongoDB Atlas connection string.
+  MongoDBDatabase:
+    Type: String
+    Default: picoservice
+    Description: MongoDB database name.
   JwtSecret:
     Type: String
     NoEcho: true
@@ -26,7 +31,11 @@ Parameters:
     Type: String
     NoEcho: true
     Default: ""
-    Description: Bunny.net API key used to purge cached short-link redirects. Must be set with ShortBaseURL.
+    Description: Bunny.net API key used to purge cached short-link redirects and read analytics logs. Must be set with ShortBaseURL.
+  BunnyPullZoneId:
+    Type: String
+    Default: ""
+    Description: Bunny pull zone ID used by the link analytics job. Leave empty to disable the scheduled job.
   CorsAllowedOrigins:
     Type: String
     Default: ""
@@ -48,6 +57,12 @@ Parameters:
     Default: ""
     Description: Optional SMTP password.
 
+Conditions:
+  AnalyticsEnabled: !And
+    - !Not [!Equals [!Ref BunnyPullZoneId, ""]]
+    - !Not [!Equals [!Ref BunnyApiKey, ""]]
+    - !Not [!Equals [!Ref ShortBaseURL, ""]]
+
 Globals:
   Function:
     Timeout: 10
@@ -67,7 +82,7 @@ Resources:
       Environment:
         Variables:
           MONGODB_URI: !Ref MongoDBURI
-          MONGODB_DATABASE: picoservice
+          MONGODB_DATABASE: !Ref MongoDBDatabase
           JWT_SECRET: !Ref JwtSecret
           PUBLIC_BASE_URL: !Ref PublicBaseURL
           SHORT_BASE_URL: !Ref ShortBaseURL
@@ -81,6 +96,30 @@ Resources:
         AuthType: NONE
         InvokeMode: BUFFERED
 
+  AnalyticsFunction:
+    Type: AWS::Serverless::Function
+    Condition: AnalyticsEnabled
+    Metadata:
+      BuildMethod: go1.x
+    Properties:
+      CodeUri: ./
+      Handler: bootstrap
+      Timeout: 300
+      MemorySize: 512
+      Environment:
+        Variables:
+          APP_MODE: analytics
+          MONGODB_URI: !Ref MongoDBURI
+          MONGODB_DATABASE: !Ref MongoDBDatabase
+          BUNNY_API_KEY: !Ref BunnyApiKey
+          BUNNY_PULL_ZONE_ID: !Ref BunnyPullZoneId
+          SHORT_BASE_URL: !Ref ShortBaseURL
+      Events:
+        Schedule:
+          Type: Schedule
+          Properties:
+            Schedule: rate(15 minutes)
+
 Outputs:
   FunctionUrl:
     Description: Public Lambda Function URL
@@ -91,3 +130,7 @@ Outputs:
   ApiFunctionIamRole:
     Description: Implicit IAM role ARN
     Value: !GetAtt ApiFunctionRole.Arn
+  AnalyticsFunction:
+    Condition: AnalyticsEnabled
+    Description: Scheduled link analytics Lambda ARN
+    Value: !GetAtt AnalyticsFunction.Arn

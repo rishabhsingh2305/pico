@@ -33,6 +33,7 @@ import {
   updateLink,
 } from "@/features/links/api"
 import { linkErrorMessage } from "@/features/links/error-message"
+import { useLinkStats } from "@/features/links/hooks/use-link-stats"
 import type { LinkFilters, LinkPage, ShortLink } from "@/features/links/types"
 import { useDebouncedValue } from "@/hooks/use-debounced-value"
 import { usePageTitle } from "@/hooks/use-page-title"
@@ -94,6 +95,12 @@ function LinksView({ session }: { session: Session }) {
         : "ready"
   const error = linksQuery.isError ? linkErrorMessage(linksQuery.error) : ""
   const hasFilters = query.trim() !== "" || tags.length > 0
+  const stats = useLinkStats(
+    session.userId,
+    orgId,
+    page.items.map((link) => link.id),
+    canView && status === "ready"
+  )
 
   usePageTitle("Links · Pico")
 
@@ -335,6 +342,9 @@ function LinksView({ session }: { session: Session }) {
             <>
               <LinkList
                 links={page.items}
+                clicksByLinkId={stats.clicksByLinkId}
+                statsLoading={stats.isLoading}
+                statsError={stats.isError}
                 canWrite={canWrite}
                 canDelete={canDelete}
                 busyId={busyId}

@@ -16,7 +16,10 @@ import (
 	"picoservice/internal/entities"
 )
 
-var integrationCollections = []string{"users", "orgs", "memberships", "projects", "expenses", "links", "credentials"}
+var integrationCollections = []string{
+	"users", "orgs", "memberships", "projects", "expenses", "links",
+	"credentials", "link_clicks_hourly", "link_analytics_state",
+}
 
 func TestStoresIntegration(t *testing.T) {
 	uri := os.Getenv("MONGODB_TEST_URI")
@@ -445,6 +448,63 @@ func TestStoresIntegration(t *testing.T) {
 		UpdatedAt: now,
 	}); !errors.Is(err, entities.ErrSlugTaken) {
 		t.Fatalf("expected deleted slug to stay reserved, got %v", err)
+	}
+
+	historicalLinks, err := linkStore.FindBySlugs(ctx, []string{"docs", "missing"})
+	if err != nil {
+		t.Fatalf("find deleted link by slug: %v", err)
+	}
+	if len(historicalLinks) != 1 || historicalLinks[0].ID != link.ID {
+		t.Fatalf("expected deleted link for analytics, got %+v", historicalLinks)
+	}
+
+	analyticsStore := mongodb.NewLinkAnalyticsStore(client)
+	hour := now.Truncate(time.Hour)
+	if err := analyticsStore.UpsertHourly(ctx, []dao.LinkClickCount{
+		{OrgID: org.ID, LinkID: link.ID, HourStart: hour, Count: 3},
+		{OrgID: org.ID, LinkID: link.ID, HourStart: hour, Count: 2},
+		{OrgID: org.ID, LinkID: link.ID, HourStart: hour.Add(time.Hour), Count: 4},
+	}); err != nil {
+		t.Fatalf("upsert link clicks: %v", err)
+	}
+
+	totals, err := analyticsStore.SumByLinks(ctx, dao.LinkStatsFilter{
+		OrgID:   org.ID,
+		LinkIDs: []string{link.ID},
+		From:    hour,
+		To:      hour.Add(2 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("sum link clicks: %v", err)
+	}
+	if len(totals) != 1 || totals[0].Clicks != 7 {
+		t.Fatalf("expected 7 clicks, got %+v", totals)
+	}
+
+	state, acquired, err := analyticsStore.Acquire(ctx, 42, now, now.Add(time.Minute), hour)
+	if err != nil {
+		t.Fatalf("acquire analytics state: %v", err)
+	}
+	if !acquired || !state.LastCompletedHour.Equal(hour) {
+		t.Fatalf("unexpected acquired state: %+v, acquired=%v", state, acquired)
+	}
+	if _, acquired, err := analyticsStore.Acquire(ctx, 42, now, now.Add(time.Minute), hour); err != nil {
+		t.Fatalf("second acquire: %v", err)
+	} else if acquired {
+		t.Fatal("expected the active lease to block a second acquire")
+	}
+	if err := analyticsStore.Advance(ctx, 42, hour.Add(time.Hour)); err != nil {
+		t.Fatalf("advance analytics state: %v", err)
+	}
+	if err := analyticsStore.Release(ctx, 42, now); err != nil {
+		t.Fatalf("release analytics state: %v", err)
+	}
+	state, acquired, err = analyticsStore.Acquire(ctx, 42, now, now.Add(time.Minute), hour)
+	if err != nil {
+		t.Fatalf("reacquire analytics state: %v", err)
+	}
+	if !acquired || !state.LastCompletedHour.Equal(hour.Add(time.Hour)) {
+		t.Fatalf("unexpected reacquired state: %+v, acquired=%v", state, acquired)
 	}
 
 	expenseStore := mongodb.NewExpenseStore(client)

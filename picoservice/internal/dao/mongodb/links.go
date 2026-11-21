@@ -23,7 +23,10 @@ type LinkStore struct {
 	collection *mongo.Collection
 }
 
-var _ dao.LinkDAO = (*LinkStore)(nil)
+var (
+	_ dao.LinkDAO       = (*LinkStore)(nil)
+	_ dao.LinkLookupDAO = (*LinkStore)(nil)
+)
 
 // NewLinkStore returns a link store backed by client.
 func NewLinkStore(client *Client) *LinkStore {
@@ -132,6 +135,34 @@ func (s *LinkStore) FindBySlug(ctx context.Context, slug string) (entities.Link,
 		return entities.Link{}, fmt.Errorf("find link by slug: %w", err)
 	}
 	return document.link(), nil
+}
+
+// FindBySlugs resolves slugs without excluding disabled or deleted links. The
+// analytics job needs historical attribution after a link is deleted.
+func (s *LinkStore) FindBySlugs(ctx context.Context, slugs []string) ([]entities.Link, error) {
+	if len(slugs) == 0 {
+		return []entities.Link{}, nil
+	}
+
+	cursor, err := s.collection.Find(ctx, bson.M{"slug": bson.M{"$in": slugs}})
+	if err != nil {
+		return nil, fmt.Errorf("find links by slugs: %w", err)
+	}
+
+	var documents []linkDocument
+	if err := cursor.All(ctx, &documents); err != nil {
+		_ = cursor.Close(ctx)
+		return nil, fmt.Errorf("decode links by slugs: %w", err)
+	}
+	if err := cursor.Close(ctx); err != nil {
+		return nil, fmt.Errorf("close link slug cursor: %w", err)
+	}
+
+	items := make([]entities.Link, 0, len(documents))
+	for _, document := range documents {
+		items = append(items, document.link())
+	}
+	return items, nil
 }
 
 // List returns links for an organization ordered by creation time. Tags use

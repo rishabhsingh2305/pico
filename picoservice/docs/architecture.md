@@ -2,12 +2,13 @@
 
 ## Overview
 
-picoservice is a single Go AWS Lambda function exposed through a public Lambda
-Function URL. There is no API Gateway. The same chi router is used by the Lambda
-handler and by the local development server. MongoDB Atlas stores users,
-organizations, memberships, projects, expenses, and short links. Expenses are
-debit or credit entries; amounts stay positive and the type carries the
-direction. Short links redirect publicly; their management is organization
+picoservice is a Go AWS Lambda API exposed through a public Lambda Function URL.
+There is no API Gateway. The same chi router is used by the Lambda handler and
+by the local development server. A second scheduled Lambda processes Bunny CDN
+logs for link click analytics. MongoDB Atlas stores users, organizations,
+memberships, projects, expenses, short links, and aggregated link clicks.
+Expenses are debit or credit entries; amounts stay positive and the type carries
+the direction. Short links redirect publicly; their management is organization
 scoped.
 
 ```text
@@ -28,16 +29,19 @@ client
 
 | Package | Responsibility | May import |
 | --- | --- | --- |
-| `main` | Lambda entrypoint; opens MongoDB, calls `app.New` | `internal/app`, `internal/lambdahttp`, `internal/dao/mongodb` |
+| `main` | Lambda entrypoint; dispatches API and analytics jobs from `APP_MODE` | `internal/app`, `internal/lambdahttp`, `internal/dao/mongodb` |
 | `cmd/server` | Local HTTP server and graceful shutdown | `internal/app`, `internal/dao/mongodb` |
 | `cmd/indexes` | Create MongoDB indexes | `internal/dao/mongodb` |
-| `internal/app` | Composition root: DAO implementations, services, policy, CDN purger, routes | `internal/authz`, `internal/cdn`, `internal/dao/mongodb`, `internal/email`, `internal/services`, `internal/routes` |
+| `cmd/analytics` | Run one link analytics ingestion pass locally or from cron | `internal/app`, `internal/dao/mongodb` |
+| `internal/app` | Composition root: DAO implementations, services, policy, CDN purger, routes, analytics job | `internal/analytics/bunny`, `internal/authz`, `internal/cdn`, `internal/dao/mongodb`, `internal/email`, `internal/services`, `internal/routes` |
 | `internal/authz` | Embedded route and feature-role policy: YAML loading, validation, permission lookup | `internal/entities`, stdlib, `gopkg.in/yaml.v3` |
 | `internal/routes` | chi setup, middleware wiring, domain subrouters, per-route `Allow` | `internal/controllers`, `internal/middleware`, `internal/authz`, `internal/httpx`, chi |
 | `internal/controllers` | HTTP parsing, status codes, request/response DTOs, response mapping | `net/http`, `context`, `internal/services`, `internal/middleware`, `internal/entities`, `internal/httpx`, `internal/validation` |
-| `internal/services` | Business rules, bcrypt, email verification, service input structs, narrow lookup interfaces | stdlib, `internal/dao`, `internal/entities`, `internal/validation`, `golang.org/x/crypto/bcrypt`, `github.com/golang-jwt/jwt/v5` |
+| `internal/services` | Business rules, bcrypt, email verification, link analytics ingestion and reads, service input structs, narrow lookup interfaces | stdlib, `internal/analytics`, `internal/dao`, `internal/entities`, `internal/validation`, `golang.org/x/crypto/bcrypt`, `github.com/golang-jwt/jwt/v5` |
 | `internal/dao` | Per-domain persistence contracts and query/update structs | `internal/entities`, stdlib |
 | `internal/dao/mongodb` | MongoDB client lifecycle, stores, index creation, readiness ping | MongoDB driver, `internal/dao`, `internal/entities`, stdlib |
+| `internal/analytics` | Pure CDN log types, request keys, and short-link path parsing | stdlib |
+| `internal/analytics/bunny` | Bunny.net Logging API v2 HTTP client | stdlib, `internal/analytics` |
 | `internal/cdn` | Bunny.net cache purge HTTP client | stdlib |
 | `internal/email` | SMTP delivery and multipart verification messages | stdlib |
 | `internal/entities` | Domain records and sentinel errors | stdlib |
@@ -73,6 +77,11 @@ Dependency rules:
   import `controllers`, `routes`, `services`, `dao`, or `entities`.
 - `cdn` implements the link purger consumed by `controllers`; it imports stdlib
   only. `app` wires the purger from configuration.
+- `analytics` is pure: no HTTP, database, or AWS imports.
+- `analytics/bunny` implements `analytics.LogSource`; it must not import
+  `services`, `controllers`, `routes`, or `dao`.
+- `services` may import `internal/analytics` for log types and path parsing, but
+  must not import `analytics/bunny` or any HTTP package.
 - `httpx` and `validation` must not import feature packages.
 - `entities` imports stdlib only.
 - AWS-specific types must not leak past `lambdahttp`. MongoDB driver types stay
@@ -166,6 +175,21 @@ expenses
   spentAt      time
   createdAt    time
   updatedAt    time
+
+link_clicks_hourly
+  _id        ObjectID
+  orgId      string
+  linkId     string
+  hourStart  time (UTC hour)
+  count      int64
+  updatedAt  time
+  unique (linkId, hourStart)
+
+link_analytics_state
+  pullZoneId        int64 (unique)
+  lastCompletedHour time
+  lockedUntil       time | null
+  updatedAt         time
 ```
 
 `_id` values are MongoDB ObjectIDs. References (`orgId`, `userId`, `projectId`)
@@ -313,6 +337,7 @@ Object scope is enforced in controllers:
 | GET | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | 200 | `links.get` |
 | PATCH | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | 200 | `links.update`; `url`, `title`, `tags`, `disabled` |
 | DELETE | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | 204 | `links.delete`; tombstone |
+| GET | `/orgs/{orgID}/analytics/links?orgId={orgID}&ids=...` | 200 | `links.stats`; click totals for up to 100 links |
 | GET | `/s/{slug}` | 302 | Public redirect; no identity |
 
 Links are publicly readable by slug, so the alias namespace is global rather
@@ -324,7 +349,16 @@ The redirect response sets `Cache-Control: public, max-age=0, s-maxage=600`
 and `X-Robots-Tag: noindex`. Browsers revalidate immediately; Bunny caches the
 edge response for 10 minutes when it follows origin cache headers. Missing,
 disabled, and deleted links return `404 {"error":"link not found"}` with
-`Cache-Control: no-store`. There is no click tracking and no write on redirect.
+`Cache-Control: no-store`. There is no write on the redirect path.
+
+Click analytics are sourced from Bunny Logging API v2, not from redirect
+writes. A scheduled `AnalyticsFunction` processes the configured pull zone every
+15 minutes, reads `/s/` requests with `2xx`/`3xx` statuses, deduplicates by
+`requestId` in memory, and writes hourly counts to `link_clicks_hourly`. The
+job processes the current partial hour, the previous hour for late logs, and any
+missing closed hours. Empty hours advance the watermark without creating rows.
+`link_analytics_state` stores the watermark and lease. The read endpoint sums
+hourly rows; it never stores or reads raw logs.
 
 `SHORT_BASE_URL` supplies the public origin used in `shortUrl`; if unset, the
 request origin is used for local development. `BUNNY_API_KEY` enables a
@@ -341,9 +375,9 @@ The `link` feature owns management:
 
 ```yaml
 link:
-  viewer: [links.list, links.get]
-  editor: [links.list, links.get, links.create, links.update]
-  admin: [links.list, links.get, links.create, links.update, links.delete]
+  viewer: [links.list, links.get, links.stats]
+  editor: [links.list, links.get, links.stats, links.create, links.update]
+  admin: [links.list, links.get, links.stats, links.create, links.update, links.delete]
 ```
 
 ### Projects
@@ -563,6 +597,11 @@ credentials:  {tokenHash:1} unique
 expenses:     {orgId:1, spentAt:-1, _id:-1}
               {orgId:1, projectId:1, spentAt:-1, _id:-1}
               {orgId:1, tags:1}
+link_clicks_hourly:
+              {linkId:1, hourStart:1} unique
+              {orgId:1, linkId:1, hourStart:1}
+link_analytics_state:
+              {pullZoneId:1} unique
 ```
 
 The unique indexes on `users.email` and `(memberships.orgId,
@@ -586,7 +625,8 @@ public internet.
 ### Secrets
 
 The connection string is supplied as the `MongoDBURI` CloudFormation parameter
-with `NoEcho: true` and injected as `MONGODB_URI`. `JwtSecret` and the SMTP
+with `NoEcho: true` and injected as `MONGODB_URI`. The database name is supplied
+as `MongoDBDatabase` and injected as `MONGODB_DATABASE`. `JwtSecret` and the SMTP
 credentials use `NoEcho` parameters as well. Secrets Manager and the AWS
 Parameters and Secrets Lambda Extension are the intended next step; do not add
 a caching library that is pinned to AWS SDK v1.
@@ -613,19 +653,28 @@ a caching library that is pinned to AWS SDK v1.
 ## Runtime and deployment
 
 - Runtime: `provided.al2023`, `x86_64`
-- Timeout: 10 seconds; memory: 128 MB
-- Build method: SAM `go1.x` (runs `go build` at the repository root)
+- `ApiFunction`: 10 second timeout, 128 MB, public Function URL.
+- `AnalyticsFunction`: 300 second timeout, 512 MB, no Function URL. EventBridge
+  invokes it every 15 minutes when `BunnyPullZoneId` is configured.
+- Build method: SAM `go1.x` (runs `go build` at the repository root; both
+  functions use the same `bootstrap` binary and `APP_MODE` selects the entrypoint)
 - Deployment: `sam deploy` using `samconfig.toml` (stack `picoservice`).
   `scripts/deploy.sh` / `make ship` wraps `sam build`, `sam deploy`, index
   creation, and health checks. It loads the selected application env file
   (`APP_ENV=prod` uses `prod.env`, unset uses `.env`) and the selected deploy
   env file (`prod.deploy.env` or `deploy.env`; ignored, mode `600`, templates
   `sample.prod.deploy.env` / `sample.deploy.env`). `make deploy` remains the
-  explicit-env fallback and does not load env files.
-- Environment: `MONGODB_URI` (parameter), `MONGODB_DATABASE`, `JWT_SECRET`,
-  `PUBLIC_BASE_URL`, optional `SHORT_BASE_URL` / `BUNNY_API_KEY` (set together),
-  optional `CORS_ALLOWED_ORIGINS`, `EMAIL_FROM`, `SMTP_ADDR`, and optional
-  `SMTP_USERNAME` / `SMTP_PASSWORD`
+  explicit-env fallback and does not load env files. After deploying, the
+  script verifies required Lambda environment keys and the selected database
+  without printing secret values.
+- Environment: `MONGODB_URI` and `MongoDBDatabase` (parameters),
+  `MONGODB_DATABASE`, `JWT_SECRET`, `PUBLIC_BASE_URL`, optional
+  `SHORT_BASE_URL` / `BUNNY_API_KEY` (set together), optional
+  `BUNNY_PULL_ZONE_ID` for the analytics function, optional
+  `CORS_ALLOWED_ORIGINS`, `EMAIL_FROM`, `SMTP_ADDR`, and optional
+  `SMTP_USERNAME` / `SMTP_PASSWORD`. The deploy script passes optional
+  parameters explicitly, including empty values, so stale Lambda environment
+  values cannot survive a deploy.
 - Local development: `cmd/server` on `PORT` (default `8080`). `make run`,
   `make indexes`, `make test-integration`, and `make invoke` load the selected
   application env file (`APP_ENV=dev` uses `dev.env`); `sample.env` is the
@@ -667,6 +716,11 @@ purges the exact URL through `internal/cdn` with `async=false`. Purge failures a
 not fail the mutation, so a failed purge can leave a stale redirect until the
 edge TTL expires. `SHORT_BASE_URL` and `BUNNY_API_KEY` are set together or not
 at all.
+
+The same pull zone exposes the Logging API. When `BUNNY_PULL_ZONE_ID` is set,
+`AnalyticsFunction` reads `/s/` request logs, counts successful redirects, and
+stores hourly aggregates. Logging is never enabled on the API request path and
+the job never stores raw logs.
 
 ### chi instead of a full framework or stdlib-only routing
 
@@ -817,6 +871,11 @@ A legacy document with no `type` is counted as debit through `$ifNull`.
   rate limit. Add those before exposing creation to untrusted users at scale.
 - **CDN purging is best-effort.** If Bunny is unreachable after an edit or
   disable, the stale redirect can live until the 10-minute edge TTL expires.
+- **Link analytics depend on Bunny's 3-day log retention.** If the scheduled job
+  is down for more than 3 days, those hours cannot be recovered. Counts are
+  request counts, not unique visitors, and include bots and link previews.
+- **Analytics read queries scan hourly buckets.** The current 365-day maximum is
+  bounded and indexed; add daily rollups if link volume makes reads expensive.
 - **Access tokens carry at most 20 organization role lists.** `RolesForUser`
   caps the `orgs` map so the token stays small. A user with more memberships
   loses access to the oldest organizations until the cap is raised.

@@ -98,8 +98,10 @@ includes searchable endpoint cards, request/response examples, and copy buttons.
 Owners and members with a `link.*` role can manage organization short links at
 `/orgs/:orgId/links`. A link can use a custom alias or a generated one, carries
 optional tags, and can be edited, disabled, re-enabled, deleted, copied, opened,
-or shown as a QR code. The redirect itself is public at the short-link origin
-under `/s/{slug}`; only management requires an account.
+or shown as a QR code. The table shows a 30-day click count fetched in one bulk
+request for the visible page; links without data render as zero. The redirect
+itself is public at the short-link origin under `/s/{slug}`; only management
+requires an account.
 
 Owners and members with `share.*` roles can manage share links from the
 organization's Sharing page. Generated URLs are shown once at creation; the

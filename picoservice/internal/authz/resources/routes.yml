@@ -145,6 +145,10 @@ endpoints:
       method: DELETE
       path: /orgs/{orgID}/links/{linkID}
       scope: org
+    stats:
+      method: GET
+      path: /orgs/{orgID}/analytics/links
+      scope: org
     redirect:
       method: GET
       path: /s/{slug}

@@ -3,6 +3,7 @@ import type {
   CreateLinkInput,
   LinkFilters,
   LinkPage,
+  LinkStatsResponse,
   ShortLink,
   UpdateLinkInput,
 } from "@/features/links/types"
@@ -31,6 +32,18 @@ export async function listLinks(
   query.set("offset", String(offset))
   return requestJSON<LinkPage>(
     `/orgs/${encodeURIComponent(orgId)}/links?${query}`,
+    { method: "GET" }
+  )
+}
+
+export async function getLinkStats(
+  orgId: string,
+  linkIds: string[]
+): Promise<LinkStatsResponse> {
+  const query = new URLSearchParams({ orgId })
+  query.set("ids", linkIds.join(","))
+  return requestJSON<LinkStatsResponse>(
+    `/orgs/${encodeURIComponent(orgId)}/analytics/links?${query}`,
     { method: "GET" }
   )
 }

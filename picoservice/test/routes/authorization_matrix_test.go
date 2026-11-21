@@ -39,8 +39,11 @@ func TestAuthorizationMatrix(t *testing.T) {
 			path = strings.ReplaceAll(path, placeholder, value)
 		}
 		path += "?orgId=org-1"
-		if endpoint.Permission == "shares.status" {
+		switch endpoint.Permission {
+		case "shares.status":
 			path += "&resourceType=expense&resourceIds=expense-1"
+		case "links.stats":
+			path += "&ids=link-1"
 		}
 
 		for _, role := range roles {

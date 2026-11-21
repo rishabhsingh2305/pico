@@ -36,3 +36,9 @@ type LinkDAO interface {
 	Update(ctx context.Context, orgID, id string, update LinkUpdate) (entities.Link, error)
 	Delete(ctx context.Context, orgID, id string, deletedAt time.Time) (entities.Link, error)
 }
+
+// LinkLookupDAO resolves link slugs without excluding disabled or deleted
+// records. It supports historical analytics attribution.
+type LinkLookupDAO interface {
+	FindBySlugs(ctx context.Context, slugs []string) ([]entities.Link, error)
+}

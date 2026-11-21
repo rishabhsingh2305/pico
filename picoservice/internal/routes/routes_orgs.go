@@ -13,6 +13,7 @@ func orgRoutes(
 	members *controllers.MembershipController,
 	credentials *controllers.CredentialController,
 	links *controllers.LinkController,
+	linkAnalytics *controllers.LinkAnalyticsController,
 	requireUser func(http.Handler) http.Handler,
 	requireOrg func(http.Handler) http.Handler,
 ) chi.Router {
@@ -28,6 +29,8 @@ func orgRoutes(
 		r.With(requireOrg).Patch("/", orgs.Update)
 		r.Mount("/members", membershipRoutes(members, requireOrg))
 		r.Mount("/links", linkRoutes(links, requireOrg))
+		r.With(requireOrg).Get("/analytics/links", linkAnalytics.Stats)
+		r.With(requireOrg).Head("/analytics/links", linkAnalytics.Stats)
 
 		r.With(requireOrg).Post("/shares", credentials.Create)
 		r.With(requireOrg).Get("/shares", credentials.List)

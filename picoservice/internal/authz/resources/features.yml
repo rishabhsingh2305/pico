@@ -25,9 +25,9 @@ features:
     admin: [shares.list, shares.status, shares.credentials, shares.create, shares.revoke]
 
   link:
-    viewer: [links.list, links.get]
-    editor: [links.list, links.get, links.create, links.update]
-    admin: [links.list, links.get, links.create, links.update, links.delete]
+    viewer: [links.list, links.get, links.stats]
+    editor: [links.list, links.get, links.stats, links.create, links.update]
+    admin: [links.list, links.get, links.stats, links.create, links.update, links.delete]
 
   project:
     viewer: [projects.list, projects.get]

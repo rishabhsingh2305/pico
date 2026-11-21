@@ -56,7 +56,9 @@
   the UI never builds
   it from the UI origin. The list filters by alias prefix and any-match tags.
   Link aliases are immutable. Delete is a tombstone, so the alias is not reused.
-  QR codes are rendered client-side from `shortUrl`.
+  QR codes are rendered client-side from `shortUrl`. The table shows a 30-day
+  click count from `GET /orgs/{orgID}/analytics/links`, fetched once for the
+  visible page; missing links render as zero.
 - Verification emails contain a link and a 6-digit code. The UI verifies via
   the link only; `POST /auth/verify-email/otp` is API-only for now. Resend
   rotates the code and returns `Retry-After: 60`.
@@ -201,6 +203,34 @@ Boundaries:
   `src/features/api-docs/content.ts` so the public guide stays accurate.
 - **Generated files:** do not edit `node_modules`, `dist`, or lockfiles by hand.
   Do not edit `src/components/ui/` except to fix generated-code issues.
+
+## Clean code and modularity
+
+These are standing rules for all changes, not feature-specific advice.
+
+- **Separate fetching from rendering:** route components compose, hooks own data
+  fetching, and presentational components receive data and callbacks.
+- **One source for query keys:** register React Query keys in
+  `src/app/query-keys.ts`; do not build ad hoc key arrays in components.
+- **No N+1 requests:** when a bulk endpoint exists, fetch once for the visible
+  page or list instead of issuing one request per row.
+- **Explicit states:** render loading, empty, error, and forbidden states
+  deliberately. Do not let an optional panel break the whole page.
+- **Keep business rules server-side:** the UI formats and composes data; it does
+  not recompute server aggregates or decide authorization.
+- **Feature-local structure:** keep types, API calls, validation, and error
+  mapping inside `src/features/<feature>/`; shared UI belongs in
+  `src/components/`.
+- **Small components:** keep JSX focused. Extract hooks, helpers, and
+  subcomponents before a component becomes a catch-all.
+- **Accessible by default:** labels, keyboard behavior, focus states, and alerts
+  are part of the implementation, not a later cleanup.
+- **Tests at the right layer:** pure helpers get unit tests, components get
+  Testing Library tests, and fetch behavior is mocked. Cover success,
+  validation, and error paths.
+- **Docs follow contracts:** update `README.md`, `docs/architecture.md`, and this
+  file when routes, API contracts, or conventions change. Update
+  `src/features/api-docs/content.ts` for API changes.
 
 ## Adding a page or feature
 

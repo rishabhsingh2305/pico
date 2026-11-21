@@ -15,28 +15,30 @@ import (
 
 // Services groups fake service implementations for router tests.
 type Services struct {
-	Users       *UserService
-	Auth        *AuthService
-	Orgs        *OrgService
-	Memberships *MembershipService
-	Projects    *ProjectService
-	Expenses    *ExpenseService
-	Links       *LinkService
-	Credentials *CredentialService
+	Users         *UserService
+	Auth          *AuthService
+	Orgs          *OrgService
+	Memberships   *MembershipService
+	Projects      *ProjectService
+	Expenses      *ExpenseService
+	Links         *LinkService
+	LinkAnalytics *LinkAnalyticsService
+	Credentials   *CredentialService
 }
 
 // NewServices returns fake services that accept any existing identity by
 // default.
 func NewServices() Services {
 	return Services{
-		Users:       &UserService{},
-		Auth:        &AuthService{},
-		Orgs:        &OrgService{},
-		Memberships: &MembershipService{},
-		Projects:    &ProjectService{},
-		Expenses:    &ExpenseService{},
-		Links:       &LinkService{},
-		Credentials: &CredentialService{},
+		Users:         &UserService{},
+		Auth:          &AuthService{},
+		Orgs:          &OrgService{},
+		Memberships:   &MembershipService{},
+		Projects:      &ProjectService{},
+		Expenses:      &ExpenseService{},
+		Links:         &LinkService{},
+		LinkAnalytics: &LinkAnalyticsService{},
+		Credentials:   &CredentialService{},
 	}
 }
 
@@ -56,6 +58,7 @@ func (s Services) Deps(logger *slog.Logger, pinger controllers.Pinger) routes.De
 		Projects:       s.Projects,
 		Expenses:       s.Expenses,
 		Links:          s.Links,
+		LinkAnalytics:  s.LinkAnalytics,
 		Credentials:    s.Credentials,
 		Policy:         policy,
 		SecureCookies:  false,

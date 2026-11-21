@@ -2,7 +2,9 @@
 
 ## Project snapshot
 
-- Go 1.27, chi v5, a single AWS Lambda behind a public Function URL.
+- Go 1.27, chi v5, an AWS Lambda API behind a public Function URL, plus a
+  scheduled analytics Lambda. Both use the same binary; `APP_MODE=analytics`
+  selects the job.
 - No API Gateway. CORS is handled by the shared `middleware.CORS` layer in the
   chi router; the Function URL has no CORS configuration.
 - MongoDB Atlas via the official `go.mongodb.org/mongo-driver/v2` driver.
@@ -24,8 +26,8 @@
 - Short links are organization-scoped records in `links`. Management uses the
   `link` feature (`link.viewer`/`link.editor`/`link.admin`); `GET /s/{slug}` is
   public, returns a `302` redirect with
-  `Cache-Control: public, max-age=0, s-maxage=600`, and has no click tracking.
-  Browsers revalidate immediately; Bunny caches for 10 minutes and the exact URL
+  `Cache-Control: public, max-age=0, s-maxage=600`. Browsers revalidate
+  immediately; Bunny caches for 10 minutes and the exact URL
   is purged after mutations. Aliases are globally unique and immutable; delete is a
   tombstone that keeps the alias reserved. The redirect is resolved without
   organization context.
@@ -33,6 +35,13 @@
   best-effort purging of the exact redirect URL after create/update/delete.
   Set both together or neither. The edge cache TTL (10 minutes) lives in Bunny,
   not application config. Purge failures are logged, never returned to clients.
+- Link click analytics come from Bunny Logging API v2, not from redirect
+  writes. `AnalyticsFunction` runs every 15 minutes, processes one hour at a
+  time, writes `link_clicks_hourly`, and stores its watermark/lease in
+  `link_analytics_state`. It only handles the configured short-link host and
+  `/s/` paths, counts `2xx`/`3xx`, deduplicates by Bunny `requestId`, and upserts
+  with `$max`. `GET /orgs/{orgID}/analytics/links` returns totals; empty hours
+  advance the watermark without rows. `BUNNY_PULL_ZONE_ID` enables the job.
 - pico-ui serves a public `/api-docs` guide mirroring this API contract. Keep
   API changes reflected in `../pico-ui/src/features/api-docs/content.ts`.
 - Health API: `GET /ping` returns `200 {"message":"pong"}`; `HEAD /ping`
@@ -87,6 +96,7 @@
 | Command | Purpose |
 | --- | --- |
 | `make run` | Run the local HTTP server on `:8080` (loads the selected app env) |
+| `make analytics` | Run one link analytics ingestion pass (loads the selected app env) |
 | `make test` | Run Go tests only (integration tests skip) |
 | `make test-integration` | Run MongoDB integration tests (loads the selected app env; requires `MONGODB_TEST_URI`) |
 | `make check` | Check formatting, run `go vet`, and run tests |
@@ -100,7 +110,7 @@
 
 ## Non-negotiable rules
 
-- **Boundaries:** Lambda/AWS event types belong only in `internal/lambdahttp`. MongoDB driver types belong only in `internal/dao/mongodb` in production code; integration tests may use the driver to isolate and drop test databases. Transport middleware belongs only in `internal/middleware`. SMTP and message construction belong only in `internal/email`; services consume the `services.Mailer` interface. Bunny purge HTTP belongs only in `internal/cdn`; controllers consume the `controllers.LinkPurger` interface. Controllers must not import `events`, `lambda`, AWS SDKs, `internal/dao`, or the MongoDB driver.
+- **Boundaries:** Lambda/AWS event types belong only in `internal/lambdahttp`. MongoDB driver types belong only in `internal/dao/mongodb` in production code; integration tests may use the driver to isolate and drop test databases. Transport middleware belongs only in `internal/middleware`. SMTP and message construction belong only in `internal/email`; services consume the `services.Mailer` interface. Bunny purge HTTP belongs only in `internal/cdn`; controllers consume the `controllers.LinkPurger` interface. Bunny logging HTTP belongs only in `internal/analytics/bunny`; `internal/analytics` stays pure. Controllers must not import `events`, `lambda`, AWS SDKs, `internal/dao`, or the MongoDB driver.
 - **Dependency direction:** `main`/`cmd` → `internal/app` → `routes`/`services`/`dao/mongodb`/`email`; `routes` → `controllers`, `middleware`, `httpx`, `authz`; `controllers` → `services`, `middleware`, `entities`, `httpx`, `validation`; `services` → `dao`, `entities`, `validation`, stdlib, JWT; `dao` → `entities`; `dao/mongodb` → `dao`, `entities`, MongoDB driver; `email` → stdlib; `middleware` → `httpx`, `authz`, chi; `authz` → `entities`, stdlib, and YAML parsing; `lambdahttp` → `httpx`; `entities`, `httpx`, and `validation` import stdlib only. Controllers depend on small consumer-side service interfaces.
 - **Thin controllers:** controllers parse/validate HTTP input and write responses. Business logic lives in services. DTOs and response mapping stay in `internal/controllers`; do not query MongoDB from controllers.
 - **Tenancy:** org-scoped routes must use `middleware.RequireOrgAccess` after `middleware.Authenticate`; user-scoped routes that need an actor use only `middleware.RequireAuth`. The actor is the JWT `sub`; the tenant is `?orgId=`; the route permission comes from `routes.yml`; feature roles come from the token `orgs` map and `features.yml`. The owner is implicit: token issuance writes `["*"]` when `orgs.userId` matches the actor, and `"*"` is never stored in `features.yml` or a membership record. Feature-management permissions are enforced by middleware; services only protect the owner account (the owner cannot be added, removed, or have roles changed). Never describe query parameters as authentication.
@@ -113,7 +123,7 @@
   CORS; duplicate `Access-Control-*` headers break browsers.
 - **Architecture:** do not add API Gateway, replace chi, add an ODM/generic repository, or add a Lambda proxy/framework library without explicit approval.
 - **State:** no global mutable state, no `init()`, no hidden I/O. Wire dependencies in `internal/app`; create one MongoDB client per process and never per request.
-- **Configuration:** `SHORT_BASE_URL` and `BUNNY_API_KEY` are optional together; set both to enable custom short URLs and Bunny purging, or neither. They are application settings and belong in the app env file, never a deploy env file. Application values belong in `.env` or `$(APP_ENV).env` (ignored), with `sample.env` as the committed template. `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects `prod.env` and `prod.deploy.env`; unset uses `.env` and `deploy.env`. `make run`, `indexes`, `test-integration`, and `invoke` load the selected app env; `make deploy` must not. AWS deployment settings belong in `deploy.env` or `$(APP_ENV).deploy.env` (ignored), with `sample.deploy.env` and per-environment samples committed; `make ship`/`scripts/deploy.sh` load the selected files. Do not put application secrets in a deploy env file.
+- **Configuration:** `SHORT_BASE_URL` and `BUNNY_API_KEY` are optional together; set both to enable custom short URLs and Bunny purging, or neither. `BUNNY_PULL_ZONE_ID` is optional and enables the scheduled link analytics job; it requires `BUNNY_API_KEY` and `SHORT_BASE_URL`. They are application settings and belong in the app env file, never a deploy env file. Application values belong in `.env` or `$(APP_ENV).env` (ignored), with `sample.env` as the committed template. `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects `prod.env` and `prod.deploy.env`; unset uses `.env` and `deploy.env`. `make run`, `analytics`, `indexes`, `test-integration`, and `invoke` load the selected app env; `make deploy` must not. AWS deployment settings belong in `deploy.env` or `$(APP_ENV).deploy.env` (ignored), with `sample.deploy.env` and per-environment samples committed; `make ship`/`scripts/deploy.sh` load the selected files. Do not put application secrets in a deploy env file.
 - **Database:** every call takes a `context.Context` with a timeout; log driver errors with `request_id` and never return them to clients. DAO contracts live in `internal/dao`; implementations live in `internal/dao/mongodb`. Add indexes in `internal/dao/mongodb/indexes.go`.
 - **Query efficiency:** list handlers return one page and must not run unbounded aggregates. Aggregates live on separate summary endpoints, grouped server-side; clients must not issue one totals request per item. Every list query pattern needs an index matching its filters and sort. Verify new or changed patterns with `explain("executionStats")`; do not use `$facet` to combine a page with an unbounded summary.
 - **Errors:** wrap with `%w`, log once at the boundary, never silently ignore. No `log.Fatal`/`os.Exit` outside `main`.
@@ -122,6 +132,44 @@
 - **Tests:** every behavior change and bug fix needs a test. Tests live under `test/` and use only exported APIs. Prefer table-driven tests and `httptest`. Integration tests must skip unless `MONGODB_TEST_URI` is set.
 - **Docs:** update `README.md`, `docs/architecture.md`, `docs/engineering-standards.md`, and `AGENTS.md` when the API or architecture changes.
 - **Known debt:** if you touch an area listed in `docs/architecture.md` under Known debt, fix it or explain why not.
+
+## Clean code and modularity
+
+These are standing rules for all changes, not feature-specific advice.
+
+- **Single responsibility:** every package, type, and function should have one
+  reason to change. Split orchestration, parsing, I/O, persistence, and HTTP
+  mapping instead of growing one service.
+- **Thin entrypoints:** `main`, `cmd`, and Lambda handlers only wire dependencies
+  and delegate. Business rules stay in `internal/services`; request/response
+  mapping stays in controllers.
+- **Narrow interfaces:** services depend on small consumer-side interfaces. Do
+  not widen a DAO or service interface because a caller happens to need one more
+  method. Add a focused interface instead.
+- **Honest names:** names should describe the responsibility. Prefer
+  `LinkHourProcessor`, `LinkStatsReader`, and `hourStart` over vague
+  `AnalyticsHelper`, `Service`, or `bucketStart`.
+- **No speculative abstraction:** keep schemas and services domain-specific.
+  Introduce a generic abstraction only when a second real use case exists.
+- **Explicit side effects:** inject clocks and external clients. Keep parsing,
+  filtering, and counting pure where possible. Do not hide I/O behind
+  convenience helpers.
+- **Idempotent writes:** recompute aggregates and upsert with `$max` or `$set`
+  as appropriate. A retry or partial failure must not double-count or lower a
+  counter.
+- **Explicit failure handling:** handle empty input, retries, cancellation, and
+  partial failures deliberately. Empty results are not errors; transport,
+  authentication, and storage failures are.
+- **No hidden state:** no global mutable state, no `init()` side effects, no I/O
+  at import time. Wire dependencies in `internal/app`.
+- **Background jobs:** deploy them separately from request handlers. Process a
+  bounded unit at a time, acquire a lease, save progress after each successful
+  unit, and never advance progress after a failed or partial run.
+- **Tests at the right layer:** pure helpers get unit tests, HTTP clients get
+  `httptest` tests, services get fakes, MongoDB behavior gets integration tests,
+  and every route change gets a route-policy test.
+- **Docs follow contracts:** update `README.md`, `docs/architecture.md`, and this
+  file whenever a contract, boundary, or operational behavior changes.
 
 ## Adding a route
 

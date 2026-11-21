@@ -70,6 +70,8 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 	projectService := services.NewProjectService(projectStore)
 	expenseService := services.NewExpenseService(expenseStore, projectStore)
 	linkService := services.NewLinkService(linkStore)
+	linkAnalyticsStore := mongodb.NewLinkAnalyticsStore(db)
+	linkStatsReader := services.NewLinkStatsReader(linkAnalyticsStore)
 	credentialService := services.NewCredentialService(credentialStore, orgStore, projectStore, expenseStore)
 
 	deps := routes.Deps{
@@ -82,6 +84,7 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 		Projects:       projectService,
 		Expenses:       expenseService,
 		Links:          linkService,
+		LinkAnalytics:  linkStatsReader,
 		ShortBaseURL:   cfg.ShortBaseURL,
 		Credentials:    credentialService,
 		Policy:         policy,

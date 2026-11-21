@@ -608,6 +608,13 @@ Updates `url`, `title`, `tags`, and/or `disabled`. The alias is immutable.
 `DELETE` tombstones the link, and `GET /s/{slug}` is the public `302` redirect;
 neither is called through `requestJSON` from the UI.
 
+### `GET /orgs/{orgID}/analytics/links?orgId=...&ids=...`
+
+Returns `{items:[{linkId,clicks}]}` for up to 100 links. `from` and `to` are
+optional RFC 3339 bounds; the server defaults to the last 30 days. The Links
+page fetches this once for the visible page and renders missing links as zero.
+The endpoint requires `links.stats`, which all link roles have.
+
 ### `GET /projects?orgId=...&tags=food,travel&limit=100`
 
 Success: `200` with `{"items":[...]}`. Projects belong to the organization.

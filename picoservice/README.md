@@ -1,10 +1,11 @@
 # picoservice
 
-A small Go REST API running as a single AWS Lambda function behind a public
-Lambda Function URL. Routing is handled by
-[chi](https://github.com/go-chi/chi), with a small adapter that translates
-Function URL events into standard `net/http` requests. MongoDB Atlas stores
-users, organizations, memberships, projects, expenses, and short links.
+A small Go REST API running as an AWS Lambda function behind a public Lambda
+Function URL, plus a scheduled Lambda that aggregates link clicks from Bunny
+CDN logs. Routing is handled by [chi](https://github.com/go-chi/chi), with a
+small adapter that translates Function URL events into standard `net/http`
+requests. MongoDB Atlas stores users, organizations, memberships, projects,
+expenses, short links, and hourly link click counts.
 
 ## Endpoints
 
@@ -183,6 +184,7 @@ and deleting require a `link.*` role.
 | `GET` | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | `links.get` | Get one link |
 | `PATCH` | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | `links.update` | Update `url`, `title`, `tags`, or `disabled` |
 | `DELETE` | `/orgs/{orgID}/links/{linkID}?orgId={orgID}` | `links.delete` | Tombstone a link |
+| `GET` | `/orgs/{orgID}/analytics/links?orgId={orgID}&ids=...` | `links.stats` | Click totals for up to 100 links |
 | `GET` | `/s/{slug}` | public | Redirect to the destination |
 
 Create body:
@@ -238,9 +240,56 @@ The `link` feature governs management:
 
 ```yaml
 link:
-  viewer: [links.list, links.get]
-  editor: [links.list, links.get, links.create, links.update]
-  admin: [links.list, links.get, links.create, links.update, links.delete]
+  viewer: [links.list, links.get, links.stats]
+  editor: [links.list, links.get, links.stats, links.create, links.update]
+  admin: [links.list, links.get, links.stats, links.create, links.update, links.delete]
+```
+
+### Link analytics
+
+Click counts come from the Bunny Logging API v2. The public redirect is still
+stateless and does not write to MongoDB; cached redirects are counted from the
+edge logs.
+
+`GET /orgs/{orgID}/analytics/links?orgId={orgID}&ids=id1,id2&from=...&to=...`
+returns click totals per link:
+
+```json
+{
+  "items": [
+    { "linkId": "64f...", "clicks": 42 }
+  ]
+}
+```
+
+`ids` is required, comma-separated, and capped at 100. `from` and `to` are RFC
+3339 timestamps; the default range is the last 30 days and the maximum is 365
+days. Links without data are omitted and should be rendered as zero. The
+endpoint requires `links.stats`, which is granted to all link roles.
+
+Ingestion is a separate scheduled Lambda, `AnalyticsFunction`. It runs every 15
+minutes, processes one hour at a time, and stores one document per link per hour
+in `link_clicks_hourly`. It also keeps the watermark and lease in
+`link_analytics_state`. The job:
+
+- queries Bunny logs for the configured short-link host and `/s/` path;
+- filters to `2xx` and `3xx` responses;
+- deduplicates by Bunny `requestId` in memory;
+- resolves slugs in batches, including deleted links;
+- recomputes hourly counts and upserts them with `$max`.
+
+Empty hours are successful. They create no click documents and advance the
+watermark. Bunny errors never advance the watermark. `GET /s/{slug}` remains
+stateless; no writes happen on the request path.
+
+Bunny Logging must be enabled on the pull zone. Configure `BUNNY_PULL_ZONE_ID`;
+`BUNNY_API_KEY` must be able to read logs. `BUNNY_PULL_ZONE_ID` is optional and
+empty disables the scheduled job.
+
+The job can be run manually with:
+
+```bash
+make analytics
 ```
 
 ### Projects
@@ -427,12 +476,15 @@ or membership constraints. The command is idempotent.
 ├── AGENTS.md                      # Agent rules and definition of done
 ├── main.go                        # Lambda entrypoint
 ├── cmd/
+│   ├── analytics/main.go          # One link analytics ingestion pass
 │   ├── indexes/main.go            # Create MongoDB indexes
 │   └── server/main.go             # Local development HTTP server
 ├── docs/
 │   ├── architecture.md            # Request flow, boundaries, decisions
 │   └── engineering-standards.md   # Clean code, DRY, modularity, testing
 ├── internal/
+│   ├── analytics/                 # Pure log types, keys, and path parsing
+│   │   └── bunny/                 # Bunny Logging API v2 client
 │   ├── app/                       # Shared composition root
 │   ├── cdn/                       # Bunny.net cache purge client
 │   ├── controllers/               # HTTP request/response DTOs and controllers
@@ -450,7 +502,7 @@ or membership constraints. The command is idempotent.
 ├── events/function-url.json       # Sample event for sam local invoke
 ├── opencode.jsonc                 # Auto-loads docs for OpenCode sessions
 ├── sample.env                     # Local env template; copy to .env
-├── template.yaml                  # Lambda and Function URL resources
+├── template.yaml                  # API, scheduled analytics Lambda, Function URL
 ├── Makefile
 └── samconfig.toml
 ```
@@ -537,8 +589,8 @@ make ship APP_ENV=prod
 
 `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects
 `prod.env` and `prod.deploy.env`. With `APP_ENV` unset, `.env` and `deploy.env`
-are used. The same selector works for `run`, `indexes`, `test-integration`,
-`invoke`, `ship`, and `url`.
+are used. The same selector works for `run`, `analytics`, `indexes`,
+`test-integration`, `invoke`, `ship`, and `url`.
 
 Generate a local JWT secret with `openssl rand -hex 32`.
 
@@ -671,8 +723,8 @@ make invoke
 `make invoke` requires Docker and loads the settings from `.env` (or the
 current environment). It uses `events/function-url.json` and passes the values
 to the local container as template parameters. `SMTP_USERNAME` and
-`SMTP_PASSWORD` are optional. The template sets `MONGODB_DATABASE` to
-`picoservice`.
+`SMTP_PASSWORD` are optional. The template uses the selected
+`MONGODB_DATABASE` through the `MongoDBDatabase` parameter.
 
 ## Deploy
 
@@ -680,22 +732,27 @@ to the local container as template parameters. `SMTP_USERNAME` and
 make deploy
 ```
 
-`make deploy` does not load `.env`. It requires `MONGODB_URI`, `JWT_SECRET`,
-`PUBLIC_BASE_URL`, `EMAIL_FROM`, and `SMTP_ADDR`. `SMTP_USERNAME` and
+`make deploy` does not load `.env`. It requires `MONGODB_URI`,
+`MONGODB_DATABASE`, `JWT_SECRET`, `PUBLIC_BASE_URL`, `EMAIL_FROM`, and
+`SMTP_ADDR`. If `BUNNY_PULL_ZONE_ID` is set,
+`BUNNY_API_KEY` and `SHORT_BASE_URL` are required as well. `SMTP_USERNAME` and
 `SMTP_PASSWORD` are optional but must be set together. `CORS_ALLOWED_ORIGINS`
 is optional and defaults to `PUBLIC_BASE_URL`. `SHORT_BASE_URL` and
 `BUNNY_API_KEY` are optional together: set both to enable the custom short-link
-origin and CDN purging, or leave both unset. `MongoDBURI`, `JwtSecret`,
+origin and CDN purging, or leave both unset. `BUNNY_PULL_ZONE_ID` is optional and
+enables the scheduled link analytics Lambda. `MongoDBURI`, `JwtSecret`,
 `SmtpUsername`, `SmtpPassword`, and `BunnyApiKey` are `NoEcho` parameters, so
 CloudFormation masks them in stack descriptions. To deploy without the Makefile:
 
 ```bash
 sam deploy --parameter-overrides \
   MongoDBURI='mongodb+srv://...' \
+  MongoDBDatabase='picoservice-prod' \
   JwtSecret='...' \
   PublicBaseURL='https://example.com' \
   ShortBaseURL='https://link.uppixl.com' \
   BunnyApiKey='...' \
+  BunnyPullZoneId='1234' \
   CorsAllowedOrigins='https://example.com' \
   EmailFrom='noreply@example.com' \
   SmtpAddr='smtp.example.com:587' \
@@ -733,7 +790,7 @@ Application settings stay in `.env` (template: `sample.env`):
 chmod 600 .env
 # MONGODB_URI, MONGODB_DATABASE, JWT_SECRET, PUBLIC_BASE_URL,
 # CORS_ALLOWED_ORIGINS, EMAIL_FROM, SMTP_ADDR, optional SMTP_USERNAME/SMTP_PASSWORD,
-# optional SHORT_BASE_URL/BUNNY_API_KEY
+# optional SHORT_BASE_URL/BUNNY_API_KEY/BUNNY_PULL_ZONE_ID
 ```
 
 Then deploy:
@@ -747,11 +804,19 @@ Or run `./scripts/deploy.sh` directly. The script:
 - requires both env files to exist with mode `600`
 - loads the selected application env file and deploy env file
 - checks the required values
-- requires `SHORT_BASE_URL` and `BUNNY_API_KEY` together when either is set
+- requires `SHORT_BASE_URL` and `BUNNY_API_KEY` together when either is set;
+  `BUNNY_PULL_ZONE_ID` also requires both
 - verifies AWS credentials with `aws sts get-caller-identity`
 - uses a dedicated `S3_BUCKET` when configured, creating it if missing unless
   `--no-create-bucket` is passed
-- runs `sam build` and `sam deploy`
+- passes `MongoDBDatabase` and all optional environment values explicitly,
+  including empty values, so a deploy cannot silently retain or clear old
+  Lambda environment values
+- runs `sam build` and `sam deploy`; when `BUNNY_PULL_ZONE_ID` is set it also
+  deploys the scheduled `AnalyticsFunction`
+- verifies required Lambda environment keys and the selected database after
+  deploying, without printing secret values; this requires
+  `lambda:GetFunctionConfiguration`
 - ensures MongoDB indexes unless `--skip-indexes` is passed
 - checks `/ping` and `/ready`
 - prints the Function URL and log command
@@ -802,11 +867,12 @@ curl -i "$(make url)ready"
 | Variable | Required | Description |
 | --- | --- | --- |
 | `MONGODB_URI` | yes | MongoDB Atlas connection string |
-| `MONGODB_DATABASE` | yes | Database name, `picoservice` in `template.yaml` |
+| `MONGODB_DATABASE` | yes | Database name; passed to CloudFormation as the `MongoDBDatabase` parameter |
 | `JWT_SECRET` | yes | Signs email verification and access tokens; at least 32 bytes |
 | `PUBLIC_BASE_URL` | yes | Frontend origin used in verification links and as the default CORS origin |
 | `SHORT_BASE_URL` | no | Public short-link origin, for example `https://link.uppixl.com`; set with `BUNNY_API_KEY` or leave both unset |
-| `BUNNY_API_KEY` | no | Bunny.net API key used to purge cached redirects; set with `SHORT_BASE_URL` or leave both unset |
+| `BUNNY_API_KEY` | no | Bunny.net API key used to purge cached redirects and read log analytics; set with `SHORT_BASE_URL` or leave both unset |
+| `BUNNY_PULL_ZONE_ID` | no | Bunny pull zone ID for the scheduled link-analytics job; empty disables the job |
 | `CORS_ALLOWED_ORIGINS` | no | Comma-separated allowed browser origins; defaults to `PUBLIC_BASE_URL`; `*` allows all |
 | `EMAIL_FROM` | yes | Sender address for verification email |
 | `SMTP_ADDR` | yes | SMTP server address, `host:port` |

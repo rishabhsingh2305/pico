@@ -31,6 +31,7 @@ func TestAllowHeadersForParameterizedRoutes(t *testing.T) {
 		{name: "members collection", method: http.MethodDelete, path: "/orgs/org-1/members", wantAllow: "GET, HEAD, POST"},
 		{name: "member item", method: http.MethodGet, path: "/orgs/org-1/members/member-1", wantAllow: "PATCH, DELETE"},
 		{name: "links collection", method: http.MethodDelete, path: "/orgs/org-1/links", wantAllow: "GET, HEAD, POST"},
+		{name: "link stats", method: http.MethodPost, path: "/orgs/org-1/analytics/links", wantAllow: "GET, HEAD"},
 		{name: "link item", method: http.MethodPost, path: "/orgs/org-1/links/link-1", wantAllow: "GET, HEAD, PATCH, DELETE"},
 		{name: "short link redirect", method: http.MethodPost, path: "/s/launch", wantAllow: "GET, HEAD"},
 		{name: "projects collection", method: http.MethodDelete, path: "/projects", wantAllow: "GET, HEAD, POST"},

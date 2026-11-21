@@ -97,6 +97,28 @@ func (c *Client) EnsureIndexes(ctx context.Context) error {
 			},
 		},
 		{
+			collection: linkClicksCollection,
+			models: []mongo.IndexModel{
+				{
+					Keys:    bson.D{{Key: "linkId", Value: 1}, {Key: "hourStart", Value: 1}},
+					Options: options.Index().SetName("link_clicks_link_hour_unique").SetUnique(true),
+				},
+				{
+					Keys:    bson.D{{Key: "orgId", Value: 1}, {Key: "linkId", Value: 1}, {Key: "hourStart", Value: 1}},
+					Options: options.Index().SetName("link_clicks_org_link_hour"),
+				},
+			},
+		},
+		{
+			collection: linkAnalyticsStateCollection,
+			models: []mongo.IndexModel{
+				{
+					Keys:    bson.D{{Key: "pullZoneId", Value: 1}},
+					Options: options.Index().SetName("link_analytics_state_pull_zone_unique").SetUnique(true),
+				},
+			},
+		},
+		{
 			collection: projectsCollection,
 			models: []mongo.IndexModel{
 				{

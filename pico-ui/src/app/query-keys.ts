@@ -10,6 +10,9 @@ const expenseRoot = (userId: string, orgId: string, projectId: string) =>
 const linksRoot = (userId: string, orgId: string) =>
   ["links", userId, orgId] as const
 
+const linkStatsRoot = (userId: string, orgId: string) =>
+  [...linksRoot(userId, orgId), "stats"] as const
+
 const orgExpensesRoot = (userId: string, orgId: string) =>
   ["org-expenses", userId, orgId] as const
 
@@ -90,6 +93,9 @@ export const queryKeys = {
       [...filters.tags].sort(),
       offset,
     ] as const,
+  linkStatsRoot,
+  linkStats: (userId: string, orgId: string, ids: string[]) =>
+    [...linkStatsRoot(userId, orgId), [...ids].sort()] as const,
   shareStatus: (
     orgId: string,
     resourceType: "org" | "project" | "expense",

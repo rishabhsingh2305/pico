@@ -18,6 +18,15 @@ export type LinkPage = {
   nextOffset: number | null
 }
 
+export type LinkStat = {
+  linkId: string
+  clicks: number
+}
+
+export type LinkStatsResponse = {
+  items: LinkStat[]
+}
+
 export type LinkFilters = {
   q: string
   tags: string[]

@@ -68,6 +68,7 @@ type Deps struct {
 	Projects       ProjectService
 	Expenses       ExpenseService
 	Links          LinkService
+	LinkAnalytics  controllers.LinkStatsService
 	LinkPurger     controllers.LinkPurger
 	ShortBaseURL   string
 	Credentials    CredentialService
@@ -94,6 +95,7 @@ func New(deps Deps) (*chi.Mux, error) {
 	projectController := controllers.NewProjectController(logger, deps.Projects)
 	expenseController := controllers.NewExpenseController(logger, deps.Expenses)
 	linkController := controllers.NewLinkController(logger, deps.Links, deps.ShortBaseURL, deps.LinkPurger)
+	linkAnalyticsController := controllers.NewLinkAnalyticsController(logger, deps.LinkAnalytics)
 	credentialController := controllers.NewCredentialController(logger, deps.Credentials)
 
 	requireAuth := middleware.RequireAuth(deps.Auth)
@@ -113,7 +115,7 @@ func New(deps Deps) (*chi.Mux, error) {
 	healthRoutes(r, logger, deps.Pinger)
 	r.Mount("/auth", authRoutes(userController, authController))
 	r.Mount("/users", userRoutes(userController, requireAuth))
-	r.Mount("/orgs", orgRoutes(orgController, membershipController, credentialController, linkController, requireAuth, requireOrg))
+	r.Mount("/orgs", orgRoutes(orgController, membershipController, credentialController, linkController, linkAnalyticsController, requireAuth, requireOrg))
 	r.Mount("/projects", projectRoutes(projectController, requireOrg))
 	r.Mount("/expenses", expenseRoutes(expenseController, requireOrg))
 	r.Mount("/s", redirectRoutes(linkController))
@@ -149,6 +151,8 @@ func (d Deps) validate() error {
 		return errors.New("routes: expense service is required")
 	case d.Links == nil:
 		return errors.New("routes: link service is required")
+	case d.LinkAnalytics == nil:
+		return errors.New("routes: link analytics service is required")
 	case (d.ShortBaseURL == "") != (d.LinkPurger == nil):
 		return errors.New("routes: short base URL and link purger must be set together")
 	case d.Credentials == nil:

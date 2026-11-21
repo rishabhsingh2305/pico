@@ -22,6 +22,9 @@ import type { ShortLink } from "@/features/links/types"
 
 type LinkListProps = {
   links: ShortLink[]
+  clicksByLinkId: ReadonlyMap<string, number>
+  statsLoading: boolean
+  statsError: boolean
   canWrite: boolean
   canDelete: boolean
   busyId: string | null
@@ -33,6 +36,9 @@ type LinkListProps = {
 
 export function LinkList({
   links,
+  clicksByLinkId,
+  statsLoading,
+  statsError,
   canWrite,
   canDelete,
   busyId,
@@ -53,6 +59,7 @@ export function LinkList({
           <TableHead>Destination</TableHead>
           <TableHead>Tags</TableHead>
           <TableHead>Status</TableHead>
+          <TableHead className="text-right">Clicks (30d)</TableHead>
           <TableHead>Created</TableHead>
           <TableHead className="text-right">Actions</TableHead>
         </TableRow>
@@ -71,6 +78,13 @@ export function LinkList({
             </TableCell>
             <TableCell>
               <LinkStatus disabled={link.disabled} />
+            </TableCell>
+            <TableCell className="text-right text-muted-foreground tabular-nums">
+              <ClickCount
+                count={clicksByLinkId.get(link.id)}
+                loading={statsLoading}
+                error={statsError}
+              />
             </TableCell>
             <TableCell className="text-muted-foreground">
               {formatCreatedAt(link.createdAt)}
@@ -148,6 +162,28 @@ function LinkStatus({ disabled }: { disabled: boolean }) {
       {disabled ? "Disabled" : "Active"}
     </Badge>
   )
+}
+
+function ClickCount({
+  count,
+  loading,
+  error,
+}: {
+  count: number | undefined
+  loading: boolean
+  error: boolean
+}) {
+  if (loading) {
+    return <span aria-label="Loading clicks">—</span>
+  }
+  if (error) {
+    return (
+      <span title="Could not load click counts" aria-label="Clicks unavailable">
+        —
+      </span>
+    )
+  }
+  return <>{formatClickCount(count ?? 0)}</>
 }
 
 type LinkActionsProps = {
@@ -253,6 +289,10 @@ function displayTitle(link: ShortLink): string {
   } catch {
     return link.slug
   }
+}
+
+function formatClickCount(value: number): string {
+  return new Intl.NumberFormat().format(value)
 }
 
 function formatCreatedAt(value: string): string {
