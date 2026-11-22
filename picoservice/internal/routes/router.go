@@ -59,22 +59,24 @@ type LinkService interface {
 
 // Deps contains the dependencies required to build the application router.
 type Deps struct {
-	Logger         *slog.Logger
-	Pinger         controllers.Pinger
-	Users          UserService
-	Auth           AuthService
-	Orgs           OrgService
-	Memberships    MembershipService
-	Projects       ProjectService
-	Expenses       ExpenseService
-	Links          LinkService
-	LinkAnalytics  controllers.LinkStatsService
-	LinkPurger     controllers.LinkPurger
-	ShortBaseURL   string
-	Credentials    CredentialService
-	Policy         *authz.Policy
-	SecureCookies  bool
-	AllowedOrigins []string
+	Logger           *slog.Logger
+	Pinger           controllers.Pinger
+	Users            UserService
+	Auth             AuthService
+	Orgs             OrgService
+	Memberships      MembershipService
+	Projects         ProjectService
+	Expenses         ExpenseService
+	Links            LinkService
+	LinkAnalytics    controllers.LinkStatsService
+	AnalyticsSources controllers.AnalyticsSourceService
+	AnalyticsStats   controllers.AnalyticsStatsService
+	LinkPurger       controllers.LinkPurger
+	ShortBaseURL     string
+	Credentials      CredentialService
+	Policy           *authz.Policy
+	SecureCookies    bool
+	AllowedOrigins   []string
 }
 
 // New builds the application router.
@@ -96,6 +98,13 @@ func New(deps Deps) (*chi.Mux, error) {
 	expenseController := controllers.NewExpenseController(logger, deps.Expenses)
 	linkController := controllers.NewLinkController(logger, deps.Links, deps.ShortBaseURL, deps.LinkPurger)
 	linkAnalyticsController := controllers.NewLinkAnalyticsController(logger, deps.LinkAnalytics)
+	analyticsController := controllers.NewAnalyticsController(
+		logger,
+		deps.AnalyticsSources,
+		deps.AnalyticsStats,
+		deps.ShortBaseURL,
+	)
+	analyticsPixel := controllers.NewAnalyticsPixel()
 	credentialController := controllers.NewCredentialController(logger, deps.Credentials)
 
 	requireAuth := middleware.RequireAuth(deps.Auth)
@@ -115,10 +124,20 @@ func New(deps Deps) (*chi.Mux, error) {
 	healthRoutes(r, logger, deps.Pinger)
 	r.Mount("/auth", authRoutes(userController, authController))
 	r.Mount("/users", userRoutes(userController, requireAuth))
-	r.Mount("/orgs", orgRoutes(orgController, membershipController, credentialController, linkController, linkAnalyticsController, requireAuth, requireOrg))
+	r.Mount("/orgs", orgRoutes(
+		orgController,
+		membershipController,
+		credentialController,
+		linkController,
+		linkAnalyticsController,
+		analyticsController,
+		requireAuth,
+		requireOrg,
+	))
 	r.Mount("/projects", projectRoutes(projectController, requireOrg))
 	r.Mount("/expenses", expenseRoutes(expenseController, requireOrg))
 	r.Mount("/s", redirectRoutes(linkController))
+	r.Mount("/p", pixelRoutes(analyticsPixel))
 
 	probe, err := newMethodProbe(r)
 	if err != nil {
@@ -153,6 +172,10 @@ func (d Deps) validate() error {
 		return errors.New("routes: link service is required")
 	case d.LinkAnalytics == nil:
 		return errors.New("routes: link analytics service is required")
+	case d.AnalyticsSources == nil:
+		return errors.New("routes: analytics source service is required")
+	case d.AnalyticsStats == nil:
+		return errors.New("routes: analytics stats service is required")
 	case (d.ShortBaseURL == "") != (d.LinkPurger == nil):
 		return errors.New("routes: short base URL and link purger must be set together")
 	case d.Credentials == nil:

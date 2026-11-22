@@ -5,11 +5,12 @@
 picoservice is a Go AWS Lambda API exposed through a public Lambda Function URL.
 There is no API Gateway. The same chi router is used by the Lambda handler and
 by the local development server. A second scheduled Lambda processes Bunny CDN
-logs for link click analytics. MongoDB Atlas stores users, organizations,
-memberships, projects, expenses, short links, and aggregated link clicks.
-Expenses are debit or credit entries; amounts stay positive and the type carries
-the direction. Short links redirect publicly; their management is organization
-scoped.
+logs for link click and pixel capture analytics. MongoDB Atlas stores users,
+organizations, memberships, projects, expenses, short links, analytics sources,
+and aggregated hourly counts. Expenses are debit or credit entries; amounts
+stay positive and the type carries the direction. Short links redirect publicly;
+their management is organization scoped. Analytics pixels return a 1x1 GIF and
+are counted from edge logs.
 
 ```text
 client
@@ -32,15 +33,15 @@ client
 | `main` | Lambda entrypoint; dispatches API and analytics jobs from `APP_MODE` | `internal/app`, `internal/lambdahttp`, `internal/dao/mongodb` |
 | `cmd/server` | Local HTTP server and graceful shutdown | `internal/app`, `internal/dao/mongodb` |
 | `cmd/indexes` | Create MongoDB indexes | `internal/dao/mongodb` |
-| `cmd/analytics` | Run one link analytics ingestion pass locally or from cron | `internal/app`, `internal/dao/mongodb` |
+| `cmd/analytics` | Run one link and pixel analytics ingestion pass locally or from cron | `internal/app`, `internal/dao/mongodb` |
 | `internal/app` | Composition root: DAO implementations, services, policy, CDN purger, routes, analytics job | `internal/analytics/bunny`, `internal/authz`, `internal/cdn`, `internal/dao/mongodb`, `internal/email`, `internal/services`, `internal/routes` |
 | `internal/authz` | Embedded route and feature-role policy: YAML loading, validation, permission lookup | `internal/entities`, stdlib, `gopkg.in/yaml.v3` |
 | `internal/routes` | chi setup, middleware wiring, domain subrouters, per-route `Allow` | `internal/controllers`, `internal/middleware`, `internal/authz`, `internal/httpx`, chi |
 | `internal/controllers` | HTTP parsing, status codes, request/response DTOs, response mapping | `net/http`, `context`, `internal/services`, `internal/middleware`, `internal/entities`, `internal/httpx`, `internal/validation` |
-| `internal/services` | Business rules, bcrypt, email verification, link analytics ingestion and reads, service input structs, narrow lookup interfaces | stdlib, `internal/analytics`, `internal/dao`, `internal/entities`, `internal/validation`, `golang.org/x/crypto/bcrypt`, `github.com/golang-jwt/jwt/v5` |
+| `internal/services` | Business rules, bcrypt, email verification, link and pixel analytics ingestion and reads, service input structs, narrow lookup interfaces | stdlib, `internal/analytics`, `internal/dao`, `internal/entities`, `internal/validation`, `golang.org/x/crypto/bcrypt`, `github.com/golang-jwt/jwt/v5` |
 | `internal/dao` | Per-domain persistence contracts and query/update structs | `internal/entities`, stdlib |
 | `internal/dao/mongodb` | MongoDB client lifecycle, stores, index creation, readiness ping | MongoDB driver, `internal/dao`, `internal/entities`, stdlib |
-| `internal/analytics` | Pure CDN log types, request keys, and short-link path parsing | stdlib |
+| `internal/analytics` | Pure CDN log types, request keys, and link/pixel path parsing | stdlib |
 | `internal/analytics/bunny` | Bunny.net Logging API v2 HTTP client | stdlib, `internal/analytics` |
 | `internal/cdn` | Bunny.net cache purge HTTP client | stdlib |
 | `internal/email` | SMTP delivery and multipart verification messages | stdlib |
@@ -190,6 +191,31 @@ link_analytics_state
   lastCompletedHour time
   lockedUntil       time | null
   updatedAt         time
+
+analytics_sources
+  _id          ObjectID
+  orgId        string
+  name         string
+  description  string
+  key          string (16 chars, unique)
+  events       []string
+  disabledAt   time | null
+  createdAt    time
+  updatedAt    time
+
+analytics_captures_hourly
+  _id          ObjectID
+  orgId        string
+  sourceId     string
+  event        string
+  hourStart    time (UTC hour)
+  countryCode  string
+  device       string (desktop|mobile|tablet|bot|unknown)
+  isBot        bool
+  referrerHost string
+  count        int64
+  updatedAt    time
+  unique (sourceId, event, hourStart, countryCode, device, isBot, referrerHost)
 ```
 
 `_id` values are MongoDB ObjectIDs. References (`orgId`, `userId`, `projectId`)
@@ -199,17 +225,18 @@ with API identifiers.
 Organization ownership is `orgs.userId`. The owner is implicit: it is not stored
 as a membership role and token issuance writes `["*"]` for owned organizations.
 Every other membership stores a feature-to-role map such as
-`{"org":"viewer","project":"editor","expense":"viewer","link":"viewer"}`.
+`{"org":"viewer","project":"editor","expense":"viewer","link":"viewer","analytics":"viewer"}`.
 Memberships created
 before feature roles existed decode the legacy `role` field: `org.editor` maps to
 the default member roles and `org.viewer` maps to read-only roles.
 
 ## API contract
 
-All responses are JSON unless the status is `204` or the route is the public
-short-link redirect (`302`). Error responses use `{"error":"message"}`. Read
-endpoints support `GET` and `HEAD`. List endpoints accept `limit` and `offset`
-(default 20, maximum 100).
+All responses are JSON unless the status is `204`, the route is the public
+short-link redirect (`302`), or the route is the public capture pixel
+(`image/gif`). Error responses use `{"error":"message"}`. Read endpoints support
+`GET` and `HEAD`. List endpoints accept `limit` and `offset` (default 20,
+maximum 100).
 
 ### Health
 
@@ -381,6 +408,48 @@ link:
   viewer: [links.list, links.get, links.stats]
   editor: [links.list, links.get, links.stats, links.create, links.update]
   admin: [links.list, links.get, links.stats, links.create, links.update, links.delete]
+```
+
+### Analytics pixels
+
+| Method | Path | Success | Notes |
+| --- | --- | --- | --- |
+| POST | `/orgs/{orgID}/analytics/sources?orgId={orgID}` | 201 | `analytics.create`; `{"name","description","events"}` |
+| GET | `/orgs/{orgID}/analytics/sources?orgId={orgID}` | 200 | `analytics.list`; paginated; `q` name prefix |
+| GET | `/orgs/{orgID}/analytics/sources/{sourceID}?orgId={orgID}` | 200 | `analytics.get` |
+| PATCH | `/orgs/{orgID}/analytics/sources/{sourceID}?orgId={orgID}` | 200 | `analytics.update`; name, description, events, disabled |
+| DELETE | `/orgs/{orgID}/analytics/sources/{sourceID}?orgId={orgID}` | 204 | `analytics.delete`; counters remain |
+| GET | `/orgs/{orgID}/analytics/sources/{sourceID}/stats?orgId={orgID}` | 200 | `analytics.stats`; totals and breakdowns |
+| GET | `/orgs/{orgID}/analytics/stats?orgId={orgID}&ids=...` | 200 | `analytics.bulk_stats`; totals for up to 100 sources |
+| GET | `/p/{key}?event=...` | 200 | Public 1x1 GIF; no identity, no database read |
+
+Sources have a 16-character key, an allowlisted event list capped at 20, and an
+optional 280-byte description. Missing `event` defaults to `view`. The pixel
+response is always `image/gif` with `Cache-Control: no-store, max-age=0` and
+`X-Robots-Tag: noindex`, so every request can be logged. Unknown keys still
+return the GIF; they are dropped during ingestion.
+
+Capture ingestion shares `AnalyticsFunction` and its watermark/lease with link
+clicks. The job reads `/p/` requests with `2xx`/`3xx` statuses, deduplicates by
+`requestId`, resolves keys in batches (including disabled and deleted sources),
+filters events through each source's allowlist, and upserts
+`analytics_captures_hourly` with `$max`. The row grain is source, event, hour,
+country, device, bot flag, and referrer host. Stats accept `from`, `to`,
+`interval=hour|day`, event, country codes, devices, bot, and exact referrer host;
+the default range is 30 days and the maximum is 365 days. The time series
+contains only buckets with data.
+
+This is a counts-only v1. Raw log rows, unique visitors, funnels, and custom
+properties are not stored or exposed. Counters include bots and previews; clients
+can filter them with `bot=false`.
+
+The `analytics` feature owns management:
+
+```yaml
+analytics:
+  viewer: [analytics.list, analytics.get, analytics.stats, analytics.bulk_stats]
+  editor: [analytics.list, analytics.get, analytics.stats, analytics.bulk_stats, analytics.create, analytics.update]
+  admin: [analytics.list, analytics.get, analytics.stats, analytics.bulk_stats, analytics.create, analytics.update, analytics.delete]
 ```
 
 ### Projects
@@ -605,6 +674,13 @@ link_clicks_hourly:
               {orgId:1, linkId:1, hourStart:1}
 link_analytics_state:
               {pullZoneId:1} unique
+analytics_sources:
+              {key:1} unique
+              {orgId:1, createdAt:-1, _id:-1}
+analytics_captures_hourly:
+              {sourceId:1, event:1, hourStart:1, countryCode:1, device:1, isBot:1, referrerHost:1} unique
+              {orgId:1, sourceId:1, event:1, hourStart:1}
+              {orgId:1, sourceId:1, hourStart:1}
 ```
 
 The unique indexes on `users.email` and `(memberships.orgId,
@@ -721,10 +797,12 @@ not fail the mutation, so a failed purge can leave a stale redirect until the
 edge TTL expires. `SHORT_BASE_URL` and `BUNNY_API_KEY` are set together or not
 at all.
 
-The same pull zone exposes the Logging API. When `BUNNY_PULL_ZONE_ID` is set,
-`AnalyticsFunction` reads `/s/` request logs, counts successful redirects, and
-stores hourly aggregates. Logging is never enabled on the API request path and
-the job never stores raw logs.
+The same pull zone exposes the Logging API and serves the public pixel at
+`https://link.uppixl.com/p/{key}`. When `BUNNY_PULL_ZONE_ID` is set,
+`AnalyticsFunction` reads `/s/` and `/p/` request logs, counts successful
+requests, and stores hourly aggregates. Pixel responses are `no-store` so Bunny
+does not cache them and every view is logged. Logging is never enabled on the
+API request path and the job never stores raw logs.
 
 ### chi instead of a full framework or stdlib-only routing
 
@@ -875,11 +953,14 @@ A legacy document with no `type` is counted as debit through `$ifNull`.
   rate limit. Add those before exposing creation to untrusted users at scale.
 - **CDN purging is best-effort.** If Bunny is unreachable after an edit or
   disable, the stale redirect can live until the 10-minute edge TTL expires.
-- **Link analytics depend on Bunny's 3-day log retention.** If the scheduled job
-  is down for more than 3 days, those hours cannot be recovered. Counts are
-  request counts, not unique visitors, and include bots and link previews.
+- **Analytics depend on Bunny's 3-day log retention.** If the scheduled job is
+  down for more than 3 days, those hours cannot be recovered. Counts are request
+  counts, not unique visitors, and include bots, previews, and repeated pixel
+  loads. Logs also retain pixel query strings, so pixel URLs must never carry
+  personal or sensitive data.
 - **Analytics read queries scan hourly buckets.** The current 365-day maximum is
-  bounded and indexed; add daily rollups if link volume makes reads expensive.
+  bounded and indexed; add daily rollups if link or pixel volume makes reads
+  expensive.
 - **Access tokens carry at most 20 organization role lists.** `RolesForUser`
   caps the `orgs` map so the token stays small. A user with more memberships
   loses access to the oldest organizations until the cap is raised.

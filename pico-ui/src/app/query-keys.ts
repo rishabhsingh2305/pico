@@ -1,3 +1,4 @@
+import type { AnalyticsStatsFilters } from "@/features/analytics/types"
 import type { ExpenseFilters } from "@/features/expenses/filters"
 import type { LinkFilters } from "@/features/links/types"
 
@@ -15,6 +16,9 @@ const linkStatsRoot = (userId: string, orgId: string) =>
 
 const orgExpensesRoot = (userId: string, orgId: string) =>
   ["org-expenses", userId, orgId] as const
+
+const analyticsRoot = (userId: string, orgId: string) =>
+  ["analytics", userId, orgId] as const
 
 function expenseFilterKey(filters: ExpenseFilters) {
   return [filters.tags, filters.from ?? null, filters.to ?? null] as const
@@ -96,6 +100,48 @@ export const queryKeys = {
   linkStatsRoot,
   linkStats: (userId: string, orgId: string, ids: string[]) =>
     [...linkStatsRoot(userId, orgId), [...ids].sort()] as const,
+  analyticsRoot,
+  analyticsSources: (
+    userId: string,
+    orgId: string,
+    query: string,
+    offset: number
+  ) => [...analyticsRoot(userId, orgId), "sources", query, offset] as const,
+  analyticsSource: (userId: string, orgId: string, sourceId: string) =>
+    [...analyticsRoot(userId, orgId), "source", sourceId] as const,
+  analyticsStats: (
+    userId: string,
+    orgId: string,
+    sourceId: string,
+    filters: AnalyticsStatsFilters
+  ) =>
+    [
+      ...analyticsRoot(userId, orgId),
+      "stats",
+      sourceId,
+      filters.from,
+      filters.to,
+      filters.interval,
+      filters.event,
+      filters.country,
+      filters.device,
+      filters.bot,
+      filters.referrer,
+    ] as const,
+  analyticsBulkStats: (
+    userId: string,
+    orgId: string,
+    ids: string[],
+    from: string,
+    to: string
+  ) =>
+    [
+      ...analyticsRoot(userId, orgId),
+      "bulk-stats",
+      [...ids].sort(),
+      from,
+      to,
+    ] as const,
   shareStatus: (
     orgId: string,
     resourceType: "org" | "project" | "expense",

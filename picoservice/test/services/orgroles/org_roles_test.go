@@ -27,8 +27,8 @@ func TestRolesForUser(t *testing.T) {
 		t.Fatalf("roles for user: %v", err)
 	}
 	assertRoles(t, roles["org-owned"], []string{entities.RoleWildcard})
-	assertRoles(t, roles["org-family"], []string{"expense.viewer", "link.viewer", "org.viewer", "project.viewer"})
-	assertRoles(t, roles["org-work"], []string{"expense.editor", "link.viewer", "member.viewer", "org.viewer", "project.editor"})
+	assertRoles(t, roles["org-family"], []string{"analytics.viewer", "expense.viewer", "link.viewer", "org.viewer", "project.viewer"})
+	assertRoles(t, roles["org-work"], []string{"analytics.viewer", "expense.editor", "link.viewer", "member.viewer", "org.viewer", "project.editor"})
 }
 
 func TestRolesForUserSkipsEmptyRoles(t *testing.T) {

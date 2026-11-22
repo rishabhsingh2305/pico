@@ -209,6 +209,8 @@ func decodePage(body []byte) (analytics.LogPage, error) {
 			StatusCode  int     `json:"statusCode"`
 			CacheStatus *string `json:"cacheStatus"`
 			RemoteIP    *string `json:"remoteIp"`
+			CountryCode *string `json:"countryCode"`
+			Referer     *string `json:"referer"`
 			UserAgent   *string `json:"userAgent"`
 		} `json:"data"`
 		Pagination struct {
@@ -233,6 +235,8 @@ func decodePage(body []byte) (analytics.LogPage, error) {
 			StatusCode:  item.StatusCode,
 			CacheStatus: stringValue(item.CacheStatus),
 			RemoteIP:    stringValue(item.RemoteIP),
+			CountryCode: stringValue(item.CountryCode),
+			Referer:     stringValue(item.Referer),
 			UserAgent:   stringValue(item.UserAgent),
 		})
 	}

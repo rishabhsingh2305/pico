@@ -20,6 +20,8 @@ type LogEntry struct {
 	StatusCode  int
 	CacheStatus string
 	RemoteIP    string
+	CountryCode string
+	Referer     string
 	UserAgent   string
 }
 

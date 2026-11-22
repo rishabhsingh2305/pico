@@ -44,19 +44,21 @@ func TestAuthFlowWithFeatureRoles(t *testing.T) {
 
 	fakeServices := fakes.NewServices()
 	r, err := routes.New(routes.Deps{
-		Logger:         testLogger(),
-		Pinger:         stubPinger{},
-		Users:          fakeServices.Users,
-		Auth:           authService,
-		Orgs:           fakeServices.Orgs,
-		Memberships:    membershipService,
-		Projects:       fakeServices.Projects,
-		Expenses:       fakeServices.Expenses,
-		Links:          fakeServices.Links,
-		LinkAnalytics:  fakeServices.LinkAnalytics,
-		Credentials:    fakeServices.Credentials,
-		Policy:         policy,
-		AllowedOrigins: []string{"http://localhost:5173"},
+		Logger:           testLogger(),
+		Pinger:           stubPinger{},
+		Users:            fakeServices.Users,
+		Auth:             authService,
+		Orgs:             fakeServices.Orgs,
+		Memberships:      membershipService,
+		Projects:         fakeServices.Projects,
+		Expenses:         fakeServices.Expenses,
+		Links:            fakeServices.Links,
+		LinkAnalytics:    fakeServices.LinkAnalytics,
+		AnalyticsSources: fakeServices.AnalyticsSources,
+		AnalyticsStats:   fakeServices.AnalyticsStats,
+		Credentials:      fakeServices.Credentials,
+		Policy:           policy,
+		AllowedOrigins:   []string{"http://localhost:5173"},
 	})
 	if err != nil {
 		t.Fatalf("build router: %v", err)

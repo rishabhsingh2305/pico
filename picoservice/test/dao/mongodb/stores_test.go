@@ -19,6 +19,7 @@ import (
 var integrationCollections = []string{
 	"users", "orgs", "memberships", "projects", "expenses", "links",
 	"credentials", "link_clicks_hourly", "link_analytics_state",
+	"analytics_sources", "analytics_captures_hourly",
 }
 
 func TestStoresIntegration(t *testing.T) {
@@ -505,6 +506,78 @@ func TestStoresIntegration(t *testing.T) {
 	}
 	if !acquired || !state.LastCompletedHour.Equal(hour.Add(time.Hour)) {
 		t.Fatalf("unexpected reacquired state: %+v, acquired=%v", state, acquired)
+	}
+
+	pixelStore := mongodb.NewAnalyticsStore(client)
+	pixelSource, err := pixelStore.Insert(ctx, entities.AnalyticsSource{
+		OrgID:       org.ID,
+		Name:        "Homepage",
+		Description: "Hero pixel",
+		Key:         "testpixelkey1234",
+		Events:      []string{"view", "click"},
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	})
+	if err != nil {
+		t.Fatalf("insert analytics source: %v", err)
+	}
+	if _, err := pixelStore.Insert(ctx, entities.AnalyticsSource{
+		OrgID:     org.ID,
+		Name:      "Duplicate",
+		Key:       "testpixelkey1234",
+		Events:    []string{"view"},
+		CreatedAt: now,
+		UpdatedAt: now,
+	}); !errors.Is(err, entities.ErrAnalyticsKeyTaken) {
+		t.Fatalf("expected ErrAnalyticsKeyTaken, got %v", err)
+	}
+	foundSources, err := pixelStore.FindByKeys(ctx, []string{"testpixelkey1234"})
+	if err != nil || len(foundSources) != 1 || foundSources[0].ID != pixelSource.ID {
+		t.Fatalf("find analytics source by key: %+v, %v", foundSources, err)
+	}
+	if err := pixelStore.UpsertHourly(ctx, []dao.AnalyticsCaptureCount{
+		{
+			OrgID: org.ID, SourceID: pixelSource.ID, Event: "click", HourStart: hour,
+			CountryCode: "IN", Device: "mobile", IsBot: false, ReferrerHost: "twitter.com", Count: 3,
+		},
+		{
+			OrgID: org.ID, SourceID: pixelSource.ID, Event: "click", HourStart: hour,
+			CountryCode: "IN", Device: "mobile", IsBot: false, ReferrerHost: "twitter.com", Count: 2,
+		},
+		{
+			OrgID: org.ID, SourceID: pixelSource.ID, Event: "view", HourStart: hour.Add(time.Hour),
+			CountryCode: "US", Device: "desktop", IsBot: true, ReferrerHost: "direct", Count: 4,
+		},
+	}); err != nil {
+		t.Fatalf("upsert analytics captures: %v", err)
+	}
+	pixelStats, err := pixelStore.Stats(ctx, dao.AnalyticsCaptureFilter{
+		OrgID:    org.ID,
+		SourceID: pixelSource.ID,
+		From:     hour,
+		To:       hour.Add(2 * time.Hour),
+		Interval: "hour",
+	})
+	if err != nil {
+		t.Fatalf("analytics stats: %v", err)
+	}
+	if pixelStats.Total != 7 || len(pixelStats.Series) != 2 || len(pixelStats.Events) != 2 {
+		t.Fatalf("unexpected analytics stats: %+v", pixelStats)
+	}
+	if pixelStats.Countries[0].Value != "US" || pixelStats.Countries[0].Count != 4 {
+		t.Fatalf("unexpected analytics country breakdown: %+v", pixelStats.Countries)
+	}
+	pixelTotals, err := pixelStore.SumBySources(ctx, dao.AnalyticsBulkFilter{
+		OrgID:     org.ID,
+		SourceIDs: []string{pixelSource.ID},
+		From:      hour,
+		To:        hour.Add(2 * time.Hour),
+	})
+	if err != nil {
+		t.Fatalf("sum analytics captures: %v", err)
+	}
+	if len(pixelTotals) != 1 || pixelTotals[0].Count != 7 {
+		t.Fatalf("expected 7 captures, got %+v", pixelTotals)
 	}
 
 	expenseStore := mongodb.NewExpenseStore(client)

@@ -96,14 +96,21 @@ func NewLinkAnalyticsJob(db *mongodb.Client, cfg AnalyticsConfig) (*services.Lin
 	}
 
 	linkStore := mongodb.NewLinkStore(db)
-	analyticsStore := mongodb.NewLinkAnalyticsStore(db)
-	processor := services.NewLinkHourProcessor(logClient, linkStore, cfg.ShortLinkHost, cfg.PageSize)
+	linkAnalyticsStore := mongodb.NewLinkAnalyticsStore(db)
+	analyticsStore := mongodb.NewAnalyticsStore(db)
+	linkProcessor := services.NewLinkHourProcessor(logClient, linkStore, cfg.ShortLinkHost, cfg.PageSize)
+	captureProcessor := services.NewAnalyticsCaptureProcessor(logClient, analyticsStore, cfg.ShortLinkHost, cfg.PageSize)
 
-	return services.NewLinkAnalyticsIngester(
-		processor,
-		analyticsStore,
-		analyticsStore,
+	ingester := services.NewLinkAnalyticsIngester(
+		linkProcessor,
+		linkAnalyticsStore,
+		linkAnalyticsStore,
 		cfg.Job,
 		time.Now,
-	), nil
+	)
+	ingester.SetCapturePipeline(services.AnalyticsCapturePipeline{
+		Processor: captureProcessor,
+		Writer:    analyticsStore,
+	})
+	return ingester, nil
 }

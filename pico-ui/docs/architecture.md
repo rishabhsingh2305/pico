@@ -5,12 +5,13 @@
 pico-ui is the browser client for the picoservice Go API. It is a React single
 page application built with Vite. The current features are account signup,
 login, email verification, an API console, organizations with a
-context-sensitive Projects/Expenses/Links/Sharing workspace, project debits and
-credits, organization short links, and read-only public shares.
+context-sensitive Projects/Expenses/Links/Analytics/Sharing workspace, project
+debits and credits, organization short links, pixel analytics, and read-only
+public shares.
 
 ```text
 browser
-  -> React signup / login / verification / organizations / projects / expenses / links / sharing pages
+  -> React signup / login / verification / organizations / projects / expenses / links / analytics / sharing pages
   -> TanStack Query hooks (cache, dedupe, invalidation)
   -> requestJSON (fetch, credentials: omit)
   -> VITE_API_BASE_URL (default http://localhost:8080) or the production API origin
@@ -238,7 +239,7 @@ organization used to render the screen.
 
 `/` redirects signed-in users to `/orgs`, the landing page. Organizations are
 created from a dialog on `/orgs`, not an inline form. Entering an organization
-switches the sidebar to Projects, Expenses, Links, and Sharing.
+switches the sidebar to Projects, Expenses, Links, Analytics, and Sharing.
 
 `/api` is the signed-in API console. It shows the configured `VITE_API_BASE_URL`,
 checks `GET /ping` and `GET /ready`, and provides copyable curl examples. It does
@@ -253,11 +254,11 @@ sidebar contains Organizations, API console, and a new-tab link to the public
 API docs. `/` redirects to `/orgs`.
 
 `OrgWorkspaceLayout` wraps `/orgs/:orgId`. It loads the organization once,
-replaces the sidebar with Projects, Expenses, Links, and Sharing, and provides
-the organization, roles, and permission flags through `Outlet` context. It
-renders its own `AppShell`; organization pages are not nested inside
-`WorkspaceLayout`. Links and Sharing are hidden without the corresponding
-feature role. Child pages do not fetch the organization again.
+replaces the sidebar with Projects, Expenses, Links, Analytics, and Sharing, and
+provides the organization, roles, and permission flags through `Outlet` context.
+It renders its own `AppShell`; organization pages are not nested inside
+`WorkspaceLayout`. Links, Analytics, and Sharing are hidden without the
+corresponding feature role. Child pages do not fetch the organization again.
 
 `PageHeader` provides the shared eyebrow, title, description, and action layout.
 Auth screens use `AuthShell` with a split brand panel, while `/api-docs` keeps
@@ -317,6 +318,32 @@ token lacks the matching `link.*` role.
 - Query keys derive from the user ID, organization ID, filters, and offset.
   Mutations invalidate the organization's link root.
 
+## Organization analytics
+
+`/orgs/:orgId/analytics` lists named analytics pixels, and
+`/orgs/:orgId/analytics/:sourceId` is the capture dashboard.
+
+- The list loads `GET /orgs/{orgID}/analytics/sources` with a debounced name
+  prefix and `nextOffset` pagination. It fetches 30-day capture totals for the
+  visible page in one `GET /orgs/{orgID}/analytics/stats` request and renders
+  missing sources as zero.
+- Create uses `POST /orgs/{orgID}/analytics/sources` with a name, optional
+  description, and an allowlisted event list. Events are lowercased,
+  deduplicated, limited to 20, and validated with the same pattern as the
+  server.
+- The detail page loads the source and its stats. The pixel URL and path come
+  from the API; the UI never builds the public pixel origin itself.
+- Filters are an inclusive local date range, event, grouping (`day`/`hour`),
+  device, country, referrer host, and bot status. Applying or resetting filters
+  updates the TanStack Query key and refetches.
+- KPI cards show total, human, and bot captures plus the top event, country, and
+  device. The Recharts area chart shows captures over time. Breakdown cards show
+  countries, devices, traffic, and referrers, with the top six values per
+  dimension.
+- `analytics.viewer` can read; `analytics.editor` can create; only
+  `analytics.admin` can delete. Owners use the wildcard. New captures appear
+  after the next CDN log-ingestion run, not immediately.
+
 ## Organization and project workspace
 
 `/orgs/:orgId/projects` is the project list tab.
@@ -335,7 +362,8 @@ token lacks the matching `link.*` role.
   without a filter, the new organization is prepended.
 - The filtered empty state is “No organizations match these tags.”
 - The organization sidebar context shows the organization's name, tags, owner
-  badge, and share action. It provides Projects, Expenses, Links, and Sharing.
+  badge, and share action. It provides Projects, Expenses, Links, Analytics, and
+  Sharing.
 - The Projects page shows project names, currencies, and tags, with no expense
   information.
 - Each project has a currency selected at creation; it is shown next to the
@@ -615,6 +643,34 @@ optional RFC 3339 bounds; the server defaults to the last 30 days. The Links
 page fetches this once for the visible page and renders missing links as zero.
 The endpoint requires `links.stats`, which all link roles have.
 
+### Analytics sources
+
+- `POST /orgs/{orgID}/analytics/sources?orgId=...` creates
+  `{name,description?,events}` and returns `201`. Events are allowlisted,
+  lowercased, deduplicated, and limited to 20.
+- `GET /orgs/{orgID}/analytics/sources?orgId=...&q=...&limit=20&offset=0`
+  returns `{items,nextOffset}`. `q` matches the start of the name.
+- `GET`, `PATCH`, and `DELETE /orgs/{orgID}/analytics/sources/{sourceID}`
+  read, update, or delete one source. `PATCH` accepts `name`, `description`,
+  `events`, and `disabled`. Deleting keeps historical counters.
+- `GET /orgs/{orgID}/analytics/sources/{sourceID}/stats?orgId=...` accepts
+  `from`, `to`, `interval=hour|day`, `event`, `country`, `device`, `bot`, and
+  `referrer`, and returns `{total,series,events,breakdowns}`. Breakdowns contain
+  `countries`, `devices`, `bots`, and `referrers` arrays of `{value,count}`.
+  The default range is 30 days; the maximum is 365 days. The series contains
+  only buckets with captures.
+- `GET /orgs/{orgID}/analytics/stats?orgId=...&ids=...` returns
+  `{items:[{sourceId,captures}]}` for up to 100 sources. The Analytics list uses
+  this once per visible page and renders missing sources as zero.
+- `GET /p/{key}?event=...` is public and returns a 1x1 GIF. The UI never calls it
+  through `requestJSON`; users embed `pixelUrl` from the API. Missing `event`
+  defaults to `view`, and non-allowlisted events are ignored during ingestion.
+  The pixel is uncached and counts include bots unless filtered with
+  `bot=false`.
+
+Source keys, event names, and counts are server-owned. The UI displays
+`pixelUrl`/`pixelPath` as returned and never builds the pixel origin itself.
+
 ### `GET /projects?orgId=...&tags=food,travel&limit=100`
 
 Success: `200` with `{"items":[...]}`. Projects belong to the organization.
@@ -784,6 +840,8 @@ Organization errors:
 - `/orgs/:orgId/projects/:projectId` — project expenses
 - `/orgs/:orgId/expenses` — organization-wide expenses
 - `/orgs/:orgId/links` — organization short links
+- `/orgs/:orgId/analytics` — organization analytics sources
+- `/orgs/:orgId/analytics/:sourceId` — pixel capture dashboard
 - `/orgs/:orgId/sharing` — share links and permissions
 - `/orgs/:orgId/dashboard` — redirects to organization expenses
 - `/shared` — public read-only view opened by a share link

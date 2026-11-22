@@ -15,30 +15,34 @@ import (
 
 // Services groups fake service implementations for router tests.
 type Services struct {
-	Users         *UserService
-	Auth          *AuthService
-	Orgs          *OrgService
-	Memberships   *MembershipService
-	Projects      *ProjectService
-	Expenses      *ExpenseService
-	Links         *LinkService
-	LinkAnalytics *LinkAnalyticsService
-	Credentials   *CredentialService
+	Users            *UserService
+	Auth             *AuthService
+	Orgs             *OrgService
+	Memberships      *MembershipService
+	Projects         *ProjectService
+	Expenses         *ExpenseService
+	Links            *LinkService
+	LinkAnalytics    *LinkAnalyticsService
+	AnalyticsSources *AnalyticsSourceService
+	AnalyticsStats   *AnalyticsStatsService
+	Credentials      *CredentialService
 }
 
 // NewServices returns fake services that accept any existing identity by
 // default.
 func NewServices() Services {
 	return Services{
-		Users:         &UserService{},
-		Auth:          &AuthService{},
-		Orgs:          &OrgService{},
-		Memberships:   &MembershipService{},
-		Projects:      &ProjectService{},
-		Expenses:      &ExpenseService{},
-		Links:         &LinkService{},
-		LinkAnalytics: &LinkAnalyticsService{},
-		Credentials:   &CredentialService{},
+		Users:            &UserService{},
+		Auth:             &AuthService{},
+		Orgs:             &OrgService{},
+		Memberships:      &MembershipService{},
+		Projects:         &ProjectService{},
+		Expenses:         &ExpenseService{},
+		Links:            &LinkService{},
+		LinkAnalytics:    &LinkAnalyticsService{},
+		AnalyticsSources: &AnalyticsSourceService{},
+		AnalyticsStats:   &AnalyticsStatsService{},
+		Credentials:      &CredentialService{},
 	}
 }
 
@@ -49,20 +53,22 @@ func (s Services) Deps(logger *slog.Logger, pinger controllers.Pinger) routes.De
 		panic(err)
 	}
 	return routes.Deps{
-		Logger:         logger,
-		Pinger:         pinger,
-		Users:          s.Users,
-		Auth:           s.Auth,
-		Orgs:           s.Orgs,
-		Memberships:    s.Memberships,
-		Projects:       s.Projects,
-		Expenses:       s.Expenses,
-		Links:          s.Links,
-		LinkAnalytics:  s.LinkAnalytics,
-		Credentials:    s.Credentials,
-		Policy:         policy,
-		SecureCookies:  false,
-		AllowedOrigins: []string{"http://localhost:5173"},
+		Logger:           logger,
+		Pinger:           pinger,
+		Users:            s.Users,
+		Auth:             s.Auth,
+		Orgs:             s.Orgs,
+		Memberships:      s.Memberships,
+		Projects:         s.Projects,
+		Expenses:         s.Expenses,
+		Links:            s.Links,
+		LinkAnalytics:    s.LinkAnalytics,
+		AnalyticsSources: s.AnalyticsSources,
+		AnalyticsStats:   s.AnalyticsStats,
+		Credentials:      s.Credentials,
+		Policy:           policy,
+		SecureCookies:    false,
+		AllowedOrigins:   []string{"http://localhost:5173"},
 	}
 }
 

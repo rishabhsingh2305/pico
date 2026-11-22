@@ -220,12 +220,20 @@ type LinkAnalyticsJobResult struct {
 	HoursProcessed        int
 	GapHours              int
 	Clicks                int64
+	Captures              int64
+}
+
+// AnalyticsCapturePipeline groups the optional capture processor and writer.
+type AnalyticsCapturePipeline struct {
+	Processor *AnalyticsCaptureProcessor
+	Writer    dao.AnalyticsCaptureWriter
 }
 
 // LinkAnalyticsIngester owns the job lease, watermark, and hour loop.
 type LinkAnalyticsIngester struct {
 	processor *LinkHourProcessor
 	writer    dao.LinkClickWriter
+	captures  *AnalyticsCapturePipeline
 	state     dao.LinkAnalyticsStateStore
 	config    LinkAnalyticsJobConfig
 	now       func() time.Time
@@ -251,11 +259,22 @@ func NewLinkAnalyticsIngester(
 	}
 }
 
+// SetCapturePipeline enables pixel capture ingestion in the same job run.
+func (s *LinkAnalyticsIngester) SetCapturePipeline(pipeline AnalyticsCapturePipeline) {
+	if pipeline.Processor == nil || pipeline.Writer == nil {
+		return
+	}
+	s.captures = &pipeline
+}
+
 // Run processes the current partial hour, the previous hour for late logs, and
 // any missing closed hours.
 func (s *LinkAnalyticsIngester) Run(ctx context.Context) (result LinkAnalyticsJobResult, err error) {
 	if s.processor == nil || s.writer == nil || s.state == nil {
 		return result, errors.New("link analytics job: dependencies are required")
+	}
+	if s.captures != nil && (s.captures.Processor == nil || s.captures.Writer == nil) {
+		return result, errors.New("link analytics job: capture pipeline is incomplete")
 	}
 	if err := s.config.validate(); err != nil {
 		return result, err
@@ -289,22 +308,24 @@ func (s *LinkAnalyticsIngester) Run(ctx context.Context) (result LinkAnalyticsJo
 	oldest := now.Add(-s.config.MaxLookback).Truncate(time.Hour)
 
 	if partialTo := now.Add(-s.config.SafetyLag); partialTo.After(currentHour) {
-		clicks, err := s.processHour(ctx, currentHour, partialTo)
+		clicks, captures, err := s.processHour(ctx, currentHour, partialTo)
 		if err != nil {
 			return result, err
 		}
 		result.CurrentHourProcessed = true
 		result.Clicks += clicks
+		result.Captures += captures
 	}
 
 	previous := currentHour.Add(-time.Hour)
 	if !previous.Before(oldest) {
-		clicks, err := s.processHour(ctx, previous, currentHour)
+		clicks, captures, err := s.processHour(ctx, previous, currentHour)
 		if err != nil {
 			return result, err
 		}
 		result.PreviousHourProcessed = true
 		result.Clicks += clicks
+		result.Captures += captures
 	}
 
 	last := state.LastCompletedHour.UTC()
@@ -322,7 +343,7 @@ func (s *LinkAnalyticsIngester) Run(ctx context.Context) (result LinkAnalyticsJo
 	for processed := 0; last.Before(currentHour) && processed < s.config.MaxHoursPerRun; processed++ {
 		hourStart := last
 		hourEnd := last.Add(time.Hour)
-		clicks, err := s.processHour(ctx, hourStart, hourEnd)
+		clicks, captures, err := s.processHour(ctx, hourStart, hourEnd)
 		if err != nil {
 			return result, err
 		}
@@ -331,6 +352,7 @@ func (s *LinkAnalyticsIngester) Run(ctx context.Context) (result LinkAnalyticsJo
 		}
 		result.HoursProcessed++
 		result.Clicks += clicks
+		result.Captures += captures
 		last = hourEnd
 	}
 
@@ -343,6 +365,9 @@ func (s *LinkAnalyticsIngester) Run(ctx context.Context) (result LinkAnalyticsJo
 func (s *LinkAnalyticsIngester) Backfill(ctx context.Context, from, to time.Time) (result LinkAnalyticsJobResult, err error) {
 	if s.processor == nil || s.writer == nil || s.state == nil {
 		return result, errors.New("link analytics backfill: dependencies are required")
+	}
+	if s.captures != nil && (s.captures.Processor == nil || s.captures.Writer == nil) {
+		return result, errors.New("link analytics backfill: capture pipeline is incomplete")
 	}
 	if err := s.config.validate(); err != nil {
 		return result, err
@@ -388,12 +413,13 @@ func (s *LinkAnalyticsIngester) Backfill(ctx context.Context, from, to time.Time
 	}()
 
 	for hour := from; hour.Before(to); hour = hour.Add(time.Hour) {
-		clicks, err := s.processHour(ctx, hour, hour.Add(time.Hour))
+		clicks, captures, err := s.processHour(ctx, hour, hour.Add(time.Hour))
 		if err != nil {
 			return result, err
 		}
 		result.HoursProcessed++
 		result.Clicks += clicks
+		result.Captures += captures
 
 		if hour.Add(time.Hour).Before(to) {
 			timer := time.NewTimer(backfillHourDelay)
@@ -408,18 +434,32 @@ func (s *LinkAnalyticsIngester) Backfill(ctx context.Context, from, to time.Time
 	return result, nil
 }
 
-func (s *LinkAnalyticsIngester) processHour(ctx context.Context, from, to time.Time) (int64, error) {
+func (s *LinkAnalyticsIngester) processHour(ctx context.Context, from, to time.Time) (int64, int64, error) {
 	counts, err := s.processor.Process(ctx, from, to)
 	if err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 	if err := s.writer.UpsertHourly(ctx, counts); err != nil {
-		return 0, err
+		return 0, 0, err
 	}
 
-	var total int64
+	var clicks int64
 	for _, count := range counts {
-		total += count.Count
+		clicks += count.Count
 	}
-	return total, nil
+
+	var captures int64
+	if s.captures != nil {
+		captureCounts, err := s.captures.Processor.Process(ctx, from, to)
+		if err != nil {
+			return 0, 0, err
+		}
+		if err := s.captures.Writer.UpsertHourly(ctx, captureCounts); err != nil {
+			return 0, 0, err
+		}
+		for _, count := range captureCounts {
+			captures += count.Count
+		}
+	}
+	return clicks, captures, nil
 }

@@ -26,6 +26,7 @@ func TestAuthorizationMatrix(t *testing.T) {
 		"{expenseID}":    "expense-1",
 		"{memberUserID}": "user-2",
 		"{linkID}":       "link-1",
+		"{sourceID}":     "source-1",
 	}
 	roles := append(policy.Roles(), entities.RoleWildcard)
 
@@ -42,8 +43,8 @@ func TestAuthorizationMatrix(t *testing.T) {
 		switch endpoint.Permission {
 		case "shares.status":
 			path += "&resourceType=expense&resourceIds=expense-1"
-		case "links.stats":
-			path += "&ids=link-1"
+		case "links.stats", "analytics.bulk_stats":
+			path += "&ids=source-1"
 		}
 
 		for _, role := range roles {

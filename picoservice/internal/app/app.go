@@ -72,24 +72,29 @@ func New(logger *slog.Logger, db *mongodb.Client, cfg Config) (http.Handler, err
 	linkService := services.NewLinkService(linkStore)
 	linkAnalyticsStore := mongodb.NewLinkAnalyticsStore(db)
 	linkStatsReader := services.NewLinkStatsReader(linkAnalyticsStore)
+	analyticsStore := mongodb.NewAnalyticsStore(db)
+	analyticsSourceService := services.NewAnalyticsSourceService(analyticsStore)
+	analyticsStatsReader := services.NewAnalyticsStatsReader(analyticsStore)
 	credentialService := services.NewCredentialService(credentialStore, orgStore, projectStore, expenseStore)
 
 	deps := routes.Deps{
-		Logger:         logger,
-		Pinger:         db,
-		Users:          userService,
-		Auth:           authService,
-		Orgs:           orgService,
-		Memberships:    membershipService,
-		Projects:       projectService,
-		Expenses:       expenseService,
-		Links:          linkService,
-		LinkAnalytics:  linkStatsReader,
-		ShortBaseURL:   cfg.ShortBaseURL,
-		Credentials:    credentialService,
-		Policy:         policy,
-		SecureCookies:  strings.HasPrefix(cfg.PublicBaseURL, "https://"),
-		AllowedOrigins: cfg.AllowedOrigins(),
+		Logger:           logger,
+		Pinger:           db,
+		Users:            userService,
+		Auth:             authService,
+		Orgs:             orgService,
+		Memberships:      membershipService,
+		Projects:         projectService,
+		Expenses:         expenseService,
+		Links:            linkService,
+		LinkAnalytics:    linkStatsReader,
+		AnalyticsSources: analyticsSourceService,
+		AnalyticsStats:   analyticsStatsReader,
+		ShortBaseURL:     cfg.ShortBaseURL,
+		Credentials:      credentialService,
+		Policy:           policy,
+		SecureCookies:    strings.HasPrefix(cfg.PublicBaseURL, "https://"),
+		AllowedOrigins:   cfg.AllowedOrigins(),
 	}
 	if cfg.BunnyAPIKey != "" {
 		purger, err := cdn.NewBunnyPurger(cdn.BunnyConfig{APIKey: cfg.BunnyAPIKey})

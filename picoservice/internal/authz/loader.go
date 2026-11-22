@@ -25,12 +25,13 @@ const (
 // featurePrefixes maps a feature role namespace to the route permission prefix.
 // Keeping it explicit catches copy-paste mistakes between features.
 var featurePrefixes = map[string]string{
-	entities.FeatureOrg:     "orgs",
-	entities.FeatureMember:  "members",
-	entities.FeatureProject: "projects",
-	entities.FeatureExpense: "expenses",
-	entities.FeatureLink:    "links",
-	entities.FeatureShare:   "shares",
+	entities.FeatureOrg:       "orgs",
+	entities.FeatureMember:    "members",
+	entities.FeatureProject:   "projects",
+	entities.FeatureExpense:   "expenses",
+	entities.FeatureLink:      "links",
+	entities.FeatureShare:     "shares",
+	entities.FeatureAnalytics: "analytics",
 }
 
 type routesDocument struct {

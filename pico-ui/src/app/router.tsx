@@ -1,5 +1,7 @@
 import { Navigate, Route, Routes, useParams } from "react-router"
 
+import { AnalyticsDetailPage } from "@/features/analytics/pages/analytics-detail-page"
+import { AnalyticsPage } from "@/features/analytics/pages/analytics-page"
 import { ApiConsolePage } from "@/features/developer/pages/api-console-page"
 import { ApiDocsPage } from "@/features/api-docs/pages/api-docs-page"
 import { RequireSession } from "@/features/auth/auth-provider"
@@ -45,6 +47,8 @@ export function AppRouter() {
           <Route path="projects/:projectId" element={<ProjectDetailPage />} />
           <Route path="expenses" element={<OrgExpensesPage />} />
           <Route path="links" element={<LinksPage />} />
+          <Route path="analytics" element={<AnalyticsPage />} />
+          <Route path="analytics/:sourceId" element={<AnalyticsDetailPage />} />
           <Route path="sharing" element={<SharingPage />} />
         </Route>
       </Route>

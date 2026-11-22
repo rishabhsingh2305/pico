@@ -3,8 +3,8 @@ Transform: AWS::Serverless-2016-10-31
 Description: >
   picoservice
 
-  A Go API Lambda behind a public Function URL, plus a scheduled link analytics
-  Lambda, both built from the same binary.
+  A Go API Lambda behind a public Function URL, plus a scheduled link and pixel
+  analytics Lambda, both built from the same binary.
 
 Parameters:
   MongoDBURI:
@@ -35,7 +35,7 @@ Parameters:
   BunnyPullZoneId:
     Type: String
     Default: ""
-    Description: Bunny pull zone ID used by the link analytics job. Leave empty to disable the scheduled job.
+    Description: Bunny pull zone ID used by the link and pixel analytics job. Leave empty to disable the scheduled job.
   CorsAllowedOrigins:
     Type: String
     Default: ""
@@ -132,5 +132,5 @@ Outputs:
     Value: !GetAtt ApiFunctionRole.Arn
   AnalyticsFunction:
     Condition: AnalyticsEnabled
-    Description: Scheduled link analytics Lambda ARN
+    Description: Scheduled link and pixel analytics Lambda ARN
     Value: !GetAtt AnalyticsFunction.Arn

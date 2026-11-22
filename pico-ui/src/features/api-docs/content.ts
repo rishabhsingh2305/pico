@@ -91,6 +91,38 @@ const linkExample = `{
   "updatedAt": "2026-11-20T10:00:00Z"
 }`
 
+const analyticsSourceExample = `{
+  "id": "64f1a2b3c4d5e6f7890a1234",
+  "orgId": "64f1a2b3c4d5e6f7890a5678",
+  "name": "Homepage CTA",
+  "description": "Top hero button",
+  "key": "k7m2p9q4r8s1t6v3",
+  "events": ["view", "click", "signup"],
+  "pixelPath": "/p/k7m2p9q4r8s1t6v3",
+  "pixelUrl": "https://link.uppixl.com/p/k7m2p9q4r8s1t6v3",
+  "disabled": false,
+  "createdAt": "2026-11-22T10:00:00Z",
+  "updatedAt": "2026-11-22T10:00:00Z"
+}`
+
+const analyticsStatsExample = `{
+  "total": 128,
+  "series": [
+    { "bucket": "2026-11-21T00:00:00Z", "count": 74 },
+    { "bucket": "2026-11-22T00:00:00Z", "count": 54 }
+  ],
+  "events": [
+    { "event": "click", "count": 81 },
+    { "event": "view", "count": 47 }
+  ],
+  "breakdowns": {
+    "countries": [{ "value": "IN", "count": 96 }],
+    "devices": [{ "value": "mobile", "count": 72 }],
+    "bots": [{ "value": "false", "count": 120 }],
+    "referrers": [{ "value": "twitter.com", "count": 44 }]
+  }
+}`
+
 const errorsNote =
   'Errors use the shape {"error":"message"}. Internal details are never returned.'
 
@@ -1138,6 +1170,350 @@ export const API_SECTIONS: ApiSection[] = [
         notes: [
           "HEAD follows the same behavior with an empty body.",
           "The destination can be changed or the link disabled at any time.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "analytics",
+    title: "Analytics",
+    description:
+      "Named analytics pixels count captures from Bunny CDN request logs. Sources are organization-scoped; the public pixel always returns a 1x1 GIF and never reads MongoDB.",
+    endpoints: [
+      {
+        id: "analytics-create",
+        method: "POST",
+        path: "/orgs/{orgID}/analytics/sources?orgId=...",
+        title: "Create an analytics source",
+        summary:
+          "Creates a named pixel with an allowlisted event list. Requires analytics.create.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam],
+        requestBody: `{
+  "name": "Homepage CTA",
+  "description": "Top hero button",
+  "events": ["view", "click", "signup"]
+}`,
+        response: {
+          status: 201,
+          description:
+            "Source created. pixelUrl uses SHORT_BASE_URL when configured, otherwise the API request origin.",
+          body: analyticsSourceExample,
+        },
+        errors: [
+          "400 — invalid name, description, or events",
+          "403 — missing analytics.create",
+          "409 — generated key collision",
+        ],
+        notes: [
+          "Events are lowercase and may contain letters, digits, dots, underscores, and hyphens.",
+          'An omitted or empty events list defaults to ["view"].',
+          "Keys are 16 URL-safe characters and cannot be changed.",
+        ],
+      },
+      {
+        id: "analytics-list",
+        method: "GET",
+        path: "/orgs/{orgID}/analytics/sources?orgId=...&q=...&limit=20&offset=0",
+        title: "List analytics sources",
+        summary:
+          "Lists one page of sources. q matches the start of the name. Requires analytics.list.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [
+          orgIdParam,
+          {
+            name: "q",
+            required: false,
+            description:
+              "Name prefix, case-insensitive, maximum 64 characters.",
+          },
+          limitParam,
+          offsetParam,
+        ],
+        response: {
+          status: 200,
+          description:
+            "One page of sources. nextOffset is null on the last page.",
+          body: `{\n  "items": [],\n  "nextOffset": 20\n}`,
+        },
+        errors: [
+          "400 — invalid pagination or query",
+          "403 — missing analytics.list",
+        ],
+      },
+      {
+        id: "analytics-get",
+        method: "GET",
+        path: "/orgs/{orgID}/analytics/sources/{sourceID}?orgId=...",
+        title: "Get an analytics source",
+        summary:
+          "Returns one source, including disabled sources. Requires analytics.get.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+          {
+            name: "sourceID",
+            required: true,
+            description: "Analytics source MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam],
+        response: {
+          status: 200,
+          description: "The analytics source.",
+          body: analyticsSourceExample,
+        },
+        errors: ["403 — missing analytics.get", "404 — source not found"],
+      },
+      {
+        id: "analytics-update",
+        method: "PATCH",
+        path: "/orgs/{orgID}/analytics/sources/{sourceID}?orgId=...",
+        title: "Update an analytics source",
+        summary:
+          "Updates the name, description, allowlisted events, or disabled state. Requires analytics.update.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+          {
+            name: "sourceID",
+            required: true,
+            description: "Analytics source MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam],
+        requestBody: `{
+  "events": ["view", "click"],
+  "disabled": true
+}`,
+        response: {
+          status: 200,
+          description: "The updated source.",
+          body: analyticsSourceExample,
+        },
+        errors: [
+          "400 — invalid or missing fields",
+          "403 — missing analytics.update",
+          "404 — source not found",
+        ],
+        notes: [
+          "At least one field is required.",
+          "Removing an event stops new captures for it; historical counters remain.",
+          "disabled: true stops new captures without deleting history.",
+        ],
+      },
+      {
+        id: "analytics-delete",
+        method: "DELETE",
+        path: "/orgs/{orgID}/analytics/sources/{sourceID}?orgId=...",
+        title: "Delete an analytics source",
+        summary:
+          "Deletes the source record. Hourly capture counters remain. Requires analytics.delete.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+          {
+            name: "sourceID",
+            required: true,
+            description: "Analytics source MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [orgIdParam],
+        response: {
+          status: 204,
+          description: "Source deleted; empty body.",
+        },
+        errors: ["403 — missing analytics.delete", "404 — source not found"],
+      },
+      {
+        id: "analytics-stats",
+        method: "GET",
+        path: "/orgs/{orgID}/analytics/sources/{sourceID}/stats?orgId=...&from=...&to=...&interval=day",
+        title: "Get capture stats",
+        summary:
+          "Returns captures for one source grouped by time, event, country, device, bot, and referrer. Requires analytics.stats.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+          {
+            name: "sourceID",
+            required: true,
+            description: "Analytics source MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [
+          orgIdParam,
+          {
+            name: "from",
+            required: false,
+            description:
+              "Inclusive RFC 3339 start timestamp. Defaults to 30 days ago.",
+          },
+          {
+            name: "to",
+            required: false,
+            description: "Exclusive RFC 3339 end timestamp. Defaults to now.",
+          },
+          {
+            name: "interval",
+            required: false,
+            description: "hour or day. Defaults to day.",
+          },
+          {
+            name: "event",
+            required: false,
+            description: "Exact allowlisted event to include.",
+          },
+          {
+            name: "country",
+            required: false,
+            description: "Comma-separated ISO 3166-1 alpha-2 country codes.",
+          },
+          {
+            name: "device",
+            required: false,
+            description:
+              "Comma-separated device values: desktop, mobile, tablet, bot, unknown.",
+          },
+          {
+            name: "bot",
+            required: false,
+            description: "true for bots or false for humans.",
+          },
+          {
+            name: "referrer",
+            required: false,
+            description:
+              "Exact referrer host. Use direct for captures without a referrer.",
+          },
+        ],
+        response: {
+          status: 200,
+          description:
+            "Totals, a time series, event counts, and breakdowns sorted by count descending.",
+          body: analyticsStatsExample,
+        },
+        errors: [
+          "400 — invalid range, interval, event, or bot filter",
+          "403 — missing analytics.stats",
+          "404 — source not found",
+        ],
+        notes: [
+          "The maximum range is 365 days.",
+          "The series contains only buckets with captures; it is not zero-filled.",
+          "Counts are aggregates, not unique visitors or raw log rows.",
+        ],
+      },
+      {
+        id: "analytics-bulk-stats",
+        method: "GET",
+        path: "/orgs/{orgID}/analytics/stats?orgId=...&ids=...&from=...&to=...",
+        title: "Get capture totals for sources",
+        summary:
+          "Returns capture totals for up to 100 sources in one request. Requires analytics.bulk_stats.",
+        access: "Org role",
+        pathParams: [
+          {
+            name: "orgID",
+            required: true,
+            description: "Organization MongoDB ObjectID.",
+          },
+        ],
+        queryParams: [
+          orgIdParam,
+          {
+            name: "ids",
+            required: true,
+            description:
+              "Comma-separated analytics source IDs, maximum 100. Duplicate IDs are ignored.",
+          },
+          {
+            name: "from",
+            required: false,
+            description:
+              "Inclusive RFC 3339 start timestamp. Defaults to 30 days ago.",
+          },
+          {
+            name: "to",
+            required: false,
+            description: "Exclusive RFC 3339 end timestamp. Defaults to now.",
+          },
+        ],
+        response: {
+          status: 200,
+          description:
+            "Capture totals for sources with data. Sources with no rows are omitted.",
+          body: `{\n  "items": [\n    {\n      "sourceId": "64f1a2b3c4d5e6f7890a1234",\n      "captures": 128\n    }\n  ]\n}`,
+        },
+        errors: [
+          "400 — missing ids, too many ids, or invalid range",
+          "403 — missing analytics.bulk_stats",
+        ],
+        notes: ["Clients should render missing source IDs as 0."],
+      },
+      {
+        id: "analytics-capture",
+        method: "GET",
+        path: "/p/{key}?event=view",
+        title: "Capture a pixel event",
+        summary:
+          "Public 1x1 transparent GIF. No authentication or database read happens on the request path.",
+        access: "Public",
+        pathParams: [
+          {
+            name: "key",
+            required: true,
+            description: "Analytics source key.",
+          },
+        ],
+        queryParams: [
+          {
+            name: "event",
+            required: false,
+            description:
+              "Allowlisted event name. Defaults to view. Unknown or invalid events are ignored during ingestion.",
+          },
+        ],
+        response: {
+          status: 200,
+          description:
+            "image/gif with Cache-Control: no-store, max-age=0 and X-Robots-Tag: noindex.",
+        },
+        errors: ["Never returns a 4xx for a well-formed /p/{key} request."],
+        notes: [
+          "HEAD returns the same headers with an empty body.",
+          "Captures appear after the scheduled log-ingestion run, not immediately.",
+          "Never put personal or sensitive data in the query string; Bunny logs retain it.",
         ],
       },
     ],

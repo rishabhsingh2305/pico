@@ -8,6 +8,7 @@ import {
 } from "react-router"
 import { useQuery, useQueryClient } from "@tanstack/react-query"
 import {
+  BarChart3Icon,
   Building2Icon,
   CircleAlertIcon,
   FolderIcon,
@@ -41,6 +42,8 @@ export type OrgWorkspaceContext = {
   canShare: boolean
   canViewShares: boolean
   canViewLinks: boolean
+  canViewAnalytics: boolean
+  canManageAnalytics: boolean
   sessionInvalid: () => void
 }
 
@@ -81,6 +84,11 @@ export function OrgWorkspaceLayout() {
   const canShare = isOwner || roles.includes("share.admin")
   const canViewShares = isOwner || hasFeatureRole(roles, "share")
   const canViewLinks = isOwner || hasFeatureRole(roles, "link")
+  const canViewAnalytics = isOwner || hasFeatureRole(roles, "analytics")
+  const canManageAnalytics =
+    isOwner ||
+    roles.includes("analytics.editor") ||
+    roles.includes("analytics.admin")
 
   const sessionInvalid = useCallback(() => {
     void logout()
@@ -158,10 +166,17 @@ export function OrgWorkspaceLayout() {
     canShare,
     canViewShares,
     canViewLinks,
+    canViewAnalytics,
+    canManageAnalytics,
     sessionInvalid,
   }
   const orgShared = (orgShareStatusQuery.data ?? []).length > 0
-  const navigation = buildOrgNavigation(orgId, canViewLinks, canViewShares)
+  const navigation = buildOrgNavigation(
+    orgId,
+    canViewLinks,
+    canViewAnalytics,
+    canViewShares
+  )
 
   return (
     <AppShell
@@ -211,6 +226,7 @@ export function OrgWorkspaceLayout() {
 function buildOrgNavigation(
   orgId: string,
   canViewLinks: boolean,
+  canViewAnalytics: boolean,
   canViewShares: boolean
 ): NavigationGroup[] {
   const workspaceItems = [
@@ -240,6 +256,17 @@ function buildOrgNavigation(
       icon: LinkIcon,
       isActive: (pathname: string) =>
         pathname.startsWith(`/orgs/${orgId}/links`),
+    })
+  }
+
+  if (canViewAnalytics) {
+    workspaceItems.push({
+      to: `/orgs/${orgId}/analytics`,
+      label: "Analytics",
+      index: "04",
+      icon: BarChart3Icon,
+      isActive: (pathname: string) =>
+        pathname.startsWith(`/orgs/${orgId}/analytics`),
     })
   }
 

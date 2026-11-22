@@ -15,6 +15,7 @@ func TestLoad(t *testing.T) {
 	}
 
 	wantRoles := []string{
+		"analytics.admin", "analytics.editor", "analytics.viewer",
 		"expense.admin", "expense.editor", "expense.viewer",
 		"link.admin", "link.editor", "link.viewer",
 		"member.admin", "member.viewer",
@@ -23,7 +24,7 @@ func TestLoad(t *testing.T) {
 		"share.admin", "share.viewer",
 	}
 	assertStrings(t, policy.Roles(), wantRoles)
-	assertStrings(t, policy.Features(), []string{"expense", "link", "member", "org", "project", "share"})
+	assertStrings(t, policy.Features(), []string{"analytics", "expense", "link", "member", "org", "project", "share"})
 
 	tests := []struct {
 		method string

@@ -84,6 +84,7 @@ func runAnalytics(logger *slog.Logger) {
 			"hours_processed", result.HoursProcessed,
 			"gap_hours", result.GapHours,
 			"clicks", result.Clicks,
+			"captures", result.Captures,
 		)
 		return nil
 	})

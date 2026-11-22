@@ -13,6 +13,8 @@ const (
 	FeatureExpense = "expense"
 	// FeatureLink covers short links.
 	FeatureLink = "link"
+	// FeatureAnalytics covers pixel analytics sources and reads.
+	FeatureAnalytics = "analytics"
 
 	// FeatureRoleViewer can read a feature.
 	FeatureRoleViewer = "viewer"
@@ -29,7 +31,7 @@ const (
 // ValidFeature reports whether feature is a known feature name.
 func ValidFeature(feature string) bool {
 	switch feature {
-	case FeatureOrg, FeatureMember, FeatureProject, FeatureExpense, FeatureLink, FeatureShare:
+	case FeatureOrg, FeatureMember, FeatureProject, FeatureExpense, FeatureLink, FeatureShare, FeatureAnalytics:
 		return true
 	default:
 		return false
@@ -50,11 +52,12 @@ func ValidFeatureRole(role string) bool {
 // roles. It matches the previous org.editor behavior.
 func DefaultMemberRoles() map[string]string {
 	return map[string]string{
-		FeatureOrg:     FeatureRoleViewer,
-		FeatureMember:  FeatureRoleViewer,
-		FeatureProject: FeatureRoleEditor,
-		FeatureExpense: FeatureRoleEditor,
-		FeatureLink:    FeatureRoleViewer,
+		FeatureOrg:       FeatureRoleViewer,
+		FeatureMember:    FeatureRoleViewer,
+		FeatureProject:   FeatureRoleEditor,
+		FeatureExpense:   FeatureRoleEditor,
+		FeatureLink:      FeatureRoleViewer,
+		FeatureAnalytics: FeatureRoleViewer,
 	}
 }
 
@@ -62,10 +65,11 @@ func DefaultMemberRoles() map[string]string {
 // role.
 func ViewerRoles() map[string]string {
 	return map[string]string{
-		FeatureOrg:     FeatureRoleViewer,
-		FeatureProject: FeatureRoleViewer,
-		FeatureExpense: FeatureRoleViewer,
-		FeatureLink:    FeatureRoleViewer,
+		FeatureOrg:       FeatureRoleViewer,
+		FeatureProject:   FeatureRoleViewer,
+		FeatureExpense:   FeatureRoleViewer,
+		FeatureLink:      FeatureRoleViewer,
+		FeatureAnalytics: FeatureRoleViewer,
 	}
 }
 

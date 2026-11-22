@@ -5,10 +5,11 @@ Tailwind CSS 4, shadcn/ui, React Router, and TanStack Query.
 
 Current scope: signup, login, email verification, an API console, organization
 list/create, a context-sensitive organization workspace, project expenses,
-organization-wide expenses, short links, share-link management, and read-only
-public share pages.
+organization-wide expenses, short links, pixel analytics, share-link management,
+and read-only public share pages.
 Organizations carry tags and can be filtered by any matching tag. Entering an
-organization changes the sidebar to Projects, Expenses, Links, and Sharing. The
+organization changes the sidebar to Projects, Expenses, Links, Analytics, and
+Sharing. The
 Expenses page lists every expense across the organization with project, tag, and
 date filters plus currency-grouped totals. Projects carry tags and can be
 filtered by any matching tag. Opening a project shows its debits and credits,
@@ -103,6 +104,16 @@ request for the visible page; links without data render as zero. The redirect
 itself is public at the short-link origin under `/s/{slug}`; only management
 requires an account.
 
+Owners and members with an `analytics.*` role can create named pixels at
+`/orgs/:orgId/analytics`. Each source has an allowlisted event list and a public
+pixel URL on the short-link origin. Embed the pixel with `?event=view` or fire
+other allowlisted events from JavaScript. The detail dashboard shows total,
+human, and bot captures, an hourly or daily Recharts time series, and
+country/device/traffic/referrer breakdowns, filtered by date range, event,
+device, country, referrer, and bot status. Counts are read from Bunny CDN logs
+and appear after the next ingestion run; the list shows 30-day captures in one
+bulk request.
+
 Owners and members with `share.*` roles can manage share links from the
 organization's Sharing page. Generated URLs are shown once at creation; the
 page uses a compact list with status tabs and a details panel for resources,
@@ -142,6 +153,8 @@ token in the `Authorization` header. The API allows the UI origin through CORS.
 | `/orgs/:orgId/projects/:projectId` | Project expenses            |
 | `/orgs/:orgId/expenses`            | Organization-wide expenses  |
 | `/orgs/:orgId/links`               | Organization short links    |
+| `/orgs/:orgId/analytics`           | Pixel analytics sources     |
+| `/orgs/:orgId/analytics/:sourceId` | Pixel analytics dashboard   |
 | `/orgs/:orgId/sharing`             | Share links and permissions |
 | `/orgs/:orgId/dashboard`           | Redirects to Expenses       |
 | `/shared`                          | Public read-only share view |
@@ -165,6 +178,9 @@ token in the `Authorization` header. The API allows the UI origin through CORS.
 - `src/features/links/api.ts` calls the organization link management routes and
   paginates with `nextOffset`. The page treats `shortUrl` from the API as
   authoritative.
+- `src/features/analytics/api.ts` calls analytics source CRUD, the per-source
+  stats endpoint, and the bulk stats endpoint. Query keys derive from the
+  organization, source, date range, interval, and dimension filters.
 - `src/features/projects/api.ts` calls `GET/POST /projects`,
   `GET /projects/{id}`, and `PATCH /projects/{id}` for tag edits. Project
   creation includes the currency and tags. The project list sends `tags` to the

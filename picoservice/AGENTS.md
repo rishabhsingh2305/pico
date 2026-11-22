@@ -9,7 +9,7 @@
   chi router; the Function URL has no CORS configuration.
 - MongoDB Atlas via the official `go.mongodb.org/mongo-driver/v2` driver.
 - MongoDB-backed APIs for users, organizations, memberships, projects,
-  expenses, and short links.
+  expenses, short links, and named analytics pixels.
 - Projects own a currency; expenses inherit it at creation. Projects also carry
   up to 20 tags (32 bytes each) and can be filtered by any matching tag.
 - Organizations carry up to 20 tags (32 bytes each), filter with any-match
@@ -35,14 +35,24 @@
   best-effort purging of the exact redirect URL after create/update/delete.
   Set both together or neither. The edge cache TTL (10 minutes) lives in Bunny,
   not application config. Purge failures are logged, never returned to clients.
-- Link click analytics come from Bunny Logging API v2, not from redirect
-  writes. `AnalyticsFunction` runs on `cron(0/15 * * * ? *)` (UTC
-  `:00`/`:15`/`:30`/`:45`), processes one hour at a time, writes
-  `link_clicks_hourly`, and stores its watermark/lease in
-  `link_analytics_state`. It only handles the configured short-link host and
-  `/s/` paths, counts `2xx`/`3xx`, deduplicates by Bunny `requestId`, and upserts
-  with `$max`. `GET /orgs/{orgID}/analytics/links` returns totals; empty hours
-  advance the watermark without rows. `BUNNY_PULL_ZONE_ID` enables the job.
+- Link click and pixel capture analytics come from Bunny Logging API v2, not
+  from request-path writes. `AnalyticsFunction` runs on
+  `cron(0/15 * * * ? *)` (UTC `:00`/`:15`/`:30`/`:45`), processes one hour at a
+  time, writes `link_clicks_hourly` and `analytics_captures_hourly`, and stores
+  its watermark/lease in `link_analytics_state`. It only handles the configured
+  short-link host, `/s/` and `/p/` paths, counts `2xx`/`3xx`, deduplicates by
+  Bunny `requestId`, and upserts with `$max`. `GET
+  /orgs/{orgID}/analytics/links` returns link totals; empty hours advance the
+  watermark without rows. `BUNNY_PULL_ZONE_ID` enables the job.
+- Analytics sources are organization records with an allowlisted event list.
+  Management uses the `analytics` feature
+  (`analytics.viewer`/`analytics.editor`/`analytics.admin`). `GET /p/{key}`
+  is public, always returns a 1x1 GIF, and never reads MongoDB.
+  `Cache-Control: no-store, max-age=0` keeps every pixel request loggable.
+  Missing `?event=` defaults to `view`; non-allowlisted events are ignored
+  during ingestion. Stats are counts only: total, series, events, countries,
+  devices, bot flag, and referrer host. Raw logs, unique visitors, funnels, and
+  custom properties are not exposed.
 - pico-ui serves a public `/api-docs` guide mirroring this API contract. Keep
   API changes reflected in `../pico-ui/src/features/api-docs/content.ts`.
 - Health API: `GET /ping` returns `200 {"message":"pong"}`; `HEAD /ping`
@@ -97,7 +107,7 @@
 | Command | Purpose |
 | --- | --- |
 | `make run` | Run the local HTTP server on `:8080` (loads the selected app env) |
-| `make analytics` | Run one link analytics ingestion pass or a `--from`/`--to` backfill (loads the selected app env) |
+| `make analytics` | Run one link and pixel analytics ingestion pass or a `--from`/`--to` backfill (loads the selected app env) |
 | `make test` | Run Go tests only (integration tests skip) |
 | `make test-integration` | Run MongoDB integration tests (loads the selected app env; requires `MONGODB_TEST_URI`) |
 | `make check` | Check formatting, run `go vet`, and run tests |
@@ -124,7 +134,7 @@
   CORS; duplicate `Access-Control-*` headers break browsers.
 - **Architecture:** do not add API Gateway, replace chi, add an ODM/generic repository, or add a Lambda proxy/framework library without explicit approval.
 - **State:** no global mutable state, no `init()`, no hidden I/O. Wire dependencies in `internal/app`; create one MongoDB client per process and never per request.
-- **Configuration:** `SHORT_BASE_URL` and `BUNNY_API_KEY` are optional together; set both to enable custom short URLs and Bunny purging, or neither. `BUNNY_PULL_ZONE_ID` is optional and enables the scheduled link analytics job; it requires `BUNNY_API_KEY` and `SHORT_BASE_URL`. They are application settings and belong in the app env file, never a deploy env file. Application values belong in `.env` or `$(APP_ENV).env` (ignored), with `sample.env` as the committed template. `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects `prod.env` and `prod.deploy.env`; unset uses `.env` and `deploy.env`. `make run`, `analytics`, `indexes`, `test-integration`, and `invoke` load the selected app env; `make deploy` must not. AWS deployment settings belong in `deploy.env` or `$(APP_ENV).deploy.env` (ignored), with `sample.deploy.env` and per-environment samples committed; `make ship`/`scripts/deploy.sh` load the selected files. Do not put application secrets in a deploy env file.
+- **Configuration:** `SHORT_BASE_URL` and `BUNNY_API_KEY` are optional together; set both to enable custom short URLs and Bunny purging, or neither. `BUNNY_PULL_ZONE_ID` is optional and enables the scheduled link and pixel analytics job; it requires `BUNNY_API_KEY` and `SHORT_BASE_URL`. They are application settings and belong in the app env file, never a deploy env file. Application values belong in `.env` or `$(APP_ENV).env` (ignored), with `sample.env` as the committed template. `APP_ENV=dev` selects `dev.env` and `dev.deploy.env`; `APP_ENV=prod` selects `prod.env` and `prod.deploy.env`; unset uses `.env` and `deploy.env`. `make run`, `analytics`, `indexes`, `test-integration`, and `invoke` load the selected app env; `make deploy` must not. AWS deployment settings belong in `deploy.env` or `$(APP_ENV).deploy.env` (ignored), with `sample.deploy.env` and per-environment samples committed; `make ship`/`scripts/deploy.sh` load the selected files. Do not put application secrets in a deploy env file.
 - **Database:** every call takes a `context.Context` with a timeout; log driver errors with `request_id` and never return them to clients. DAO contracts live in `internal/dao`; implementations live in `internal/dao/mongodb`. Add indexes in `internal/dao/mongodb/indexes.go`.
 - **Query efficiency:** list handlers return one page and must not run unbounded aggregates. Aggregates live on separate summary endpoints, grouped server-side; clients must not issue one totals request per item. Every list query pattern needs an index matching its filters and sort. Verify new or changed patterns with `explain("executionStats")`; do not use `$facet` to combine a page with an unbounded summary.
 - **Errors:** wrap with `%w`, log once at the boundary, never silently ignore. No `log.Fatal`/`os.Exit` outside `main`.

@@ -154,6 +154,40 @@ endpoints:
       path: /s/{slug}
       scope: public
 
+  analytics:
+    list:
+      method: GET
+      path: /orgs/{orgID}/analytics/sources
+      scope: org
+    create:
+      method: POST
+      path: /orgs/{orgID}/analytics/sources
+      scope: org
+    get:
+      method: GET
+      path: /orgs/{orgID}/analytics/sources/{sourceID}
+      scope: org
+    update:
+      method: PATCH
+      path: /orgs/{orgID}/analytics/sources/{sourceID}
+      scope: org
+    delete:
+      method: DELETE
+      path: /orgs/{orgID}/analytics/sources/{sourceID}
+      scope: org
+    stats:
+      method: GET
+      path: /orgs/{orgID}/analytics/sources/{sourceID}/stats
+      scope: org
+    bulk_stats:
+      method: GET
+      path: /orgs/{orgID}/analytics/stats
+      scope: org
+    capture:
+      method: GET
+      path: /p/{key}
+      scope: public
+
   projects:
     list:
       method: GET

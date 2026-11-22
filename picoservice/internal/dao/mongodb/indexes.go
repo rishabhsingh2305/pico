@@ -119,6 +119,44 @@ func (c *Client) EnsureIndexes(ctx context.Context) error {
 			},
 		},
 		{
+			collection: analyticsSourcesCollection,
+			models: []mongo.IndexModel{
+				{
+					Keys:    bson.D{{Key: "key", Value: 1}},
+					Options: options.Index().SetName("analytics_sources_key_unique").SetUnique(true),
+				},
+				{
+					Keys:    bson.D{{Key: "orgId", Value: 1}, {Key: "createdAt", Value: -1}, {Key: "_id", Value: -1}},
+					Options: options.Index().SetName("analytics_sources_org_created"),
+				},
+			},
+		},
+		{
+			collection: analyticsCapturesCollection,
+			models: []mongo.IndexModel{
+				{
+					Keys: bson.D{
+						{Key: "sourceId", Value: 1},
+						{Key: "event", Value: 1},
+						{Key: "hourStart", Value: 1},
+						{Key: "countryCode", Value: 1},
+						{Key: "device", Value: 1},
+						{Key: "isBot", Value: 1},
+						{Key: "referrerHost", Value: 1},
+					},
+					Options: options.Index().SetName("analytics_captures_dimension_unique").SetUnique(true),
+				},
+				{
+					Keys:    bson.D{{Key: "orgId", Value: 1}, {Key: "sourceId", Value: 1}, {Key: "event", Value: 1}, {Key: "hourStart", Value: 1}},
+					Options: options.Index().SetName("analytics_captures_org_source_event_hour"),
+				},
+				{
+					Keys:    bson.D{{Key: "orgId", Value: 1}, {Key: "sourceId", Value: 1}, {Key: "hourStart", Value: 1}},
+					Options: options.Index().SetName("analytics_captures_org_source_hour"),
+				},
+			},
+		},
+		{
 			collection: projectsCollection,
 			models: []mongo.IndexModel{
 				{

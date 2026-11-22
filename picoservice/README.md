@@ -1,18 +1,20 @@
 # picoservice
 
 A small Go REST API running as an AWS Lambda function behind a public Lambda
-Function URL, plus a scheduled Lambda that aggregates link clicks from Bunny
-CDN logs. Routing is handled by [chi](https://github.com/go-chi/chi), with a
-small adapter that translates Function URL events into standard `net/http`
-requests. MongoDB Atlas stores users, organizations, memberships, projects,
-expenses, short links, and hourly link click counts.
+Function URL, plus a scheduled Lambda that aggregates link clicks and pixel
+captures from Bunny CDN logs. Routing is handled by
+[chi](https://github.com/go-chi/chi), with a small adapter that translates
+Function URL events into standard `net/http` requests. MongoDB Atlas stores
+users, organizations, memberships, projects, expenses, short links, analytics
+sources, hourly link click counts, and hourly pixel capture counts.
 
 ## Endpoints
 
 All request and response bodies are JSON, except the public short-link
-redirect, which returns `302` with no body. List responses accept `limit` and
-`offset` query parameters (default `20`, maximum `100`). Expense and link lists
-use `{"items":[...],"nextOffset":...}`; expense totals come from
+redirect, which returns `302` with no body, and the public pixel, which returns
+`image/gif`. List responses accept `limit` and `offset` query parameters
+(default `20`, maximum `100`). Expense and link lists use
+`{"items":[...],"nextOffset":...}`; expense totals come from
 `GET /expenses/summary`. Read endpoints also support `HEAD`, except the email
 verification action, which is `POST` only.
 
@@ -271,17 +273,19 @@ Ingestion is a separate scheduled Lambda, `AnalyticsFunction`. It runs every 15
 minutes at `:00`, `:15`, `:30`, and `:45` UTC, processes one hour at a time, and
 stores one document per link per hour in `link_clicks_hourly`. It also keeps the
 watermark and lease in
-`link_analytics_state`. The job:
+`link_analytics_state`. The same run also processes `/p/` pixel capture logs.
+The job:
 
 - queries Bunny logs for the configured short-link host and `/s/` path;
+- queries the same host and `/p/` path for pixel captures;
 - filters to `2xx` and `3xx` responses;
 - deduplicates by Bunny `requestId` in memory;
-- resolves slugs in batches, including deleted links;
+- resolves slugs and pixel keys in batches, including deleted links;
 - recomputes hourly counts and upserts them with `$max`.
 
 Empty hours are successful. They create no click documents and advance the
-watermark. Bunny errors never advance the watermark. `GET /s/{slug}` remains
-stateless; no writes happen on the request path.
+watermark. Bunny errors never advance the watermark. `GET /s/{slug}` and
+`GET /p/{key}` remain stateless; no writes happen on the request path.
 
 Bunny Logging must be enabled on the pull zone. Configure `BUNNY_PULL_ZONE_ID`;
 `BUNNY_API_KEY` must be able to read logs. `BUNNY_PULL_ZONE_ID` is optional and
@@ -300,7 +304,85 @@ make analytics APP_ENV=prod ARGS='--from 2026-11-21T21:00:00Z --to 2026-11-21T22
 ```
 
 Backfill does not move the scheduled job watermark; it only recomputes clicks
-for the requested complete hours.
+and captures for the requested complete hours.
+
+### Pixel analytics
+
+Pixels are named capture sources with an allowlisted event list. Each source
+gets a 16-character key and a public URL such as
+`https://link.uppixl.com/p/k7m2p9q4r8s1t6v3`. A source can record many events:
+
+```text
+/p/{key}?event=view
+/p/{key}?event=click
+/p/{key}?event=signup
+```
+
+An omitted `event` defaults to `view`. Events not in the source allowlist, or
+invalid event names, are ignored during ingestion. The pixel response is always
+a 1x1 transparent GIF and never reads MongoDB. It is sent with
+`Cache-Control: no-store, max-age=0` so every request can reach the edge and be
+logged. Captures appear after the next ingestion run.
+
+| Method | Path | Permission | Description |
+| --- | --- | --- | --- |
+| `POST` | `/orgs/{orgID}/analytics/sources?orgId={orgID}` | `analytics.create` | Create `{"name","description","events"}` |
+| `GET` | `/orgs/{orgID}/analytics/sources?orgId={orgID}` | `analytics.list` | List sources; filter: `q` (name prefix) |
+| `GET` | `/orgs/{orgID}/analytics/sources/{sourceID}?orgId={orgID}` | `analytics.get` | Get one source |
+| `PATCH` | `/orgs/{orgID}/analytics/sources/{sourceID}?orgId={orgID}` | `analytics.update` | Update name, description, events, or `disabled` |
+| `DELETE` | `/orgs/{orgID}/analytics/sources/{sourceID}?orgId={orgID}` | `analytics.delete` | Delete the source record |
+| `GET` | `/orgs/{orgID}/analytics/sources/{sourceID}/stats?orgId={orgID}` | `analytics.stats` | Capture totals, series, and breakdowns |
+| `GET` | `/orgs/{orgID}/analytics/stats?orgId={orgID}&ids=...` | `analytics.bulk_stats` | Capture totals for up to 100 sources |
+| `GET` | `/p/{key}?event=...` | public | Record a capture; returns a 1x1 GIF |
+
+Create body:
+
+```json
+{
+  "name": "Homepage CTA",
+  "description": "Top hero button",
+  "events": ["view", "click", "signup"]
+}
+```
+
+`name` uses the shared 120-byte limit. `description` is optional and capped at
+280 bytes. Events are lowercased and deduplicated, use letters, digits, dots,
+underscores, or hyphens, and are capped at 20. An empty list defaults to
+`["view"]`. List responses use `{"items":[],"nextOffset":20}`.
+
+`GET .../{sourceID}/stats` accepts `from`, `to`, `interval=hour|day`, `event`,
+`country` (comma-separated alpha-2 codes), `device`
+(`desktop,mobile,tablet,bot,unknown`), `bot=true|false`, and `referrer` (exact
+host; `direct` when absent). The default range is the last 30 days and the
+maximum is 365 days. The response is:
+
+```json
+{
+  "total": 128,
+  "series": [{ "bucket": "2026-11-22T00:00:00Z", "count": 54 }],
+  "events": [{ "event": "click", "count": 81 }],
+  "breakdowns": {
+    "countries": [{ "value": "IN", "count": 96 }],
+    "devices": [{ "value": "mobile", "count": 72 }],
+    "bots": [{ "value": "false", "count": 120 }],
+    "referrers": [{ "value": "twitter.com", "count": 44 }]
+  }
+}
+```
+
+Counters live in `analytics_captures_hourly`, with one row per source, event,
+hour, country, device, bot flag, and referrer host. The series only includes
+buckets with data. This is a counts-only v1: there are no unique visitors,
+funnels, raw log reads, or custom properties.
+
+The `analytics` feature governs management:
+
+```yaml
+analytics:
+  viewer: [analytics.list, analytics.get, analytics.stats, analytics.bulk_stats]
+  editor: [analytics.list, analytics.get, analytics.stats, analytics.bulk_stats, analytics.create, analytics.update]
+  admin: [analytics.list, analytics.get, analytics.stats, analytics.bulk_stats, analytics.create, analytics.update, analytics.delete]
+```
 
 ### Projects
 
@@ -429,6 +511,7 @@ Feature role semantics:
 | `project` | list + get | + create + update | + create + update |
 | `expense` | list + summary + get | + create + update | + delete |
 | `link` | list + get | + create + update | + delete |
+| `analytics` | list + get + stats + bulk stats | + create + update | + delete |
 
 A user may have different roles per feature in the same organization.
 
@@ -458,6 +541,19 @@ links
   _id, orgId, userId, slug (unique), url, title, tags,
   disabledAt, deletedAt, createdAt, updatedAt
 
+link_clicks_hourly
+  _id, orgId, linkId, hourStart, count, updatedAt
+  unique (linkId, hourStart)
+
+analytics_sources
+  _id, orgId, name, description, key (unique), events,
+  disabledAt, createdAt, updatedAt
+
+analytics_captures_hourly
+  _id, orgId, sourceId, event, hourStart, countryCode, device,
+  isBot, referrerHost, count, updatedAt
+  unique (sourceId, event, hourStart, countryCode, device, isBot, referrerHost)
+
 expenses
   _id, orgId, userId, projectId, amount, currency, description,
   tags, spentAt, createdAt, updatedAt
@@ -486,7 +582,7 @@ or membership constraints. The command is idempotent.
 ├── AGENTS.md                      # Agent rules and definition of done
 ├── main.go                        # Lambda entrypoint
 ├── cmd/
-│   ├── analytics/main.go          # One link analytics ingestion pass
+│   ├── analytics/main.go          # One link and pixel analytics pass
 │   ├── indexes/main.go            # Create MongoDB indexes
 │   └── server/main.go             # Local development HTTP server
 ├── docs/
@@ -750,7 +846,7 @@ make deploy
 is optional and defaults to `PUBLIC_BASE_URL`. `SHORT_BASE_URL` and
 `BUNNY_API_KEY` are optional together: set both to enable the custom short-link
 origin and CDN purging, or leave both unset. `BUNNY_PULL_ZONE_ID` is optional and
-enables the scheduled link analytics Lambda. `MongoDBURI`, `JwtSecret`,
+enables the scheduled link and pixel analytics Lambda. `MongoDBURI`, `JwtSecret`,
 `SmtpUsername`, `SmtpPassword`, and `BunnyApiKey` are `NoEcho` parameters, so
 CloudFormation masks them in stack descriptions. To deploy without the Makefile:
 
@@ -882,7 +978,7 @@ curl -i "$(make url)ready"
 | `PUBLIC_BASE_URL` | yes | Frontend origin used in verification links and as the default CORS origin |
 | `SHORT_BASE_URL` | no | Public short-link origin, for example `https://link.uppixl.com`; set with `BUNNY_API_KEY` or leave both unset |
 | `BUNNY_API_KEY` | no | Bunny.net API key used to purge cached redirects and read log analytics; set with `SHORT_BASE_URL` or leave both unset |
-| `BUNNY_PULL_ZONE_ID` | no | Bunny pull zone ID for the scheduled link-analytics job; empty disables the job |
+| `BUNNY_PULL_ZONE_ID` | no | Bunny pull zone ID for the scheduled link and pixel analytics job; empty disables the job |
 | `CORS_ALLOWED_ORIGINS` | no | Comma-separated allowed browser origins; defaults to `PUBLIC_BASE_URL`; `*` allows all |
 | `EMAIL_FROM` | yes | Sender address for verification email |
 | `SMTP_ADDR` | yes | SMTP server address, `host:port` |

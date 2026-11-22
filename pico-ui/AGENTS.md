@@ -12,15 +12,15 @@
 - The backend is the Go service in `../picoservice`.
 - Current scope is signup, login, email verification, an API console,
   organization list/create, a context-sensitive organization workspace with
-  Projects, Expenses, Links, and Sharing, project debits and credits, and
-  organization short links.
+  Projects, Expenses, Links, Analytics, and Sharing, project debits and credits,
+  organization short links, and pixel analytics.
   An organization shows project names, currencies, and tags; opening a project
   shows that project's debits and credits. Projects are created in a dialog from
   the Projects page, own the currency used by their expenses, and own tags used
   to filter the project list. Organizations also carry tags, shown on their
   cards, editable by owners, and filterable with any-match semantics.
 - `/orgs/:orgId` redirects to `/orgs/:orgId/projects`. The organization shell
-  changes the sidebar to Projects, Expenses, Links, and Sharing.
+  changes the sidebar to Projects, Expenses, Links, Analytics, and Sharing.
   `/orgs/:orgId/dashboard` redirects to the organization-wide Expenses page.
   Expenses shows one ledger across all projects with project/tag/date filters,
   currency-grouped totals, and pagination. Monetary totals are never summed
@@ -59,6 +59,15 @@
   QR codes are rendered client-side from `shortUrl`. The table shows a 30-day
   click count from `GET /orgs/{orgID}/analytics/links`, fetched once for the
   visible page; missing links render as zero.
+- Organization pixels live at `/orgs/:orgId/analytics`; opening one shows the
+  capture dashboard. Sources are managed by `analytics.viewer`,
+  `analytics.editor`, and `analytics.admin` (owners use the wildcard). The list
+  fetches 30-day totals once for the visible page. The dashboard filters by
+  date range, event, device, country, referrer, and bot status, shows total/human/
+  bot KPIs, a Recharts time series grouped by hour or day, and country/device/
+  traffic/referrer breakdowns. Counts come from Bunny logs and lag the next
+  ingestion run. The UI displays `pixelUrl`/`pixelPath` from the API and never
+  builds the pixel origin itself; do not put sensitive data in pixel URLs.
 - Verification emails contain a link and a 6-digit code. The UI verifies via
   the link only; `POST /auth/verify-email/otp` is API-only for now. Resend
   rotates the code and returns `Retry-After: 60`.
@@ -108,6 +117,7 @@ src/
 │   ├── ui/                   # Generated shadcn primitives
 │   └── theme-provider.tsx    # Existing theme provider
 ├── features/
+│   ├── analytics/          # Pixel source list/create and capture dashboard
 │   ├── api-docs/           # Public searchable API reference
 │   ├── auth/               # Signup, login, verification, session
 │   ├── design-system/      # Public palette/type/pattern style tile

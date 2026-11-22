@@ -29,6 +29,11 @@ features:
     editor: [links.list, links.get, links.stats, links.create, links.update]
     admin: [links.list, links.get, links.stats, links.create, links.update, links.delete]
 
+  analytics:
+    viewer: [analytics.list, analytics.get, analytics.stats, analytics.bulk_stats]
+    editor: [analytics.list, analytics.get, analytics.stats, analytics.bulk_stats, analytics.create, analytics.update]
+    admin: [analytics.list, analytics.get, analytics.stats, analytics.bulk_stats, analytics.create, analytics.update, analytics.delete]
+
   project:
     viewer: [projects.list, projects.get]
     editor: [projects.list, projects.get, projects.create, projects.update]
