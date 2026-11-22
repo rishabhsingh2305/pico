@@ -353,12 +353,15 @@ disabled, and deleted links return `404 {"error":"link not found"}` with
 
 Click analytics are sourced from Bunny Logging API v2, not from redirect
 writes. A scheduled `AnalyticsFunction` processes the configured pull zone every
-15 minutes, reads `/s/` requests with `2xx`/`3xx` statuses, deduplicates by
+15 minutes at UTC `:00`/`:15`/`:30`/`:45`, reads `/s/` requests with `2xx`/`3xx`
+statuses, deduplicates by
 `requestId` in memory, and writes hourly counts to `link_clicks_hourly`. The
 job processes the current partial hour, the previous hour for late logs, and any
 missing closed hours. Empty hours advance the watermark without creating rows.
 `link_analytics_state` stores the watermark and lease. The read endpoint sums
-hourly rows; it never stores or reads raw logs.
+hourly rows; it never stores or reads raw logs. `make analytics` can run the
+normal pass or a bounded `--from`/`--to` backfill that recomputes complete
+hours without moving the watermark.
 
 `SHORT_BASE_URL` supplies the public origin used in `shortUrl`; if unset, the
 request origin is used for local development. `BUNNY_API_KEY` enables a
@@ -655,7 +658,8 @@ a caching library that is pinned to AWS SDK v1.
 - Runtime: `provided.al2023`, `x86_64`
 - `ApiFunction`: 10 second timeout, 128 MB, public Function URL.
 - `AnalyticsFunction`: 300 second timeout, 512 MB, no Function URL. EventBridge
-  invokes it every 15 minutes when `BunnyPullZoneId` is configured.
+  invokes it via `cron(0/15 * * * ? *)` (UTC `:00`/`:15`/`:30`/`:45`) when
+  `BunnyPullZoneId` is configured.
 - Build method: SAM `go1.x` (runs `go build` at the repository root; both
   functions use the same `bootstrap` binary and `APP_MODE` selects the entrypoint)
 - Deployment: `sam deploy` using `samconfig.toml` (stack `picoservice`).

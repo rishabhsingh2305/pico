@@ -268,8 +268,9 @@ days. Links without data are omitted and should be rendered as zero. The
 endpoint requires `links.stats`, which is granted to all link roles.
 
 Ingestion is a separate scheduled Lambda, `AnalyticsFunction`. It runs every 15
-minutes, processes one hour at a time, and stores one document per link per hour
-in `link_clicks_hourly`. It also keeps the watermark and lease in
+minutes at `:00`, `:15`, `:30`, and `:45` UTC, processes one hour at a time, and
+stores one document per link per hour in `link_clicks_hourly`. It also keeps the
+watermark and lease in
 `link_analytics_state`. The job:
 
 - queries Bunny logs for the configured short-link host and `/s/` path;
@@ -291,6 +292,15 @@ The job can be run manually with:
 ```bash
 make analytics
 ```
+
+To recompute a specific closed UTC range, use the backfill flags:
+
+```bash
+make analytics APP_ENV=prod ARGS='--from 2026-11-21T21:00:00Z --to 2026-11-21T22:00:00Z'
+```
+
+Backfill does not move the scheduled job watermark; it only recomputes clicks
+for the requested complete hours.
 
 ### Projects
 

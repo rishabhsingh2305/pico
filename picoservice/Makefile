@@ -52,7 +52,7 @@ run:
 	@$(LOAD_ENV) go run ./cmd/server
 
 analytics:
-	@$(LOAD_ENV) go run ./cmd/analytics
+	@$(LOAD_ENV) go run ./cmd/analytics $(ARGS)
 
 invoke:
 	@$(LOAD_ENV) \

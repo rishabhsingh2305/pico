@@ -118,7 +118,7 @@ Resources:
         Schedule:
           Type: Schedule
           Properties:
-            Schedule: rate(15 minutes)
+            Schedule: cron(0/15 * * * ? *)
 
 Outputs:
   FunctionUrl:

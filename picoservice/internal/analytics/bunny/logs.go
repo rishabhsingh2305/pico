@@ -18,8 +18,8 @@ import (
 const (
 	defaultEndpoint      = "https://logging.bunnycdn.com"
 	defaultClientTimeout = 30 * time.Second
-	defaultRetryDelay    = 500 * time.Millisecond
-	defaultMaxAttempts   = 3
+	defaultRetryDelay    = time.Second
+	defaultMaxAttempts   = 5
 	maxResponseBytes     = 32 << 20
 )
 
@@ -117,7 +117,7 @@ func (c *Client) List(ctx context.Context, query analytics.LogQuery) (analytics.
 			return analytics.LogPage{}, err
 		}
 
-		delay := c.retryDelay
+		delay := c.retryDelay * time.Duration(attempt)
 		if retryAfter > delay {
 			delay = retryAfter
 		}
@@ -138,7 +138,13 @@ func (c *Client) targetURL(query analytics.LogQuery) (string, error) {
 	values := parsed.Query()
 	values.Set("from", query.From.UTC().Format(time.RFC3339))
 	values.Set("to", query.To.UTC().Format(time.RFC3339))
-	if contains := strings.TrimSpace(query.Host) + strings.TrimSpace(query.PathPrefix); contains != "" {
+	// Bunny's v2 urlContains filter matches the request path, not host+path.
+	// Use the path prefix here and enforce the host in LinkHourProcessor.
+	contains := strings.TrimSpace(query.PathPrefix)
+	if contains == "" {
+		contains = strings.TrimSpace(query.Host)
+	}
+	if contains != "" {
 		values.Set("urlContains", contains)
 	}
 	if query.Status != "" {

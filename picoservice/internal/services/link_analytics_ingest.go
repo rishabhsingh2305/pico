@@ -27,6 +27,7 @@ const (
 	DefaultLinkAnalyticsInitialBackfill = 48 * time.Hour
 	// DefaultLinkAnalyticsMaxLookback stays inside Bunny's 3-day retention.
 	DefaultLinkAnalyticsMaxLookback = 71 * time.Hour
+	backfillHourDelay               = 500 * time.Millisecond
 )
 
 // LinkSlugResolver resolves link slugs without filtering out disabled or
@@ -333,6 +334,77 @@ func (s *LinkAnalyticsIngester) Run(ctx context.Context) (result LinkAnalyticsJo
 		last = hourEnd
 	}
 
+	return result, nil
+}
+
+// Backfill recomputes complete hours in [from, to) without changing the
+// scheduled job watermark. It is intended for manual recovery after a bug or
+// configuration fix.
+func (s *LinkAnalyticsIngester) Backfill(ctx context.Context, from, to time.Time) (result LinkAnalyticsJobResult, err error) {
+	if s.processor == nil || s.writer == nil || s.state == nil {
+		return result, errors.New("link analytics backfill: dependencies are required")
+	}
+	if err := s.config.validate(); err != nil {
+		return result, err
+	}
+
+	now := s.now().UTC()
+	currentHour := now.Truncate(time.Hour)
+	from = from.UTC().Truncate(time.Hour)
+	to = to.UTC().Truncate(time.Hour)
+	if to.After(currentHour) {
+		to = currentHour
+	}
+	if !to.After(from) {
+		return result, errors.New("link analytics backfill: range must contain at least one complete hour")
+	}
+	if to.Sub(from) > s.config.MaxLookback {
+		return result, fmt.Errorf("link analytics backfill: range must not exceed %s", s.config.MaxLookback)
+	}
+	if from.Before(now.Add(-s.config.MaxLookback)) {
+		return result, fmt.Errorf("link analytics backfill: range starts before the %s lookback window", s.config.MaxLookback)
+	}
+
+	_, acquired, err := s.state.Acquire(
+		ctx,
+		s.config.PullZoneID,
+		now,
+		now.Add(s.config.LeaseDuration),
+		from,
+	)
+	if err != nil {
+		return result, fmt.Errorf("acquire link analytics lease: %w", err)
+	}
+	if !acquired {
+		result.Skipped = true
+		return result, nil
+	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		if releaseErr := s.state.Release(releaseCtx, s.config.PullZoneID, time.Now().UTC()); releaseErr != nil {
+			err = errors.Join(err, releaseErr)
+		}
+	}()
+
+	for hour := from; hour.Before(to); hour = hour.Add(time.Hour) {
+		clicks, err := s.processHour(ctx, hour, hour.Add(time.Hour))
+		if err != nil {
+			return result, err
+		}
+		result.HoursProcessed++
+		result.Clicks += clicks
+
+		if hour.Add(time.Hour).Before(to) {
+			timer := time.NewTimer(backfillHourDelay)
+			select {
+			case <-ctx.Done():
+				timer.Stop()
+				return result, ctx.Err()
+			case <-timer.C:
+			}
+		}
+	}
 	return result, nil
 }
 

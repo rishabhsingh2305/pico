@@ -36,8 +36,9 @@
   Set both together or neither. The edge cache TTL (10 minutes) lives in Bunny,
   not application config. Purge failures are logged, never returned to clients.
 - Link click analytics come from Bunny Logging API v2, not from redirect
-  writes. `AnalyticsFunction` runs every 15 minutes, processes one hour at a
-  time, writes `link_clicks_hourly`, and stores its watermark/lease in
+  writes. `AnalyticsFunction` runs on `cron(0/15 * * * ? *)` (UTC
+  `:00`/`:15`/`:30`/`:45`), processes one hour at a time, writes
+  `link_clicks_hourly`, and stores its watermark/lease in
   `link_analytics_state`. It only handles the configured short-link host and
   `/s/` paths, counts `2xx`/`3xx`, deduplicates by Bunny `requestId`, and upserts
   with `$max`. `GET /orgs/{orgID}/analytics/links` returns totals; empty hours
@@ -96,7 +97,7 @@
 | Command | Purpose |
 | --- | --- |
 | `make run` | Run the local HTTP server on `:8080` (loads the selected app env) |
-| `make analytics` | Run one link analytics ingestion pass (loads the selected app env) |
+| `make analytics` | Run one link analytics ingestion pass or a `--from`/`--to` backfill (loads the selected app env) |
 | `make test` | Run Go tests only (integration tests skip) |
 | `make test-integration` | Run MongoDB integration tests (loads the selected app env; requires `MONGODB_TEST_URI`) |
 | `make check` | Check formatting, run `go vet`, and run tests |

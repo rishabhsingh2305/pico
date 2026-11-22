@@ -290,6 +290,55 @@ func TestLinkAnalyticsIngesterAdvancesEmptyHour(t *testing.T) {
 	}
 }
 
+func TestLinkAnalyticsIngesterBackfillsRange(t *testing.T) {
+	writer := &fakeClickWriter{}
+	state := &fakeStateStore{
+		state:    dao.LinkAnalyticsState{LastCompletedHour: time.Date(2026, 11, 22, 5, 0, 0, 0, time.UTC)},
+		acquired: true,
+	}
+	source := fakeLogSource{
+		listFunc: func(context.Context, analytics.LogQuery) (analytics.LogPage, error) {
+			return analytics.LogPage{Entries: []analytics.LogEntry{{
+				RequestID: "request-1", Host: "link.uppixl.com", Path: "/s/launch", StatusCode: 302,
+			}}}, nil
+		},
+	}
+	processor := services.NewLinkHourProcessor(source, fakeLinkResolver{
+		findFunc: func(context.Context, []string) ([]entities.Link, error) {
+			return []entities.Link{{ID: "link-1", OrgID: "org-1", Slug: "launch"}}, nil
+		},
+	}, "link.uppixl.com", 100)
+	ingester := services.NewLinkAnalyticsIngester(processor, writer, state, services.LinkAnalyticsJobConfig{
+		PullZoneID:      1,
+		LeaseDuration:   time.Minute,
+		SafetyLag:       5 * time.Minute,
+		MaxHoursPerRun:  12,
+		InitialBackfill: 48 * time.Hour,
+		MaxLookback:     71 * time.Hour,
+	}, fixedNow)
+
+	result, err := ingester.Backfill(
+		context.Background(),
+		time.Date(2026, 11, 21, 21, 0, 0, 0, time.UTC),
+		time.Date(2026, 11, 21, 22, 0, 0, 0, time.UTC),
+	)
+	if err != nil {
+		t.Fatalf("backfill: %v", err)
+	}
+	if result.HoursProcessed != 1 || result.Clicks != 1 {
+		t.Fatalf("unexpected result: %+v", result)
+	}
+	if len(writer.calls) != 1 {
+		t.Fatalf("expected one write, got %d", len(writer.calls))
+	}
+	if len(state.advances) != 0 {
+		t.Fatalf("backfill must not advance the watermark, got %v", state.advances)
+	}
+	if !state.released {
+		t.Fatal("expected lease release")
+	}
+}
+
 func TestLinkAnalyticsIngesterSkipsLockedRun(t *testing.T) {
 	writer := &fakeClickWriter{}
 	state := &fakeStateStore{acquired: false}

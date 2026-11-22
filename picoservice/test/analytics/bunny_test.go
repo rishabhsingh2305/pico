@@ -67,7 +67,7 @@ func TestBunnyListBuildsQueryAndParsesEntries(t *testing.T) {
 	for _, want := range []string{
 		"from=2026-05-08T14%3A00%3A00Z",
 		"to=2026-05-08T15%3A00%3A00Z",
-		"urlContains=link.uppixl.com%2Fs%2F",
+		"urlContains=%2Fs%2F",
 		"status=2xx%2C3xx",
 		"order=asc",
 		"limit=100",
